@@ -100,7 +100,9 @@ private final class PinWindowController: NSObject {
         let cascade = CGFloat(index % 8) * 28
         let origin = CGPoint(x: visible.midX - size.width / 2 + cascade, y: visible.midY - size.height / 2 - cascade)
 
-        panel = PinFloatingPanel(contentRect: CGRect(origin: origin, size: size), styleMask: [.borderless, .nonactivatingPanel],
+        // Not a non-activating panel: a click must activate Screenme, or the pin never gets Esc, ⌘C, ⌘W and the zoom keys.
+        // Showing it does not activate anything, so a new pin never takes focus from the user's app.
+        panel = PinFloatingPanel(contentRect: CGRect(origin: origin, size: size), styleMask: [.borderless],
                          backing: .buffered, defer: false)
         imageView = PinContentView(image: image, frame: CGRect(origin: .zero, size: size))
         super.init()
