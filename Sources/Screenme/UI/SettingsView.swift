@@ -451,9 +451,10 @@ private struct RecordingPane: View {
 // MARK: - Text recognition
 
 private struct TextRecognitionPane: View {
-    @State private var combo = ShortcutStore.combo(for: .captureText)
+    @ObservedObject private var shortcuts = ShortcutsModel.shared
 
     var body: some View {
+        let combo = shortcuts.combo(for: .captureText)
         Form {
             Section {
                 PrefToggle("Keep line breaks", Pref.ocrKeepLineBreaks, detail: "Off joins the lines of a paragraph into one.")
@@ -466,9 +467,6 @@ private struct TextRecognitionPane: View {
             }
         }
         .formStyle(.grouped)
-        .onReceive(NotificationCenter.default.publisher(for: .shortcutsChanged)) { _ in
-            combo = ShortcutStore.combo(for: .captureText)
-        }
     }
 }
 

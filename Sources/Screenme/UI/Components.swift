@@ -1,43 +1,6 @@
 import AppKit
 import SwiftUI
 
-// MARK: - Shortcut status
-
-/// What is wrong, if anything, with one Screenme shortcut.
-enum ShortcutStatus: Equatable {
-    case unassigned
-    case ok
-    case usedByMacOS(String)
-    case usedByApp(running: [String])
-
-    var isWarning: Bool {
-        switch self {
-        case .usedByMacOS, .usedByApp: true
-        default: false
-        }
-    }
-
-    var text: String {
-        switch self {
-        case .unassigned: "No shortcut"
-        case .ok: "Ready"
-        case .usedByMacOS(let name): "In use by macOS: \(name)"
-        case .usedByApp(let running):
-            running.isEmpty ? "In use by another app" : "In use by another app (\(running.joined(separator: ", ")) is running)"
-        }
-    }
-
-    @MainActor
-    static func of(_ action: ShortcutAction, combo: KeyCombo?) -> ShortcutStatus {
-        guard let combo else { return .unassigned }
-        if let entry = SystemShortcuts.shared.macOSShortcut(using: combo) { return .usedByMacOS(entry.name) }
-        if HotKeyCenter.shared.conflicts.contains(action) {
-            return .usedByApp(running: SystemShortcuts.shared.rivals.map(\.name))
-        }
-        return .ok
-    }
-}
-
 // MARK: - Small views
 
 /// A keyboard shortcut drawn as separate keycaps: "⇧ ⌘ 4".

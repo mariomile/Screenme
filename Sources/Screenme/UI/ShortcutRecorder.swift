@@ -192,18 +192,16 @@ struct ShortcutRecorderField: View {
 struct ShortcutRow: View {
     let action: ShortcutAction
     @StateObject private var recorder: ShortcutRecorderModel
-    @State private var combo: KeyCombo?
-    @ObservedObject private var hotKeys = HotKeyCenter.shared
-    @ObservedObject private var system = SystemShortcuts.shared
+    @ObservedObject private var shortcuts = ShortcutsModel.shared
 
     init(action: ShortcutAction) {
         self.action = action
         _recorder = StateObject(wrappedValue: ShortcutRecorderModel(action: action))
-        _combo = State(initialValue: ShortcutStore.combo(for: action))
     }
 
     var body: some View {
-        let status = ShortcutStatus.of(action, combo: combo)
+        let combo = shortcuts.combo(for: action)
+        let status = shortcuts.status(for: action)
         HStack(spacing: 12) {
             SymbolTile(symbol: action.symbol, color: .accentColor, size: 28)
             VStack(alignment: .leading, spacing: 2) {
@@ -231,9 +229,6 @@ struct ShortcutRow: View {
             .accessibilityLabel("Remove shortcut for \(action.title)")
         }
         .padding(.vertical, 2)
-        .onReceive(NotificationCenter.default.publisher(for: .shortcutsChanged)) { _ in
-            combo = ShortcutStore.combo(for: action)
-        }
         .onDisappear { recorder.cancel() }
     }
 }
@@ -242,11 +237,11 @@ struct ShortcutRow: View {
 
 /// The state of the macOS screenshot shortcuts and the buttons to take them over or give them back.
 struct MacOSShortcutsBlock: View {
-    @ObservedObject private var system = SystemShortcuts.shared
+    @ObservedObject private var shortcuts = ShortcutsModel.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            ForEach(system.screenshotEntries) { entry in
+            ForEach(shortcuts.system.screenshotEntries) { entry in
                 HStack(spacing: 10) {
                     if let combo = entry.combo { KeyCaps(combo: combo, size: 11) }
                     Text(entry.name).font(.callout).foregroundStyle(.secondary).lineLimit(1)
@@ -259,14 +254,14 @@ struct MacOSShortcutsBlock: View {
                 }
             }
             HStack(spacing: 10) {
-                if system.macOSOwnsScreenshotShortcuts {
-                    Button("Use Screenme for ⇧⌘3, ⇧⌘4, ⇧⌘5") { system.takeOver() }
+                if shortcuts.system.macOSOwnsScreenshotShortcuts {
+                    Button("Use Screenme for ⇧⌘3, ⇧⌘4, ⇧⌘5") { shortcuts.takeOver() }
                         .buttonStyle(.borderedProminent)
                 }
-                if system.screenshotEntries.contains(where: { !$0.enabled }) {
-                    Button("Restore macOS shortcuts") { system.restore() }
+                if shortcuts.system.screenshotEntries.contains(where: { !$0.enabled }) {
+                    Button("Restore macOS shortcuts") { shortcuts.restore() }
                 }
-                if system.isWorking { ProgressView().controlSize(.small) }
+                if shortcuts.isWorking { ProgressView().controlSize(.small) }
             }
         }
     }
@@ -274,10 +269,10 @@ struct MacOSShortcutsBlock: View {
 
 /// Known screenshot apps that are running, each with a Quit button.
 struct RivalAppsBlock: View {
-    @ObservedObject private var system = SystemShortcuts.shared
+    @ObservedObject private var shortcuts = ShortcutsModel.shared
 
     var body: some View {
-        ForEach(system.rivals) { app in
+        ForEach(shortcuts.system.rivals) { app in
             HStack(spacing: 10) {
                 Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
                 VStack(alignment: .leading, spacing: 1) {
@@ -285,7 +280,7 @@ struct RivalAppsBlock: View {
                     Text("It may claim the same screenshot shortcuts.").font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button("Quit \(app.name)") { system.quit(app) }
+                Button("Quit \(app.name)") { shortcuts.quit(app) }
             }
         }
     }
@@ -294,8 +289,7 @@ struct RivalAppsBlock: View {
 // MARK: - Settings pane
 
 struct ShortcutsPane: View {
-    @ObservedObject private var hotKeys = HotKeyCenter.shared
-    @ObservedObject private var system = SystemShortcuts.shared
+    @ObservedObject private var shortcuts = ShortcutsModel.shared
 
     var body: some View {
         Form {
@@ -307,7 +301,7 @@ struct ShortcutsPane: View {
                 Text("Screenme replaces the built-in screenshot shortcuts by turning them off in System Settings > Keyboard > Keyboard Shortcuts > Screenshots. Restore puts them back.")
             }
 
-            if !system.rivals.isEmpty {
+            if !shortcuts.system.rivals.isEmpty {
                 Section("Other screenshot apps") { RivalAppsBlock() }
             }
 
@@ -326,6 +320,6 @@ struct ShortcutsPane: View {
             }
         }
         .formStyle(.grouped)
-        .polling(every: 2) { SystemShortcuts.shared.refreshAndSync() }
+        .onAppear { shortcuts.refresh() }
     }
 }

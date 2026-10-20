@@ -19,13 +19,14 @@ enum OnboardingWindow {
     /// After setup, jump to the first step that needs attention.
     private static func placeStep() {
         Permissions.shared.refresh()
-        SystemShortcuts.shared.refresh()
+        let shortcuts = ShortcutsModel.shared
+        shortcuts.refresh()
         let screenRecording = Permission.screenRecording.isGranted
         var step = Prefs[Pref.onboardingStep]
         if Prefs[Pref.onboardingDone] {
             if !screenRecording {
                 step = 1
-            } else if SystemShortcuts.shared.macOSOwnsScreenshotShortcuts || !HotKeyCenter.shared.conflicts.isEmpty {
+            } else if shortcuts.system.macOSOwnsScreenshotShortcuts || !HotKeyCenter.shared.conflicts.isEmpty {
                 step = 2
             } else {
                 step = 0
@@ -285,8 +286,7 @@ private struct ScreenRecordingStep: View {
 // MARK: - 2 Shortcuts
 
 private struct ShortcutsStep: View {
-    @ObservedObject private var system = SystemShortcuts.shared
-    @ObservedObject private var hotKeys = HotKeyCenter.shared
+    @ObservedObject private var shortcuts = ShortcutsModel.shared
 
     private let actions: [ShortcutAction] = [.allInOne, .captureText, .captureFullscreen, .captureArea, .recordScreen]
 
@@ -298,27 +298,27 @@ private struct ShortcutsStep: View {
                 ForEach(actions) { action in row(action) }
             }
 
-            if system.macOSOwnsScreenshotShortcuts {
+            if shortcuts.system.macOSOwnsScreenshotShortcuts {
                 GroupCard {
                     HStack(spacing: 10) {
                         Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
                         Text("macOS still uses ⇧⌘3, ⇧⌘4 and ⇧⌘5.").font(.system(size: 13.5, weight: .medium))
                         Spacer()
                     }
-                    Button("Use Screenme for ⇧⌘3, ⇧⌘4, ⇧⌘5") { system.takeOver() }
+                    Button("Use Screenme for ⇧⌘3, ⇧⌘4, ⇧⌘5") { shortcuts.takeOver() }
                         .buttonStyle(.borderedProminent)
                 }
             } else {
                 HStack(spacing: 8) {
                     StatusLabel(text: "The macOS screenshot shortcuts are off", tone: .good)
-                    Button("Restore") { system.restore() }.buttonStyle(.link)
+                    Button("Restore") { shortcuts.restore() }.buttonStyle(.link)
                 }
             }
 
             RivalAppsBlock()
                 .frame(maxWidth: 520)
         }
-        .polling(every: 1) { SystemShortcuts.shared.refreshAndSync() }
+        .onAppear { shortcuts.refresh() }
     }
 
     private func shortWarning(_ status: ShortcutStatus) -> String {
@@ -327,8 +327,8 @@ private struct ShortcutsStep: View {
     }
 
     private func row(_ action: ShortcutAction) -> some View {
-        let combo = ShortcutStore.combo(for: action)
-        let status = ShortcutStatus.of(action, combo: combo)
+        let combo = shortcuts.combo(for: action)
+        let status = shortcuts.status(for: action)
         return HStack(spacing: 10) {
             Image(systemName: action.symbol).frame(width: 20).foregroundStyle(.secondary)
             Text(action.title).font(.system(size: 13.5))
@@ -432,10 +432,10 @@ private struct PreferencesStep: View {
 // MARK: - 5 Done
 
 private struct DoneStep: View {
-    @ObservedObject private var system = SystemShortcuts.shared
+    @ObservedObject private var shortcuts = ShortcutsModel.shared
     @State private var appeared = false
 
-    private var combo: KeyCombo? { ShortcutStore.combo(for: .captureArea) }
+    private var combo: KeyCombo? { shortcuts.combo(for: .captureArea) }
 
     var body: some View {
         StepPage(symbol: nil,
@@ -455,7 +455,7 @@ private struct DoneStep: View {
                         Text("Press \(combo.display) to try it").font(.system(size: 16, weight: .semibold))
                         KeyCaps(combo: combo, size: 18)
                     }
-                    if system.macOSShortcut(using: combo) != nil {
+                    if shortcuts.system.macOSShortcut(using: combo) != nil {
                         VStack(spacing: 8) {
                             Text("macOS still owns this shortcut. Take it over in Settings, or use the Screenme icon in the menu bar.")
                                 .font(.callout).foregroundStyle(.orange).multilineTextAlignment(.center).frame(maxWidth: 420)
@@ -473,6 +473,5 @@ private struct DoneStep: View {
             Prefs[Pref.onboardingDone] = true
             withAnimation(.spring(duration: 0.6, bounce: 0.35).delay(0.1)) { appeared = true }
         }
-        .polling(every: 1.5) { SystemShortcuts.shared.refreshAndSync() }
     }
 }

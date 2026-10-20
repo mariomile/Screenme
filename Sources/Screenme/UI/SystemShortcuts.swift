@@ -8,11 +8,10 @@ extension Pref {
 }
 
 /// What macOS and other apps already claim: the symbolic hotkeys behind System Settings > Keyboard > Shortcuts,
-/// and running apps known to grab the screenshot shortcuts. Also the explicit "take over" and "restore" actions.
+/// and running apps known to grab the screenshot shortcuts. Also the explicit "take over" and "restore" writes.
+/// Holds no state: `ShortcutsModel` reads it and publishes the result.
 @MainActor
-final class SystemShortcuts: ObservableObject {
-    static let shared = SystemShortcuts()
-
+enum SystemShortcuts {
     struct Entry: Identifiable, Equatable {
         let id: Int
         let name: String
@@ -25,12 +24,30 @@ final class SystemShortcuts: ObservableObject {
         let name: String
     }
 
-    /// The macOS screenshot shortcuts (28, 29, 30, 31, 184), enabled or not.
-    @Published private(set) var screenshotEntries: [Entry] = []
-    /// Every enabled symbolic hotkey with a key combo, for collision checks against Screenme's own shortcuts.
-    @Published private(set) var enabledEntries: [Entry] = []
-    @Published private(set) var rivals: [RivalApp] = []
-    @Published private(set) var isWorking = false
+    /// One reading of what macOS and other apps hold.
+    struct State: Equatable {
+        /// The macOS screenshot shortcuts (28, 29, 30, 31, 184), enabled or not.
+        var screenshotEntries: [Entry] = []
+        /// Every enabled symbolic hotkey with a key combo, for collision checks against Screenme's own shortcuts.
+        var enabledEntries: [Entry] = []
+        var rivals: [RivalApp] = []
+
+        /// True while macOS still owns any of ⇧⌘3, ⇧⌘4, ⇧⌘5 (or the clipboard variants).
+        var macOSOwnsScreenshotShortcuts: Bool { screenshotEntries.contains { $0.enabled } }
+
+        /// The enabled macOS shortcut that collides with `combo`, if any.
+        func macOSShortcut(using combo: KeyCombo) -> Entry? {
+            enabledEntries.first { $0.combo == combo }
+        }
+    }
+
+    /// One macOS screenshot shortcut as it was before the takeover.
+    struct SavedShortcut: Codable, Equatable {
+        let id: Int
+        /// False when the entry was missing from the plist (macOS then uses its default).
+        let existed: Bool
+        let enabled: Bool
+    }
 
     private static let domain = "com.apple.symbolichotkeys" as CFString
     private static let hotKeysKey = "AppleSymbolicHotKeys" as CFString
@@ -44,7 +61,6 @@ final class SystemShortcuts: ObservableObject {
         (31, "Copy picture of selected area to the clipboard", [52, 21, 1_441_792]),
         (184, "Screenshot and recording options", [53, 23, 1_179_648]),
     ]
-    static let screenshotIDs = screenshotDefaults.map(\.id)
 
     private static let names: [Int: String] = [
         27: "Move focus to next window in app", 32: "Mission Control", 33: "Application windows",
@@ -62,119 +78,98 @@ final class SystemShortcuts: ObservableObject {
         ("com.techsmith.snagit", "Snagit"),
     ]
 
-    private init() { refresh() }
-
     // MARK: Reading
 
-    func refresh() {
-        let hotKeys = Self.readStored() ?? [:]
-        var screenshots: [Entry] = []
-        for item in Self.screenshotDefaults {
+    static func read() -> State {
+        let hotKeys = readStored() ?? [:]
+        var state = State()
+        for item in screenshotDefaults {
             let entry = hotKeys[String(item.id)] as? [String: Any]
-            let combo = Self.combo(from: entry) ?? Self.combo(parameters: item.parameters)
-            screenshots.append(Entry(id: item.id, name: item.name, combo: combo, enabled: Self.isEnabled(entry, default: true)))
+            let combo = combo(from: entry) ?? combo(parameters: item.parameters)
+            state.screenshotEntries.append(Entry(id: item.id, name: item.name, combo: combo, enabled: isEnabled(entry, default: true)))
         }
-        var enabledList: [Entry] = []
         for (key, value) in hotKeys {
-            guard let id = Int(key), let entry = value as? [String: Any], Self.isEnabled(entry, default: false),
-                  let combo = Self.combo(from: entry) else { continue }
-            let name = Self.names[id] ?? Self.screenshotDefaults.first { $0.id == id }?.name ?? Self.desktopName(id) ?? "A macOS shortcut"
-            enabledList.append(Entry(id: id, name: name, combo: combo, enabled: true))
+            guard let id = Int(key), let entry = value as? [String: Any], isEnabled(entry, default: false),
+                  let combo = combo(from: entry) else { continue }
+            let name = names[id] ?? screenshotDefaults.first { $0.id == id }?.name ?? desktopName(id) ?? "A macOS shortcut"
+            state.enabledEntries.append(Entry(id: id, name: name, combo: combo, enabled: true))
         }
+        state.enabledEntries.sort { $0.id < $1.id }
         // Screenshot shortcuts missing from the plist are enabled by default.
-        for entry in screenshots where entry.enabled && !enabledList.contains(where: { $0.id == entry.id }) {
-            enabledList.append(entry)
+        for entry in state.screenshotEntries where entry.enabled && !state.enabledEntries.contains(where: { $0.id == entry.id }) {
+            state.enabledEntries.append(entry)
         }
-        let screenshotsNow = screenshots
-        if screenshotsNow != screenshotEntries { screenshotEntries = screenshotsNow }
-        if enabledList != enabledEntries { enabledEntries = enabledList }
-        let rivalsNow = Self.runningRivals()
-        if rivalsNow != rivals { rivals = rivalsNow }
-    }
-
-    /// Refreshes, and re-registers Screenme's shortcuts when what macOS or other apps hold has changed.
-    func refreshAndSync() {
-        let before = (screenshotEntries, rivals)
-        refresh()
-        if (screenshotEntries, rivals) != before, !ShortcutRecorderModel.isAnyRecording {
-            HotKeyCenter.shared.registerAll()
-        }
-    }
-
-    /// True while macOS still owns any of ⇧⌘3, ⇧⌘4, ⇧⌘5 (or the clipboard variants).
-    var macOSOwnsScreenshotShortcuts: Bool { screenshotEntries.contains { $0.enabled } }
-
-    /// The enabled macOS shortcut that collides with `combo`, if any.
-    func macOSShortcut(using combo: KeyCombo) -> Entry? {
-        enabledEntries.first { $0.combo == combo }
+        state.rivals = runningRivals()
+        return state
     }
 
     // MARK: Take over and restore
 
     /// Turns off the macOS screenshot shortcuts so Screenme can register them. Only call on an explicit click.
     /// The first takeover remembers how each shortcut was set, so `restore()` can put it back exactly.
-    func takeOver() {
-        apply { hotKeys in
-            // Keep an existing backup: shortcuts that are off now may be off because Screenme turned them off.
-            if Self.loadBackup() == nil {
-                Self.saveBackup(Self.screenshotDefaults.map { item in
-                    let entry = hotKeys[String(item.id)] as? [String: Any]
-                    return SavedShortcut(id: item.id, existed: entry != nil, enabled: Self.isEnabled(entry, default: true))
-                })
-            }
-            for item in Self.screenshotDefaults {
-                var entry = hotKeys[String(item.id)] as? [String: Any] ?? Self.defaultEntry(item.parameters)
-                entry["enabled"] = false
-                hotKeys[String(item.id)] = entry
-            }
+    static func takeOver() async {
+        await write { hotKeys in
+            let result = takingOver(hotKeys, backup: loadBackup())
+            saveBackup(result.backup)
+            return result.hotKeys
         }
     }
 
-    /// Puts the macOS screenshot shortcuts back as they were before the takeover: entries that did not exist
-    /// are removed again, the others get their old on or off. With nothing saved, turns them all on (the macOS default).
-    func restore() {
-        let backup = Self.loadBackup()
-        let applied = apply { hotKeys in
-            for item in Self.screenshotDefaults {
-                let key = String(item.id)
-                let saved = backup?.first { $0.id == item.id }
-                if let saved, !saved.existed {
-                    hotKeys.removeValue(forKey: key)
-                    continue
-                }
-                var entry = hotKeys[key] as? [String: Any] ?? Self.defaultEntry(item.parameters)
-                entry["enabled"] = saved?.enabled ?? true
-                hotKeys[key] = entry
-            }
+    /// Puts the macOS screenshot shortcuts back as they were before the takeover.
+    static func restore() async {
+        let backup = loadBackup()
+        if await write({ restoring($0, backup: backup) }) { Prefs.remove(Pref.macOSScreenshotShortcutsBackup) }
+    }
+
+    /// The symbolic hotkeys with the five screenshot shortcuts off, and the state to restore later.
+    /// An existing backup is kept: shortcuts that are off now may be off because Screenme turned them off.
+    static func takingOver(_ hotKeys: [String: Any], backup: [SavedShortcut]?) -> (hotKeys: [String: Any], backup: [SavedShortcut]) {
+        var hotKeys = hotKeys
+        let saved = backup ?? screenshotDefaults.map { item in
+            let entry = hotKeys[String(item.id)] as? [String: Any]
+            return SavedShortcut(id: item.id, existed: entry != nil, enabled: isEnabled(entry, default: true))
         }
-        if applied { Prefs.remove(Pref.macOSScreenshotShortcutsBackup) }
+        for item in screenshotDefaults {
+            var entry = hotKeys[String(item.id)] as? [String: Any] ?? defaultEntry(item.parameters)
+            entry["enabled"] = false
+            hotKeys[String(item.id)] = entry
+        }
+        return (hotKeys, saved)
+    }
+
+    /// The symbolic hotkeys with the screenshot shortcuts as `backup` recorded them: entries that did not exist are
+    /// removed again, the others get their old on or off. With nothing saved, all on (the macOS default).
+    static func restoring(_ hotKeys: [String: Any], backup: [SavedShortcut]?) -> [String: Any] {
+        var hotKeys = hotKeys
+        for item in screenshotDefaults {
+            let key = String(item.id)
+            let saved = backup?.first { $0.id == item.id }
+            if let saved, !saved.existed {
+                hotKeys.removeValue(forKey: key)
+                continue
+            }
+            var entry = hotKeys[key] as? [String: Any] ?? defaultEntry(item.parameters)
+            entry["enabled"] = saved?.enabled ?? true
+            hotKeys[key] = entry
+        }
+        return hotKeys
     }
 
     /// Reads, changes and writes back the symbolic hotkeys, then has macOS pick them up.
     /// Writes only when the stored value was read whole, or is truly absent. Returns whether it wrote.
     @discardableResult
-    private func apply(_ change: (inout [String: Any]) -> Void) -> Bool {
-        guard !isWorking else { return false }
+    private static func write(_ change: ([String: Any]) -> [String: Any]) async -> Bool {
         // The whole dictionary is written back. If it exists but cannot be read as one, writing would
         // replace every other macOS shortcut with just these five: do nothing instead.
-        guard var hotKeys = Self.readStored(),
-              Self.screenshotDefaults.allSatisfy({ hotKeys[String($0.id)] == nil || hotKeys[String($0.id)] is [String: Any] }) else {
+        guard let hotKeys = readStored(),
+              screenshotDefaults.allSatisfy({ hotKeys[String($0.id)] == nil || hotKeys[String($0.id)] is [String: Any] }) else {
             NSLog("Screenme: AppleSymbolicHotKeys has an unexpected format; leaving it untouched")
             return false
         }
-        isWorking = true
-        change(&hotKeys)
-        CFPreferencesSetAppValue(Self.hotKeysKey, hotKeys as CFDictionary, Self.domain)
-        CFPreferencesAppSynchronize(Self.domain)
-
-        Task {
-            if await Self.runActivateSettings() != 0 {
-                Toast.show("Shortcuts changed. Log out to apply.", symbol: "arrow.right.square", duration: 3)
-            }
-            isWorking = false
-            refresh()
-            // A recorder that started meanwhile has released the shortcuts on purpose; it re-registers when done.
-            if !ShortcutRecorderModel.isAnyRecording { HotKeyCenter.shared.registerAll() }
+        CFPreferencesSetAppValue(hotKeysKey, change(hotKeys) as CFDictionary, domain)
+        CFPreferencesAppSynchronize(domain)
+        if await runActivateSettings() != 0 {
+            Toast.show("Shortcuts changed. Log out to apply.", symbol: "arrow.right.square", duration: 3)
         }
         return true
     }
@@ -199,16 +194,6 @@ final class SystemShortcuts: ObservableObject {
         }.value
     }
 
-    // MARK: Saved state
-
-    /// One macOS screenshot shortcut as it was before the takeover.
-    private struct SavedShortcut: Codable {
-        let id: Int
-        /// False when the entry was missing from the plist (macOS then uses its default).
-        let existed: Bool
-        let enabled: Bool
-    }
-
     private static func loadBackup() -> [SavedShortcut]? {
         try? JSONDecoder().decode([SavedShortcut].self, from: Prefs[Pref.macOSScreenshotShortcutsBackup])
     }
@@ -223,13 +208,9 @@ final class SystemShortcuts: ObservableObject {
 
     // MARK: Rival apps
 
-    func quit(_ app: RivalApp) {
+    /// Asks the app to quit. `ShortcutsModel` sees it go through the workspace notifications.
+    static func quit(_ app: RivalApp) {
         NSRunningApplication.runningApplications(withBundleIdentifier: app.id).forEach { $0.terminate() }
-        Task {
-            try? await Task.sleep(for: .milliseconds(900))
-            refresh()
-            if !ShortcutRecorderModel.isAnyRecording { HotKeyCenter.shared.registerAll() }
-        }
     }
 
     private static func runningRivals() -> [RivalApp] {
@@ -258,7 +239,7 @@ final class SystemShortcuts: ObservableObject {
     }
 
     /// An entry's `enabled` flag, which macOS stores as a boolean or a number; `fallback` when it is missing.
-    private static func isEnabled(_ entry: [String: Any]?, default fallback: Bool) -> Bool {
+    static func isEnabled(_ entry: [String: Any]?, default fallback: Bool) -> Bool {
         if let flag = entry?["enabled"] as? Bool { return flag }
         if let number = entry?["enabled"] as? Int { return number != 0 }
         return fallback
