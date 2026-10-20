@@ -13,7 +13,12 @@ struct UndoHistory {
         let number: Int
         /// Steps in a row with the same key are one continuous edit (a color panel drag).
         let coalesce: String?
+        /// When the edit last changed, for coalescing.
+        var changedAt: Date
     }
+
+    /// A pause this long ends a continuous edit: the next pick is a step of its own.
+    private static let coalesceWindow: TimeInterval = 0.6
 
     private var undoStack: [Step] = []
     private var redoStack: [EditState] = []
@@ -27,11 +32,15 @@ struct UndoHistory {
 
     /// Makes the change from `before` to `current` one undo step. Steps pushed in the meantime (a weight
     /// picked while typing) fold into it. A step with the same `coalesce` key as the one just before it
-    /// merges into that one. No change, no step.
+    /// merges into that one while it keeps coming within `coalesceWindow`. No change, no step.
     mutating func commit(from before: Checkpoint, to current: EditState, coalesce key: String?) {
         guard current != before.state else { return }
         undoStack.removeAll { $0.number > before.stepCount }
-        if let key, let last = undoStack.last, last.coalesce == key, last.number == stepCount { return }
+        if let key, let last = undoStack.last, last.coalesce == key, last.number == stepCount,
+           Date().timeIntervalSince(last.changedAt) < Self.coalesceWindow {
+            undoStack[undoStack.count - 1].changedAt = Date()
+            return
+        }
         push(before.state, coalesce: key)
         redoStack.removeAll()
     }
@@ -51,7 +60,7 @@ struct UndoHistory {
 
     private mutating func push(_ before: EditState, coalesce key: String?) {
         stepCount += 1
-        undoStack.append(Step(before: before, number: stepCount, coalesce: key))
+        undoStack.append(Step(before: before, number: stepCount, coalesce: key, changedAt: Date()))
         if undoStack.count > 300 { undoStack.removeFirst() }
     }
 }
