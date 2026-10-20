@@ -23,7 +23,7 @@ final class WebcamBubble {
         session.commitConfiguration()
 
         self.size = size
-        let screen = Placement.screen(containing: area)
+        let screen = NSScreen.at(CGPoint(x: area.midX, y: area.midY))
         let visible = screen.visibleFrame
         let diameter = size.diameter
         let margin: CGFloat = 24

@@ -125,7 +125,7 @@ final class SelectionSession {
         refresh()
 
         for panel in panels { panel.orderFrontRegardless() }
-        let keyIndex = views.firstIndex { $0.screen === screen(at: pointer) } ?? 0
+        let keyIndex = views.firstIndex { $0.screen === NSScreen.at(pointer) } ?? 0
         panels[keyIndex].makeKeyAndOrderFront(nil)
         panels.forEach { $0.invalidateCursorRects(for: $0.contentView!) }
         FocusKeeper.activateSelf()
@@ -232,7 +232,7 @@ final class SelectionSession {
 
     private func mouseDown() {
         if windowMode { return }
-        let screen = self.screen(at: pointer)
+        let screen = NSScreen.at(pointer)
         dragScreen = screen
         anchor = Self.clamp(pointer, to: screen.frame)
         corner = anchor
@@ -276,7 +276,7 @@ final class SelectionSession {
                 refresh()
             }
         case kVK_Return, kVK_ANSI_KeypadEnter:
-            if mode == .recording { finish(SelectionResult(target: .display(screen(at: pointer)), frozenImage: nil)) }
+            if mode == .recording { finish(SelectionResult(target: .display(NSScreen.at(pointer)), frozenImage: nil)) }
         case kVK_LeftArrow: nudge(dx: -1, dy: 0)
         case kVK_RightArrow: nudge(dx: 1, dy: 0)
         case kVK_UpArrow: nudge(dx: 0, dy: 1)
@@ -288,7 +288,7 @@ final class SelectionSession {
     /// Moves the real mouse by one point (ten with Shift) for pixel precision.
     private func nudge(dx: CGFloat, dy: CGFloat) {
         let step: CGFloat = NSEvent.modifierFlags.contains(.shift) ? 10 : 1
-        let frame = (dragScreen ?? screen(at: pointer)).frame
+        let frame = (dragScreen ?? NSScreen.at(pointer)).frame
         let target = CGPoint(x: min(max(pointer.x + dx * step, frame.minX), frame.maxX - 1),
                              y: min(max(pointer.y + dy * step, frame.minY + 1), frame.maxY))
         CGEventSource(stateID: .combinedSessionState)?.localEventsSuppressionInterval = 0
@@ -297,18 +297,6 @@ final class SelectionSession {
     }
 
     // MARK: Geometry
-
-    private func screen(at point: CGPoint) -> NSScreen {
-        let screens = NSScreen.screens
-        // Inclusive edges: the pointer can sit exactly on the top or right border of a display.
-        if let hit = screens.first(where: { $0.frame.insetBy(dx: -0.5, dy: -0.5).contains(point) }) { return hit }
-        return screens.min { distance(from: point, to: $0.frame) < distance(from: point, to: $1.frame) } ?? NSScreen.screens[0]
-    }
-
-    private func distance(from point: CGPoint, to rect: CGRect) -> CGFloat {
-        let clamped = Self.clamp(point, to: rect)
-        return hypot(point.x - clamped.x, point.y - clamped.y)
-    }
 
     private static func clamp(_ point: CGPoint, to rect: CGRect) -> CGPoint {
         CGPoint(x: min(max(point.x, rect.minX), rect.maxX), y: min(max(point.y, rect.minY), rect.maxY))
@@ -387,7 +375,7 @@ final class SelectionSession {
 
     private func refresh() {
         guard !finished else { return }
-        let activeScreen = dragScreen ?? screen(at: pointer)
+        let activeScreen = dragScreen ?? NSScreen.at(pointer)
         let pointerPoint = dragScreen.map { Self.clamp(pointer, to: $0.frame) } ?? pointer
         let selection: CGRect? = dragging ? selectionRect() : nil
         let hovered = windowMode && !dragging ? window(at: pointer) : nil

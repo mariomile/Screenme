@@ -12,6 +12,26 @@ extension NSScreen {
     var displayID: CGDirectDisplayID {
         deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID ?? 0
     }
+
+    /// The screen holding `point` (global Cocoa coordinates). Edges count as inside, because the pointer
+    /// can sit exactly on the top or right border of a display; off every screen, the nearest one.
+    static func at(_ point: CGPoint) -> NSScreen {
+        if let hit = screens.first(where: { $0.frame.insetBy(dx: -0.5, dy: -0.5).contains(point) }) { return hit }
+        func distance(to rect: CGRect) -> CGFloat {
+            hypot(point.x - min(max(point.x, rect.minX), rect.maxX), point.y - min(max(point.y, rect.minY), rect.maxY))
+        }
+        return screens.min { distance(to: $0.frame) < distance(to: $1.frame) } ?? screens[0]
+    }
+
+    static var underMouse: NSScreen { at(NSEvent.mouseLocation) }
+}
+
+extension CGRect {
+    /// Converts a global rect between ScreenCaptureKit / Core Graphics (top-left origin) and Cocoa (bottom-left origin).
+    /// The flip is its own inverse.
+    var cocoaFlipped: CGRect {
+        CGRect(x: minX, y: CaptureTarget.primaryHeight - maxY, width: width, height: height)
+    }
 }
 
 enum ScreenmeError: LocalizedError {
@@ -29,32 +49,52 @@ enum ScreenmeError: LocalizedError {
 }
 
 extension CaptureTarget {
-    /// Builds the ScreenCaptureKit filter and configuration for this target.
-    /// Screenme's own windows (overlays, Quick Access) are always excluded.
-    /// `retina: false` produces 1x output (one pixel per point).
-    func streamSetup(showsCursor: Bool = false, retina: Bool = true) async throws -> (SCContentFilter, SCStreamConfiguration) {
+    /// The one ScreenCaptureKit filter and configuration for this target, used by stills, recordings,
+    /// scrolling capture and the picker's snapshot. Screenme's own windows are excluded, except the desktop
+    /// icon covers (or hidden icons come back in the picture) and `extraWindows`, which the caller wants filmed.
+    /// `retina: false` produces 1x output (one pixel per point). Window shadows follow `Pref.windowShadow`.
+    func streamSetup(showsCursor: Bool = false, retina: Bool = true,
+                     including extraWindows: [CGWindowID] = []) async throws -> (SCContentFilter, SCStreamConfiguration) {
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-        let ownApps = content.applications.filter { $0.bundleIdentifier == Bundle.main.bundleIdentifier }
+        let extras = content.windows.filter { extraWindows.contains($0.windowID) }
         let config = SCStreamConfiguration()
         config.showsCursor = showsCursor
         config.ignoreShadowsSingleWindow = !Prefs[Pref.windowShadow]
 
         switch self {
-        case .window(let window):
-            let filter = SCContentFilter(desktopIndependentWindow: window)
-            let windowScale = retina ? CGFloat(filter.pointPixelScale) : 1
-            config.width = Int(filter.contentRect.width * windowScale)
-            config.height = Int(filter.contentRect.height * windowScale)
+        case .window(let picked):
+            // The window may have moved since the picker listed it.
+            let window = content.windows.first { $0.windowID == picked.windowID } ?? picked
+            if extras.isEmpty {
+                let filter = SCContentFilter(desktopIndependentWindow: window)
+                let scale = retina ? CGFloat(filter.pointPixelScale) : 1
+                config.width = Int(filter.contentRect.width * scale)
+                config.height = Int(filter.contentRect.height * scale)
+                return (filter, config)
+            }
+            // The window plus the extra windows, filmed from its display so the extras can be part of the picture.
+            let center = CGPoint(x: window.frame.midX, y: window.frame.midY)
+            guard let display = content.displays.first(where: { $0.frame.contains(center) }) ?? content.displays.first else {
+                throw ScreenmeError.displayNotFound
+            }
+            let filter = SCContentFilter(display: display, including: [window] + extras)
+            // Both frames are global top-left coordinates, so the difference is display-local.
+            config.sourceRect = CGRect(x: window.frame.minX - display.frame.minX, y: window.frame.minY - display.frame.minY,
+                                       width: window.frame.width, height: window.frame.height)
+            let displayScale = await MainActor.run { NSScreen.screens.first { $0.displayID == display.displayID }?.backingScaleFactor }
+            let scale = retina ? displayScale ?? 2 : 1
+            config.width = Int(window.frame.width * scale)
+            config.height = Int(window.frame.height * scale)
             return (filter, config)
 
         case .display(let screen), .area(_, let screen):
             guard let display = content.displays.first(where: { $0.displayID == screen.displayID }) else {
                 throw ScreenmeError.displayNotFound
             }
-            // Desktop icon covers belong to Screenme but must appear in captures, or hidden icons come back.
             let coverIDs = await MainActor.run { DesktopIcons.coverWindowIDs }
-            let covers = content.windows.filter { coverIDs.contains($0.windowID) }
-            let filter = SCContentFilter(display: display, excludingApplications: ownApps, exceptingWindows: covers)
+            let kept = content.windows.filter { coverIDs.contains($0.windowID) } + extras
+            let ownApps = content.applications.filter { $0.bundleIdentifier == Bundle.main.bundleIdentifier }
+            let filter = SCContentFilter(display: display, excludingApplications: ownApps, exceptingWindows: kept)
             let scale = retina ? screen.backingScaleFactor : 1
             var size = screen.frame.size
             if case .area(let rect, _) = self {
@@ -75,9 +115,7 @@ extension CaptureTarget {
         switch self {
         case .area(let rect, _): rect
         case .display(let screen): screen.frame
-        case .window(let window):
-            CGRect(x: window.frame.minX, y: Self.primaryHeight - window.frame.maxY,
-                   width: window.frame.width, height: window.frame.height)
+        case .window(let window): window.frame.cocoaFlipped
         }
     }
 

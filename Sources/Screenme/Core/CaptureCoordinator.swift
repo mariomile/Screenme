@@ -50,7 +50,7 @@ final class CaptureCoordinator {
             try await finishScreenshot(result)
 
         case .captureFullscreen:
-            try await finishScreenshot(SelectionResult(target: .display(screenUnderMouse), frozenImage: nil))
+            try await finishScreenshot(SelectionResult(target: .display(.underMouse), frozenImage: nil))
 
         case .capturePreviousArea:
             guard let previousArea else { throw ScreenmeError.nothingToCapture }
@@ -141,10 +141,6 @@ final class CaptureCoordinator {
     }
 
     // MARK: Helpers
-
-    var screenUnderMouse: NSScreen {
-        NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main ?? NSScreen.screens[0]
-    }
 
     func report(_ error: Error) {
         let alert = NSAlert(error: error)

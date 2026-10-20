@@ -42,7 +42,7 @@ final class QuickAccess {
         // A new version of a capture already on screen replaces its card.
         for old in cards where old.model.item.url == item.url && !old.isDismissing { remove(old) }
 
-        let screen = CaptureCoordinator.shared.screenUnderMouse
+        let screen = NSScreen.underMouse
         let card = QuickAccessCard(item: item, screen: screen, owner: self)
         cards.append(card)
         trimOverflow(on: screen)

@@ -171,16 +171,11 @@ struct VisualEffectBackground: NSViewRepresentable {
 // MARK: - Placement
 
 enum Placement {
-    static func screen(containing frame: CGRect) -> NSScreen {
-        let center = CGPoint(x: frame.midX, y: frame.midY)
-        return NSScreen.screens.first { $0.frame.contains(center) } ?? NSScreen.main ?? NSScreen.screens[0]
-    }
-
     /// The screen a target lives on.
     static func screen(for target: CaptureTarget) -> NSScreen {
         switch target {
         case .area(_, let screen), .display(let screen): screen
-        case .window: screen(containing: target.cocoaFrame)
+        case .window: NSScreen.at(CGPoint(x: target.cocoaFrame.midX, y: target.cocoaFrame.midY))
         }
     }
 
@@ -245,7 +240,7 @@ final class ProgressHUD {
     func show() {
         let view = NSHostingView(rootView: ProgressHUDView(model: model))
         let size = view.fittingSize
-        let visible = CaptureCoordinator.shared.screenUnderMouse.visibleFrame
+        let visible = NSScreen.underMouse.visibleFrame
         let frame = CGRect(x: visible.midX - size.width / 2, y: visible.minY + 80, width: size.width, height: size.height)
         let panel = FloatingPanel(frame: frame, level: .statusBar)
         panel.ignoresMouseEvents = true

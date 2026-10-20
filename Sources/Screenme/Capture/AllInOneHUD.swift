@@ -109,7 +109,7 @@ private final class HUDController {
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.contentView = effect
 
-        let screen = CaptureCoordinator.shared.screenUnderMouse.visibleFrame
+        let screen = NSScreen.underMouse.visibleFrame
         finalFrame = CGRect(x: (screen.midX - size.width / 2).rounded(), y: screen.minY + 72, width: size.width, height: size.height)
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         panel.setFrame(reduceMotion ? finalFrame : finalFrame.offsetBy(dx: 0, dy: -14), display: false)

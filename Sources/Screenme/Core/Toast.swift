@@ -11,7 +11,7 @@ enum Toast {
         panel?.orderOut(nil)
         let view = NSHostingView(rootView: ToastView(text: text, symbol: symbol))
         let size = view.fittingSize
-        let screen = CaptureCoordinator.shared.screenUnderMouse.visibleFrame
+        let screen = NSScreen.underMouse.visibleFrame
         let frame = CGRect(x: screen.midX - size.width / 2, y: screen.minY + 80, width: size.width, height: size.height)
         let panel = NSPanel(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.level = .statusBar

@@ -12,63 +12,15 @@ struct CaptureSetup {
     let width: Int
     let height: Int
 
-    /// Builds the filter and configuration for `target`.
-    /// Screenme's own windows are excluded, except `overlays` (click highlights, keystrokes, webcam),
-    /// which are part of the picture on purpose.
+    /// Builds the filter and configuration for `target` with `CaptureTarget.streamSetup`.
+    /// `overlays` (click highlights, keystrokes, webcam) are Screenme windows filmed on purpose.
     @MainActor
     static func make(for target: CaptureTarget, settings: RecordingSettings, overlays: [NSWindow]) async throws -> CaptureSetup {
-        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-        let bundleID = Bundle.main.bundleIdentifier
-        let ownApps = content.applications.filter { $0.bundleIdentifier == bundleID }
-        let overlayIDs = Set(overlays.map { CGWindowID($0.windowNumber) })
-        let included = content.windows.filter { overlayIDs.contains($0.windowID) }
-
-        let config = SCStreamConfiguration()
-        let filter: SCContentFilter
-        var size: CGSize
-        var scale: CGFloat = 1
-
-        switch target {
-        case .display(let screen), .area(_, let screen):
-            guard let display = content.displays.first(where: { $0.displayID == screen.displayID }) else {
-                throw ScreenmeError.displayNotFound
-            }
-            // Desktop icon covers belong to Screenme but must be filmed, or hidden icons show up in the video.
-            let coverIDs = Set(DesktopIcons.coverWindowIDs)
-            let covers = content.windows.filter { coverIDs.contains($0.windowID) }
-            filter = SCContentFilter(display: display, excludingApplications: ownApps, exceptingWindows: included + covers)
-            scale = settings.format == .gif ? 1 : screen.backingScaleFactor
-            size = screen.frame.size
-            if case .area(let rect, _) = target {
-                // ScreenCaptureKit wants display-local points with a top-left origin.
-                config.sourceRect = CGRect(x: rect.minX - screen.frame.minX, y: screen.frame.maxY - rect.maxY,
-                                           width: rect.width, height: rect.height)
-                size = rect.size
-            }
-
-        case .window(let staleWindow):
-            let window = content.windows.first { $0.windowID == staleWindow.windowID } ?? staleWindow
-            if included.isEmpty {
-                filter = SCContentFilter(desktopIndependentWindow: window)
-                scale = settings.format == .gif ? 1 : CGFloat(filter.pointPixelScale)
-                size = filter.contentRect.size
-            } else {
-                // The window plus the overlays, filmed from the display so the overlays can be part of it.
-                let center = CGPoint(x: window.frame.midX, y: window.frame.midY)
-                guard let display = content.displays.first(where: { $0.frame.contains(center) }) ?? content.displays.first else {
-                    throw ScreenmeError.displayNotFound
-                }
-                filter = SCContentFilter(display: display, including: [window] + included)
-                config.sourceRect = CGRect(x: window.frame.minX - display.frame.minX, y: window.frame.minY - display.frame.minY,
-                                           width: window.frame.width, height: window.frame.height)
-                let screen = NSScreen.screens.first { $0.displayID == display.displayID }
-                scale = settings.format == .gif ? 1 : (screen?.backingScaleFactor ?? 2)
-                size = window.frame.size
-            }
-        }
-
-        var width = size.width * scale
-        var height = size.height * scale
+        // GIFs are filmed at 1x: they end up small anyway.
+        let (filter, config) = try await target.streamSetup(showsCursor: settings.showCursor, retina: settings.format != .gif,
+                                                            including: overlays.map { CGWindowID($0.windowNumber) })
+        var width = CGFloat(config.width)
+        var height = CGFloat(config.height)
         let longest = max(width, height)
         if longest > 4096 {
             width *= 4096 / longest
@@ -83,9 +35,7 @@ struct CaptureSetup {
         let fps = settings.format == .gif ? min(settings.fps, 30) : settings.fps
         config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
         config.queueDepth = 8
-        config.showsCursor = settings.showCursor
         config.colorSpaceName = CGColorSpace.sRGB
-        config.ignoreShadowsSingleWindow = !Prefs[Pref.windowShadow]
 
         if settings.systemAudio && settings.format == .video {
             config.capturesAudio = true

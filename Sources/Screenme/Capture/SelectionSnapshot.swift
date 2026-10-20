@@ -17,7 +17,7 @@ struct ScreenSnapshot {
 
 enum SnapshotLoader {
     /// Reads the window list and, when `images` is true, grabs one image per screen at native pixel size.
-    /// Screenme's own windows are excluded, exactly like `CaptureTarget.streamSetup` does.
+    /// The images go through `CaptureTarget.streamSetup`, so they match a real capture.
     static func load(screens: [NSScreen], images: Bool, showsCursor: Bool) async -> ScreenSnapshot {
         guard let content = try? await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true) else {
             return ScreenSnapshot()
@@ -26,18 +26,13 @@ enum SnapshotLoader {
         snapshot.windows = orderedWindows(content)
         guard images else { return snapshot }
 
-        let ownApps = content.applications.filter { $0.bundleIdentifier == Bundle.main.bundleIdentifier }
         await withTaskGroup(of: (CGDirectDisplayID, CGImage?).self) { group in
             for screen in screens {
-                guard let display = content.displays.first(where: { $0.displayID == screen.displayID }) else { continue }
-                let filter = SCContentFilter(display: display, excludingApplications: ownApps, exceptingWindows: [])
-                let config = SCStreamConfiguration()
-                config.showsCursor = showsCursor
-                config.width = Int((screen.frame.width * screen.backingScaleFactor).rounded())
-                config.height = Int((screen.frame.height * screen.backingScaleFactor).rounded())
                 let id = screen.displayID
+                let target = CaptureTarget.display(screen)
                 group.addTask {
-                    (id, try? await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config))
+                    guard let (filter, config) = try? await target.streamSetup(showsCursor: showsCursor) else { return (id, nil) }
+                    return (id, try? await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config))
                 }
             }
             for await (id, image) in group {
@@ -61,9 +56,7 @@ enum SnapshotLoader {
                   app.bundleIdentifier != "com.apple.dock",
                   window.frame.width >= 60, window.frame.height >= 40,
                   (entry[kCGWindowAlpha as String] as? Double ?? 1) > 0.05 else { return nil }
-            let frame = CGRect(x: window.frame.minX, y: CaptureTarget.primaryHeight - window.frame.maxY,
-                               width: window.frame.width, height: window.frame.height)
-            return WindowEntry(window: window, frame: frame, appName: app.applicationName)
+            return WindowEntry(window: window, frame: window.frame.cocoaFlipped, appName: app.applicationName)
         }
     }
 }

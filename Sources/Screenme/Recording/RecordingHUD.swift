@@ -19,7 +19,7 @@ final class CountdownHUD {
     func run(seconds: Int, around frame: CGRect) async -> Bool {
         let model = Model(number: seconds)
         let side: CGFloat = 200
-        let screen = Placement.screen(containing: frame)
+        let screen = NSScreen.at(CGPoint(x: frame.midX, y: frame.midY))
         var rect = CGRect(x: frame.midX - side / 2, y: frame.midY - side / 2, width: side, height: side)
         rect.origin.x = min(max(rect.minX, screen.frame.minX), screen.frame.maxX - side)
         rect.origin.y = min(max(rect.minY, screen.frame.minY), screen.frame.maxY - side)

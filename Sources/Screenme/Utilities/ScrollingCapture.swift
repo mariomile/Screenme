@@ -232,8 +232,7 @@ private final class ScrollSession: ObservableObject {
 
     private func showPanel() {
         let size = CGSize(width: 344, height: 420)
-        let screen = NSScreen.screens.first { $0.frame.intersects(frame) && $0.frame.contains(CGPoint(x: frame.midX, y: frame.midY)) }
-            ?? NSScreen.main ?? NSScreen.screens[0]
+        let screen = NSScreen.at(CGPoint(x: frame.midX, y: frame.midY))
         let visible = screen.visibleFrame
         let height = min(max(frame.height, size.height), visible.height - 24)
         let gap: CGFloat = 14

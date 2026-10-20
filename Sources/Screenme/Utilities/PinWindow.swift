@@ -88,7 +88,7 @@ private final class PinWindowController: NSObject {
 
     init(image: CGImage, item: CaptureItem, index: Int) {
         self.item = item
-        let screen = Self.screenUnderMouse
+        let screen = NSScreen.underMouse
         let scale = screen.backingScaleFactor
         naturalSize = CGSize(width: CGFloat(image.width) / scale, height: CGFloat(image.height) / scale)
 
@@ -120,10 +120,6 @@ private final class PinWindowController: NSObject {
         panel.keyHandler = { [weak self] event in self?.handleKey(event) ?? false }
 
         imageView.controller = self
-    }
-
-    private static var screenUnderMouse: NSScreen {
-        NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main ?? NSScreen.screens[0]
     }
 
     // MARK: Lifecycle
@@ -166,7 +162,7 @@ private final class PinWindowController: NSObject {
     }
 
     func setZoom(_ target: CGFloat, anchor: CGPoint? = nil, animated: Bool = false) {
-        let screenSize = Self.screenUnderMouse.frame.size
+        let screenSize = NSScreen.underMouse.frame.size
         let minZoom = 48 / min(naturalSize.width, naturalSize.height)
         let maxZoom = min(8, max(screenSize.width, screenSize.height) * 3 / max(naturalSize.width, naturalSize.height))
         let clamped = min(max(target, minZoom), max(maxZoom, minZoom))
