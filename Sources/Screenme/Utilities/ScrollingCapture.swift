@@ -169,7 +169,8 @@ final class ScrollSession: ObservableObject {
     // MARK: Updates
 
     private func apply(_ update: ScrollStitchEngine.Update) {
-        guard phase == .capturing else { return }
+        // The first frame can arrive before startCapture returns; it carries the first preview.
+        guard phase == .capturing || phase == .starting else { return }
         if update.rows != rows { lastAdvance = Date() }
         rows = update.rows
         if let image = update.preview { preview = image }
