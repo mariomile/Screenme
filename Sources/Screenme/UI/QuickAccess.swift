@@ -210,6 +210,7 @@ final class QuickAccess {
 
     fileprivate func edit(_ card: QuickAccessCard) {
         let item = card.model.item
+        guard !item.isGIF else { return } // neither editor opens GIFs
         dismiss(card)
         item.kind == .image ? AnnotationEditor.open(item) : VideoEditor.open(item)
     }
@@ -527,8 +528,10 @@ private struct QuickAccessCardView: View {
                 }
                 Spacer()
                 HStack {
-                    HUDCircle(symbol: model.item.kind == .image ? "pencil.and.scribble" : "scissors",
-                              label: model.item.kind == .image ? "Annotate" : "Edit", action: model.actions.edit)
+                    if !model.item.isGIF {
+                        HUDCircle(symbol: model.item.kind == .image ? "pencil.and.scribble" : "scissors",
+                                  label: model.item.kind == .image ? "Annotate" : "Edit", action: model.actions.edit)
+                    }
                     Spacer()
                 }
             }
@@ -701,7 +704,7 @@ private final class CardDragView: NSView, NSDraggingSource {
         add("Save As…", "square.and.arrow.down.on.square", actions.saveAs)
         add("Show in Finder", "folder", actions.reveal)
         menu.addItem(.separator())
-        add(isImage ? "Annotate" : "Edit", isImage ? "pencil.and.scribble" : "scissors", actions.edit)
+        if !model.item.isGIF { add(isImage ? "Annotate" : "Edit", isImage ? "pencil.and.scribble" : "scissors", actions.edit) }
         if isImage { add("Pin to Screen", "pin", actions.pin) }
         menu.addItem(.separator())
         add("Delete", "trash", actions.trash)

@@ -314,8 +314,10 @@ private struct HistoryGridCell: View {
                 if item.kind == .image {
                     HistoryActionButton(symbol: "pin", help: "Pin") { HistoryActions.pin(item) }
                 }
-                HistoryActionButton(symbol: item.kind == .image ? "pencil.tip.crop.circle" : "scissors",
-                             help: item.kind == .image ? "Annotate" : "Edit video") { HistoryActions.edit(item) }
+                if !item.isGIF {
+                    HistoryActionButton(symbol: item.kind == .image ? "pencil.tip.crop.circle" : "scissors",
+                                 help: item.kind == .image ? "Annotate" : "Edit video") { HistoryActions.edit(item) }
+                }
                 HistoryActionButton(symbol: "trash", help: "Move to Trash") { HistoryActions.delete(item) }
             }
             .padding(.bottom, 9)
@@ -327,7 +329,9 @@ private struct HistoryGridCell: View {
     private var menu: some View {
         Button("Copy") { HistoryActions.copy(item) }
         Button("Save") { HistoryActions.save(item) }
-        Button(item.kind == .image ? "Annotate" : "Edit Video") { HistoryActions.edit(item) }
+        if !item.isGIF {
+            Button(item.kind == .image ? "Annotate" : "Edit Video") { HistoryActions.edit(item) }
+        }
         if item.kind == .image {
             Button("Pin") { HistoryActions.pin(item) }
         }

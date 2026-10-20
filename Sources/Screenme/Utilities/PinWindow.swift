@@ -222,7 +222,7 @@ private final class PinWindowController: NSObject {
         menu.autoenablesItems = false
         menu.addItem(entry("Copy", #selector(copyAction), key: "c"))
         menu.addItem(entry("Save", #selector(saveAction), key: "s"))
-        if item.kind == .image { menu.addItem(entry("Annotate", #selector(annotateAction))) }
+        if item.kind == .image, !item.isGIF { menu.addItem(entry("Annotate", #selector(annotateAction))) }
         menu.addItem(.separator())
 
         let opacity = NSMenu()
