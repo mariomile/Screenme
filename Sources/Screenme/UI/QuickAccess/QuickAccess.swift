@@ -66,7 +66,9 @@ final class QuickAccess {
 
     /// Slides the card out toward the screen edge; the others close the gap.
     func dismiss(_ card: QuickAccessCard, velocity: CGFloat = 0) {
-        guard !card.isDismissing else { return }
+        // A card already removed (replaced by a new version mid-drag) is off screen: animating it would start a
+        // display link that never fires and never lets the card go.
+        guard !card.isDismissing, cards.contains(where: { $0 === card }) else { return }
         card.slideOut(velocity: velocity)
         layout()
     }
