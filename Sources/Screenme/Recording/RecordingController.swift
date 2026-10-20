@@ -48,7 +48,7 @@ final class RecordingController {
 
         // 3. Countdown.
         if settings.countdown > 0 {
-            let completed = await CountdownHUD().run(seconds: settings.countdown, around: target.cocoaFrame)
+            let completed = await Countdown.run(seconds: settings.countdown, around: target.cocoaFrame)
             guard completed else {
                 preRecord.closeWebcam()
                 if hidIcons { DesktopIcons.setHidden(false) }
@@ -155,12 +155,11 @@ final class RecordingController {
     }
 
     private func convertToGIF(_ video: URL) async -> CaptureItem? {
-        let hud = ProgressHUD(title: "Creating GIF")
-        hud.show()
-        defer { hud.hide() }
+        let toast = Toast.progress("Creating GIF")
+        defer { toast.finish() }
         do {
             let gif = try await GIFExporter.export(video, fps: 15, maxWidth: 1000) { value in
-                Task { @MainActor in hud.update(value) }
+                Task { @MainActor in toast.update(value) }
             }
             try? FileManager.default.removeItem(at: video)
             return CaptureItem(url: gif, kind: .gif)

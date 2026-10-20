@@ -2,18 +2,19 @@ import AppKit
 import Carbon.HIToolbox
 import SwiftUI
 
-/// A large countdown with a ring, centered on the area about to be captured.
-/// Esc cancels. The panel is gone before `countdown` returns, so it never appears in the shot.
+/// A large countdown with a ring, centered on the area about to be captured or recorded.
+/// Esc cancels without taking focus from the user's app. The panel is gone before `run` returns,
+/// so it never appears in the shot.
 @MainActor
-enum SelfTimer {
-    private static var session: SelfTimerSession?
+enum Countdown {
+    private static var session: CountdownSession?
 
     /// Returns false when cancelled (Esc), true when the countdown reached zero.
-    static func countdown(seconds: Int, around frame: CGRect) async -> Bool {
+    static func run(seconds: Int, around frame: CGRect) async -> Bool {
         guard seconds > 0 else { return true }
         session?.finish(false)
         return await withCheckedContinuation { continuation in
-            let session = SelfTimerSession(seconds: seconds, frame: frame) { result in
+            let session = CountdownSession(seconds: seconds, frame: frame) { result in
                 continuation.resume(returning: result)
             }
             self.session = session
@@ -21,29 +22,24 @@ enum SelfTimer {
         }
     }
 
-    fileprivate static func sessionEnded(_ ended: SelfTimerSession) {
+    fileprivate static func sessionEnded(_ ended: CountdownSession) {
         if session === ended { session = nil }
-    }
-
-    fileprivate static func escapePressed() {
-        session?.finish(false)
     }
 }
 
-// MARK: - SelfTimerSession
+// MARK: - Session
 
 @MainActor
-private final class SelfTimerSession {
-    private let seconds: Int
+private final class CountdownSession {
     private let frame: CGRect
     private var completion: ((Bool) -> Void)?
-    private let model = SelfTimerModel()
+    private let model = CountdownModel()
     private var panel: FloatingPanel?
     private var timer: Timer?
+    private var escape: TemporaryHotKey?
     private var remaining: Int
 
     init(seconds: Int, frame: CGRect, completion: @escaping (Bool) -> Void) {
-        self.seconds = seconds
         self.remaining = seconds
         self.frame = frame
         self.completion = completion
@@ -51,14 +47,17 @@ private final class SelfTimerSession {
 
     func start() {
         let side: CGFloat = 220
-        let rect = CGRect(x: frame.midX - side / 2, y: frame.midY - side / 2, width: side, height: side)
+        let screen = NSScreen.at(CGPoint(x: frame.midX, y: frame.midY)).frame
+        let rect = CGRect(x: min(max(frame.midX - side / 2, screen.minX), screen.maxX - side),
+                          y: min(max(frame.midY - side / 2, screen.minY), screen.maxY - side),
+                          width: side, height: side)
         let panel = FloatingPanel(frame: rect, level: .screenSaver, hasShadow: false, ignoresMouse: true,
                                   collectionBehavior: [.canJoinAllSpaces, .fullScreenAuxiliary, .transient])
-        panel.contentView = NSHostingView(rootView: SelfTimerView(model: model))
+        panel.contentView = NSHostingView(rootView: CountdownView(model: model))
         panel.present()
         self.panel = panel
 
-        SelfTimerEscapeKey.register()
+        escape = HotKeyCenter.shared.registerTemporary(keyCode: UInt32(kVK_Escape)) { [weak self] in self?.finish(false) }
         tick()
         let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.advance() }
@@ -88,8 +87,9 @@ private final class SelfTimerSession {
         self.completion = nil
         timer?.invalidate()
         timer = nil
-        SelfTimerEscapeKey.unregister()
-        SelfTimer.sessionEnded(self)
+        HotKeyCenter.shared.unregisterTemporary(escape)
+        escape = nil
+        Countdown.sessionEnded(self)
 
         // Fade out and make sure the window is off screen before the capture starts.
         guard let panel else { completion(completed); return }
@@ -104,7 +104,7 @@ private final class SelfTimerSession {
 // MARK: - View
 
 @MainActor
-private final class SelfTimerModel: ObservableObject {
+private final class CountdownModel: ObservableObject {
     @Published var number = 0
     @Published var progress = 1.0
 
@@ -120,8 +120,8 @@ private final class SelfTimerModel: ObservableObject {
     }
 }
 
-private struct SelfTimerView: View {
-    @ObservedObject var model: SelfTimerModel
+private struct CountdownView: View {
+    @ObservedObject var model: CountdownModel
     @State private var appeared = false
 
     var body: some View {
@@ -155,46 +155,5 @@ private struct SelfTimerView: View {
         .opacity(appeared ? 1 : 0)
         .onAppear { withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) { appeared = true } }
         .environment(\.colorScheme, .dark)
-    }
-}
-
-// MARK: - Esc
-
-/// Esc as a Carbon hot key while the countdown runs: works without focus or Accessibility,
-/// so cancelling never steals focus from the app being captured.
-@MainActor
-private enum SelfTimerEscapeKey {
-    private static var ref: EventHotKeyRef?
-    private static var handlerInstalled = false
-    private static let signature = OSType(0x5354_4D45) // 'STME'
-
-    static func register() {
-        installHandler()
-        guard ref == nil else { return }
-        var newRef: EventHotKeyRef?
-        let id = EventHotKeyID(signature: signature, id: 1)
-        if RegisterEventHotKey(UInt32(kVK_Escape), 0, id, GetApplicationEventTarget(), 0, &newRef) == noErr {
-            ref = newRef
-        }
-    }
-
-    static func unregister() {
-        if let ref { UnregisterEventHotKey(ref) }
-        ref = nil
-    }
-
-    private static func installHandler() {
-        guard !handlerInstalled else { return }
-        handlerInstalled = true
-        var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
-        InstallEventHandler(GetApplicationEventTarget(), { _, event, _ in
-            guard let event else { return OSStatus(eventNotHandledErr) }
-            var hotKeyID = EventHotKeyID()
-            GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID),
-                              nil, MemoryLayout<EventHotKeyID>.size, nil, &hotKeyID)
-            guard hotKeyID.signature == SelfTimerEscapeKey.signature else { return OSStatus(eventNotHandledErr) }
-            DispatchQueue.main.async { MainActor.assumeIsolated { SelfTimer.escapePressed() } }
-            return noErr
-        }, 1, &spec, nil, nil)
     }
 }

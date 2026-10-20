@@ -13,9 +13,13 @@ final class HotKeyCenter: ObservableObject {
 
     /// 'SCME', the signature of every Screenme shortcut.
     nonisolated static let signature = OSType(0x5343_4D45)
+    /// 'SCMT', the signature of temporary hot keys.
+    nonisolated static let temporarySignature = OSType(0x5343_4D54)
 
     private var refs: [ShortcutAction: EventHotKeyRef] = [:]
     private var ids: [UInt32: ShortcutAction] = [:]
+    private var temporary: [UInt32: (ref: EventHotKeyRef, handler: () -> Void)] = [:]
+    private var nextTemporaryID: UInt32 = 1
 
     private init() {
         for (index, action) in ShortcutAction.allCases.enumerated() { ids[UInt32(index + 1)] = action }
@@ -25,13 +29,19 @@ final class HotKeyCenter: ObservableObject {
             var hotKeyID = EventHotKeyID()
             GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID),
                               nil, MemoryLayout<EventHotKeyID>.size, nil, &hotKeyID)
-            // Other hot keys in the process (the self-timer's Esc) use their own signature and ids.
-            guard hotKeyID.signature == HotKeyCenter.signature else { return OSStatus(eventNotHandledErr) }
+            let signature = hotKeyID.signature
+            guard signature == HotKeyCenter.signature || signature == HotKeyCenter.temporarySignature else {
+                return OSStatus(eventNotHandledErr)
+            }
             let id = hotKeyID.id
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     let center = HotKeyCenter.shared
-                    if let action = center.ids[id] { center.onTrigger(action) }
+                    if signature == HotKeyCenter.temporarySignature {
+                        center.temporary[id]?.handler()
+                    } else if let action = center.ids[id] {
+                        center.onTrigger(action)
+                    }
                 }
             }
             return noErr
@@ -62,4 +72,30 @@ final class HotKeyCenter: ObservableObject {
         refs.values.forEach { UnregisterEventHotKey($0) }
         refs.removeAll()
     }
+
+    // MARK: Temporary hot keys
+
+    /// Takes a key for a moment, e.g. Esc while a countdown runs. It works without focus or Accessibility,
+    /// so the user's app keeps the keyboard. Returns nil when another app holds the key.
+    /// Pass the token to `unregisterTemporary(_:)` when done.
+    func registerTemporary(keyCode: UInt32, modifiers: UInt32 = 0, handler: @escaping () -> Void) -> TemporaryHotKey? {
+        let id = nextTemporaryID
+        nextTemporaryID += 1
+        var ref: EventHotKeyRef?
+        let status = RegisterEventHotKey(keyCode, modifiers, EventHotKeyID(signature: Self.temporarySignature, id: id),
+                                         GetApplicationEventTarget(), 0, &ref)
+        guard status == noErr, let ref else { return nil }
+        temporary[id] = (ref, handler)
+        return TemporaryHotKey(id: id)
+    }
+
+    func unregisterTemporary(_ token: TemporaryHotKey?) {
+        guard let token, let entry = temporary.removeValue(forKey: token.id) else { return }
+        UnregisterEventHotKey(entry.ref)
+    }
+}
+
+/// Identifies a hot key from `HotKeyCenter.registerTemporary`.
+struct TemporaryHotKey {
+    fileprivate let id: UInt32
 }

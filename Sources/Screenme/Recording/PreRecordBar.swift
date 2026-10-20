@@ -1,5 +1,6 @@
 import AppKit
 import AVFoundation
+import Carbon.HIToolbox
 import Combine
 import SwiftUI
 
@@ -102,7 +103,7 @@ final class PreRecordUI {
     private var dimmer: AreaDimmer?
     private var barPanel: FloatingPanel?
     private var keyMonitor: Any?
-    private var globalKeyMonitor: Any?
+    private var escape: TemporaryHotKey?
     private var subscriptions: Set<AnyCancellable> = []
     private var continuation: CheckedContinuation<Decision, Never>?
 
@@ -190,31 +191,21 @@ final class PreRecordUI {
         }
     }
 
+    /// Return records while the bar has focus. Esc cancels from anywhere, even after a click into another app.
     private func installKeyMonitors() {
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self else { return event }
-            switch event.keyCode {
-            case 36, 76: finish(.record); return nil
-            case 53: finish(.cancel); return nil
-            default: return event
-            }
+            guard let self, event.keyCode == 36 || event.keyCode == 76 else { return event }
+            finish(.record)
+            return nil
         }
-        if Accessibility.trusted {
-            // Still works when the user clicked into another app while setting up.
-            globalKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
-                let code = event.keyCode
-                MainActor.assumeIsolated {
-                    if code == 36 || code == 76 { self?.finish(.record) } else if code == 53 { self?.finish(.cancel) }
-                }
-            }
-        }
+        escape = HotKeyCenter.shared.registerTemporary(keyCode: UInt32(kVK_Escape)) { [weak self] in self?.finish(.cancel) }
     }
 
     private func removeKeyMonitors() {
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
-        if let globalKeyMonitor { NSEvent.removeMonitor(globalKeyMonitor) }
         keyMonitor = nil
-        globalKeyMonitor = nil
+        HotKeyCenter.shared.unregisterTemporary(escape)
+        escape = nil
     }
 }
 

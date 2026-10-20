@@ -58,7 +58,7 @@ final class CaptureCoordinator {
 
         case .selfTimer:
             guard let result = await SelectionOverlay.select(.screenshot) else { return }
-            guard await SelfTimer.countdown(seconds: Prefs[Pref.selfTimerSeconds], around: result.target.cocoaFrame) else { return }
+            guard await Countdown.run(seconds: Prefs[Pref.selfTimerSeconds], around: result.target.cocoaFrame) else { return }
             try await finishScreenshot(SelectionResult(target: result.target, frozenImage: nil))
 
         case .captureText:

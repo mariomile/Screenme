@@ -1,7 +1,6 @@
 import AppKit
 import AVFoundation
 import CoreMedia
-import SwiftUI
 
 // MARK: - Preferences owned by the recording module
 
@@ -134,66 +133,5 @@ extension CMSampleBuffer {
                                                            sampleTimingEntryCount: count, sampleTimingArray: infos,
                                                            sampleBufferOut: &copy)
         return status == noErr ? copy : nil
-    }
-}
-
-// MARK: - Small shared UI
-
-/// A tiny progress HUD at the bottom of the screen, e.g. while a recording becomes a GIF.
-@MainActor
-final class ProgressHUD {
-    private final class Model: ObservableObject {
-        @Published var title: String
-        @Published var progress: Double = 0
-        init(title: String) { self.title = title }
-    }
-
-    private let model: Model
-    private var panel: FloatingPanel?
-
-    init(title: String) {
-        model = Model(title: title)
-    }
-
-    func show() {
-        let view = NSHostingView(rootView: ProgressHUDView(model: model))
-        let size = view.fittingSize
-        let visible = NSScreen.underMouse.visibleFrame
-        let frame = CGRect(x: visible.midX - size.width / 2, y: visible.minY + 80, width: size.width, height: size.height)
-        let panel = FloatingPanel(frame: frame, level: .statusBar, ignoresMouse: true)
-        panel.contentView = view
-        panel.present()
-        self.panel = panel
-    }
-
-    func update(_ progress: Double, title: String? = nil) {
-        model.progress = min(max(progress, 0), 1)
-        if let title { model.title = title }
-    }
-
-    func hide() {
-        panel?.dismiss()
-        panel = nil
-    }
-
-    private struct ProgressHUDView: View {
-        @ObservedObject var model: Model
-
-        var body: some View {
-            VStack(spacing: 8) {
-                Text(model.title)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white)
-                ProgressView(value: model.progress)
-                    .progressViewStyle(.linear)
-                    .tint(.white)
-                    .frame(width: 180)
-            }
-            .padding(.horizontal, 20).padding(.vertical, 14)
-            .background(VisualEffectBackground().clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous)))
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(.white.opacity(0.12)))
-            .environment(\.colorScheme, .dark)
-            .padding(8)
-        }
     }
 }
