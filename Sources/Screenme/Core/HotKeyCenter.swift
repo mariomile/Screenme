@@ -11,6 +11,9 @@ final class HotKeyCenter: ObservableObject {
 
     var onTrigger: (ShortcutAction) -> Void = { _ in }
 
+    /// 'SCME', the signature of every Screenme shortcut.
+    nonisolated static let signature = OSType(0x5343_4D45)
+
     private var refs: [ShortcutAction: EventHotKeyRef] = [:]
     private var ids: [UInt32: ShortcutAction] = [:]
 
@@ -22,6 +25,8 @@ final class HotKeyCenter: ObservableObject {
             var hotKeyID = EventHotKeyID()
             GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID),
                               nil, MemoryLayout<EventHotKeyID>.size, nil, &hotKeyID)
+            // Other hot keys in the process (the self-timer's Esc) use their own signature and ids.
+            guard hotKeyID.signature == HotKeyCenter.signature else { return OSStatus(eventNotHandledErr) }
             let id = hotKeyID.id
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
@@ -45,7 +50,7 @@ final class HotKeyCenter: ObservableObject {
         for (id, action) in ids {
             guard let combo = ShortcutStore.combo(for: action) else { continue }
             var ref: EventHotKeyRef?
-            let status = RegisterEventHotKey(combo.keyCode, combo.modifiers, EventHotKeyID(signature: OSType(0x5343_4D45), id: id),
+            let status = RegisterEventHotKey(combo.keyCode, combo.modifiers, EventHotKeyID(signature: Self.signature, id: id),
                                              GetApplicationEventTarget(), 0, &ref)
             if status == noErr, let ref { refs[action] = ref } else { failed.insert(action) }
         }
