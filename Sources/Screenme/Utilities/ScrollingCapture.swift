@@ -87,10 +87,16 @@ private final class ScrollSession: ObservableObject {
         do {
             try stream.addStreamOutput(sink, type: .screen, sampleHandlerQueue: sink.queue)
             try await stream.startCapture()
+            // Cancel was pressed while the stream started: nothing will stop it later, so stop it now.
+            guard phase == .capturing else {
+                try? await stream.stopCapture()
+                return
+            }
             self.sink = sink
             self.stream = stream
             lastAdvance = Date()
         } catch {
+            guard phase == .capturing else { return }
             phase = .ready
             status = "Could not start: \(error.localizedDescription)"
         }
