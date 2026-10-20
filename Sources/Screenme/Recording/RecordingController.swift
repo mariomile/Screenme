@@ -31,6 +31,9 @@ final class RecordingController {
         }
     }
 
+    /// A restart in progress. Stop waits for it, so pressing Stop right after Restart still stops.
+    private var restarting: Task<Void, Never>?
+
     private var running: Session? {
         if case .running(let session) = phase { return session }
         return nil
@@ -75,6 +78,7 @@ final class RecordingController {
 
     /// Stops, finishes the file and returns it. Returns nil when nothing was recorded or it was discarded.
     func stop() async -> CaptureItem? {
+        if let restarting { await restarting.value }
         guard let session = takeRunning() else { return nil }
         let size = session.size
         guard let url = await end(session, keep: true) else { return nil }
@@ -126,13 +130,18 @@ final class RecordingController {
     /// Throws the current take away and starts again with the same settings, without a countdown.
     fileprivate func restart() async {
         guard let session = takeRunning() else { return }
-        do {
-            try await session.restart()
-            phase = .running(session)
-        } catch {
-            _ = await end(session, keep: false)
-            CaptureCoordinator.shared.report(error)
+        let task = Task {
+            do {
+                try await session.restart()
+                phase = .running(session)
+            } catch {
+                _ = await end(session, keep: false)
+                CaptureCoordinator.shared.report(error)
+            }
         }
+        restarting = task
+        await task.value
+        restarting = nil
     }
 
     fileprivate func confirmDiscard() {
