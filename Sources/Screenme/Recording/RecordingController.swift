@@ -25,15 +25,10 @@ final class RecordingController {
         let previousApp = FocusKeeper.frontmostExternal()
 
         // 1. Pre-record bar.
-        let preRecord = PreRecordUI(target: target)
-        let decision = await preRecord.run()
-        preRecord.dismiss()
-        guard decision == .record else {
-            preRecord.closeWebcam()
+        guard let (settings, webcam) = await PreRecordUI(target: target).run() else {
             await FocusKeeper.restore(previousApp)
             return
         }
-        let settings = RecordingSettings.current()
 
         // 2. Desktop icons: hidden for the duration, restored afterwards.
         var hidIcons = false
@@ -47,7 +42,7 @@ final class RecordingController {
         if settings.countdown > 0 {
             let completed = await Countdown.run(seconds: settings.countdown, around: target.cocoaFrame)
             guard completed else {
-                preRecord.closeWebcam()
+                webcam?.close()
                 if hidIcons { DesktopIcons.setHidden(false) }
                 await FocusKeeper.restore(previousApp)
                 return
@@ -56,8 +51,6 @@ final class RecordingController {
 
         // 4. Capture, with the user's app in front so it records as active and keeps the keyboard.
         await FocusKeeper.restore(previousApp)
-        let webcam = settings.webcam ? preRecord.takeWebcam() : nil
-        if !settings.webcam { preRecord.closeWebcam() }
         do {
             active = try await begin(target, settings: settings, webcam: webcam, hidIcons: hidIcons)
         } catch {

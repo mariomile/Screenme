@@ -206,3 +206,27 @@ final class StreamRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
         return status == .complete
     }
 }
+
+// MARK: - Sample buffer timing
+
+extension CMSampleBuffer {
+    /// A copy with every timestamp moved earlier by `delta`.
+    func shifted(by delta: CMTime) -> CMSampleBuffer? {
+        var count: CMItemCount = 0
+        CMSampleBufferGetSampleTimingInfoArray(self, entryCount: 0, arrayToFill: nil, entriesNeededOut: &count)
+        guard count > 0 else { return nil }
+        var infos = [CMSampleTimingInfo](repeating: CMSampleTimingInfo(), count: count)
+        CMSampleBufferGetSampleTimingInfoArray(self, entryCount: count, arrayToFill: &infos, entriesNeededOut: &count)
+        for index in infos.indices {
+            infos[index].presentationTimeStamp = CMTimeSubtract(infos[index].presentationTimeStamp, delta)
+            if infos[index].decodeTimeStamp.isValid {
+                infos[index].decodeTimeStamp = CMTimeSubtract(infos[index].decodeTimeStamp, delta)
+            }
+        }
+        var copy: CMSampleBuffer?
+        let status = CMSampleBufferCreateCopyWithNewTiming(allocator: kCFAllocatorDefault, sampleBuffer: self,
+                                                           sampleTimingEntryCount: count, sampleTimingArray: infos,
+                                                           sampleBufferOut: &copy)
+        return status == noErr ? copy : nil
+    }
+}

@@ -1,120 +1,42 @@
 import AppKit
 import AVFoundation
 import Carbon.HIToolbox
-import Combine
 import SwiftUI
 
-/// What the user can change before pressing Record. Every change is written to the preferences.
+/// The compact bar shown next to the area before recording starts, with the camera preview and the dimming.
+/// The user edits a copy of the recording settings; every change is saved for next time.
 @MainActor
-final class RecorderOptions: ObservableObject {
-    @Published var format = Prefs[Pref.recordingFormat] {
-        didSet { Prefs[Pref.recordingFormat] = format }
-    }
-    @Published var microphone = Prefs[Pref.recordingMicrophone] {
-        didSet { Prefs[Pref.recordingMicrophone] = microphone }
-    }
-    @Published var microphoneID = Prefs[Pref.recordingMicrophoneID] {
-        didSet { Prefs[Pref.recordingMicrophoneID] = microphoneID }
-    }
-    @Published var systemAudio = Prefs[Pref.recordingSystemAudio] {
-        didSet { Prefs[Pref.recordingSystemAudio] = systemAudio }
-    }
-    @Published var webcam = Prefs[Pref.recordingWebcam] {
-        didSet { Prefs[Pref.recordingWebcam] = webcam }
-    }
-    @Published var webcamSize = Prefs[Pref.recordingWebcamSize] {
-        didSet { Prefs[Pref.recordingWebcamSize] = webcamSize }
-    }
-    @Published var webcamID = Prefs[Pref.recordingWebcamID] {
-        didSet { Prefs[Pref.recordingWebcamID] = webcamID }
-    }
-    @Published var showCursor = Prefs[Pref.recordingShowCursor] {
-        didSet { Prefs[Pref.recordingShowCursor] = showCursor }
-    }
-    @Published var highlightClicks = Prefs[Pref.recordingHighlightClicks] {
-        didSet { Prefs[Pref.recordingHighlightClicks] = highlightClicks }
-    }
-    @Published var showKeystrokes = Prefs[Pref.recordingShowKeystrokes] {
-        didSet { Prefs[Pref.recordingShowKeystrokes] = showKeystrokes }
-    }
-    @Published var countdown = Prefs[Pref.recordingCountdown] {
-        didSet { Prefs[Pref.recordingCountdown] = countdown }
-    }
-    @Published var hideDesktopIcons = Prefs[Pref.recordingHideDesktopIcons] {
-        didSet { Prefs[Pref.recordingHideDesktopIcons] = hideDesktopIcons }
+final class PreRecordUI: ObservableObject {
+    @Published var settings = RecordingSettings.saved {
+        didSet {
+            settings.save()
+            if settings.webcam != oldValue.webcam { setWebcam(settings.webcam) }
+            if let webcam, webcam.size != settings.webcamSize { webcam.setSize(settings.webcamSize) }
+        }
     }
     @Published private(set) var microphones: [AVCaptureDevice] = []
     @Published private(set) var cameras: [AVCaptureDevice] = []
 
-    init() {
-        refreshDevices()
-        // A permission revoked since last time must not leave the toggle on.
-        if microphone, !Permission.microphone.isGranted { microphone = false }
-        if webcam, !Permission.camera.isGranted { webcam = false }
-    }
-
-    func refreshDevices() {
-        microphones = InputDevices.microphones()
-        cameras = InputDevices.cameras()
-    }
-
-    var microphoneName: String {
-        microphones.first { $0.uniqueID == microphoneID }?.localizedName ?? "System Default"
-    }
-
-    func toggleMicrophone() {
-        if microphone {
-            microphone = false
-            return
-        }
-        Task {
-            if await Permission.microphone.ensure() { microphone = true }
-        }
-    }
-
-    func toggleWebcam() {
-        if webcam {
-            webcam = false
-            return
-        }
-        Task {
-            if await Permission.camera.ensure() { webcam = true }
-        }
-    }
-
-    func selectMicrophone(_ id: String) {
-        microphoneID = id
-        if !microphone { toggleMicrophone() }
-    }
-
-    func setKeystrokes(_ on: Bool) {
-        showKeystrokes = on
-        if on, !Permission.accessibility.isGranted { Permission.accessibility.request() }
-    }
-}
-
-/// The compact bar shown next to the area before recording starts.
-@MainActor
-final class PreRecordUI {
-    enum Decision { case record, cancel }
-
-    let options = RecorderOptions()
     private let target: CaptureTarget
     private var dimmer: AreaDimmer?
     private var barPanel: FloatingPanel?
     private var keyMonitor: Any?
     private var escape: TemporaryHotKey?
-    private var subscriptions: Set<AnyCancellable> = []
-    private var continuation: CheckedContinuation<Decision, Never>?
-
-    /// The camera preview. It outlives this object: the recording takes it over.
-    private(set) var webcam: WebcamBubble?
+    private var continuation: CheckedContinuation<Bool, Never>?
+    /// The camera preview. The recording takes it over.
+    private var webcam: WebcamBubble?
 
     init(target: CaptureTarget) {
         self.target = target
+        refreshDevices()
+        // A permission revoked since last time must not leave the toggle on.
+        if settings.microphone, !Permission.microphone.isGranted { settings.microphone = false }
+        if settings.webcam, !Permission.camera.isGranted { settings.webcam = false }
     }
 
-    func run() async -> Decision {
+    /// Shows the bar until the user records or cancels, then removes it. Returns the settings to record with and
+    /// the camera preview, which the caller now owns; nil when the user cancelled.
+    func run() async -> (RecordingSettings, WebcamBubble?)? {
         let frame = target.cocoaFrame
         let screen = Placement.screen(for: target)
 
@@ -122,9 +44,9 @@ final class PreRecordUI {
         dimmer.show()
         self.dimmer = dimmer
 
-        let view = NSHostingView(rootView: PreRecordBar(options: options,
-                                                        record: { [weak self] in self?.finish(.record) },
-                                                        cancel: { [weak self] in self?.finish(.cancel) }))
+        let view = NSHostingView(rootView: PreRecordBar(model: self,
+                                                        record: { [weak self] in self?.finish(record: true) },
+                                                        cancel: { [weak self] in self?.finish(record: false) }))
         let size = view.fittingSize
         let panel = FloatingPanel(frame: Placement.barFrame(size: size, near: frame, on: screen), level: .popUpMenu, canBeKey: true)
         panel.isMovableByWindowBackground = true
@@ -134,60 +56,86 @@ final class PreRecordUI {
         FocusKeeper.activateSelf()
 
         installKeyMonitors()
-        options.$webcam
-            .sink { [weak self] on in self?.setWebcam(on) }
-            .store(in: &subscriptions)
-        options.$webcamSize
-            .sink { [weak self] size in
-                guard let webcam = self?.webcam, webcam.size != size else { return }
-                webcam.setSize(size)
-            }
-            .store(in: &subscriptions)
+        setWebcam(settings.webcam)
 
-        let decision = await withCheckedContinuation { continuation = $0 }
+        let record = await withCheckedContinuation { continuation = $0 }
         removeKeyMonitors()
-        subscriptions.removeAll()
-        return decision
-    }
-
-    /// Removes the bar and the dimming. The camera preview stays.
-    func dismiss() {
         barPanel?.dismiss()
         barPanel = nil
-        dimmer?.close()
-        dimmer = nil
+        self.dimmer?.close()
+        self.dimmer = nil
+
+        let webcam = self.webcam
+        self.webcam = nil
+        webcam?.onResize = nil
+        guard record else {
+            webcam?.close()
+            return nil
+        }
+        return (settings, webcam)
     }
 
-    /// Hands the camera preview over to the recording.
-    func takeWebcam() -> WebcamBubble? {
-        defer { webcam = nil }
-        return webcam
+    func refreshDevices() {
+        microphones = InputDevices.microphones()
+        cameras = InputDevices.cameras()
     }
 
-    func closeWebcam() {
-        webcam?.close()
-        webcam = nil
+    var microphoneName: String {
+        microphones.first { $0.uniqueID == settings.microphoneID }?.localizedName ?? "System Default"
     }
 
-    private func finish(_ decision: Decision) {
+    func toggleMicrophone() {
+        if settings.microphone {
+            settings.microphone = false
+            return
+        }
+        Task {
+            if await Permission.microphone.ensure() { settings.microphone = true }
+        }
+    }
+
+    func toggleWebcam() {
+        if settings.webcam {
+            settings.webcam = false
+            return
+        }
+        Task {
+            if await Permission.camera.ensure() { settings.webcam = true }
+        }
+    }
+
+    func selectMicrophone(_ id: String) {
+        settings.microphoneID = id
+        if !settings.microphone { toggleMicrophone() }
+    }
+
+    func setKeystrokes(_ on: Bool) {
+        settings.showKeystrokes = on
+        if on, !Permission.accessibility.isGranted { Permission.accessibility.request() }
+    }
+
+    private func finish(record: Bool) {
         guard let continuation else { return }
         self.continuation = nil
-        continuation.resume(returning: decision)
+        continuation.resume(returning: record)
     }
 
+    /// Opens or closes the camera preview while the bar is up.
     private func setWebcam(_ on: Bool) {
+        guard barPanel != nil else { return }
         if on, webcam == nil {
             guard Permission.camera.isGranted else { return }
-            let bubble = WebcamBubble(near: target.cocoaFrame, size: options.webcamSize, deviceID: options.webcamID)
-            if let bubble {
+            if let bubble = WebcamBubble(near: target.cocoaFrame, size: settings.webcamSize, deviceID: settings.webcamID) {
+                bubble.onResize = { [weak self] size in self?.settings.webcamSize = size }
                 bubble.show()
                 webcam = bubble
             } else {
-                options.webcam = false
+                settings.webcam = false
                 Toast.show("No camera found", symbol: "video.slash.fill")
             }
         } else if !on {
-            closeWebcam()
+            webcam?.close()
+            webcam = nil
         }
     }
 
@@ -195,10 +143,10 @@ final class PreRecordUI {
     private func installKeyMonitors() {
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self, event.keyCode == 36 || event.keyCode == 76 else { return event }
-            finish(.record)
+            finish(record: true)
             return nil
         }
-        escape = HotKeyCenter.shared.registerTemporary(keyCode: UInt32(kVK_Escape)) { [weak self] in self?.finish(.cancel) }
+        escape = HotKeyCenter.shared.registerTemporary(keyCode: UInt32(kVK_Escape)) { [weak self] in self?.finish(record: false) }
     }
 
     private func removeKeyMonitors() {
@@ -212,32 +160,33 @@ final class PreRecordUI {
 // MARK: - View
 
 private struct PreRecordBar: View {
-    @ObservedObject var options: RecorderOptions
+    @ObservedObject var model: PreRecordUI
     let record: () -> Void
     let cancel: () -> Void
 
-    private var audioAvailable: Bool { options.format == .video }
+    private var settings: RecordingSettings { model.settings }
+    private var audioAvailable: Bool { settings.profile.capturesAudio }
 
     var body: some View {
         HStack(spacing: 4) {
             BarButton(symbol: "xmark", help: "Cancel (Esc)", action: cancel)
             divider
-            FormatSwitch(format: $options.format)
+            FormatSwitch(format: $model.settings.format)
             divider
             HStack(spacing: 0) {
-                BarButton(symbol: options.microphone ? "mic.fill" : "mic.slash.fill", active: options.microphone && audioAvailable,
-                          help: "Microphone: \(options.microphone ? options.microphoneName : "off")") { options.toggleMicrophone() }
+                BarButton(symbol: settings.microphone ? "mic.fill" : "mic.slash.fill", active: settings.microphone && audioAvailable,
+                          help: "Microphone: \(settings.microphone ? model.microphoneName : "off")") { model.toggleMicrophone() }
                 microphoneMenu
             }
             .opacity(audioAvailable ? 1 : 0.35)
             .disabled(!audioAvailable)
-            BarButton(symbol: options.systemAudio ? "speaker.wave.2.fill" : "speaker.slash.fill", active: options.systemAudio && audioAvailable,
-                      help: "System audio") { options.systemAudio.toggle() }
+            BarButton(symbol: settings.systemAudio ? "speaker.wave.2.fill" : "speaker.slash.fill", active: settings.systemAudio && audioAvailable,
+                      help: "System audio") { model.settings.systemAudio.toggle() }
                 .opacity(audioAvailable ? 1 : 0.35)
                 .disabled(!audioAvailable)
             HStack(spacing: 0) {
-                BarButton(symbol: options.webcam ? "video.fill" : "video.slash.fill", active: options.webcam,
-                          help: "Camera") { options.toggleWebcam() }
+                BarButton(symbol: settings.webcam ? "video.fill" : "video.slash.fill", active: settings.webcam,
+                          help: "Camera") { model.toggleWebcam() }
                 cameraMenu
             }
             optionsMenu
@@ -249,7 +198,7 @@ private struct PreRecordBar: View {
         .overlay(Capsule().strokeBorder(.white.opacity(0.14)))
         .environment(\.colorScheme, .dark)
         .fixedSize()
-        .onAppear { options.refreshDevices() }
+        .onAppear { model.refreshDevices() }
     }
 
     private var divider: some View {
@@ -258,9 +207,9 @@ private struct PreRecordBar: View {
 
     private var microphoneMenu: some View {
         Menu {
-            Picker("Microphone", selection: Binding(get: { options.microphoneID }, set: { options.selectMicrophone($0) })) {
+            Picker("Microphone", selection: Binding(get: { settings.microphoneID }, set: { model.selectMicrophone($0) })) {
                 Text("System Default").tag("")
-                ForEach(options.microphones, id: \.uniqueID) { Text($0.localizedName).tag($0.uniqueID) }
+                ForEach(model.microphones, id: \.uniqueID) { Text($0.localizedName).tag($0.uniqueID) }
             }
             .pickerStyle(.inline)
         } label: {
@@ -274,15 +223,15 @@ private struct PreRecordBar: View {
 
     private var cameraMenu: some View {
         Menu {
-            Picker("Size", selection: $options.webcamSize) {
+            Picker("Size", selection: $model.settings.webcamSize) {
                 ForEach(WebcamSize.allCases) { Text($0.title).tag($0) }
             }
             .pickerStyle(.inline)
-            if !options.cameras.isEmpty {
+            if !model.cameras.isEmpty {
                 Divider()
-                Picker("Camera", selection: $options.webcamID) {
+                Picker("Camera", selection: $model.settings.webcamID) {
                     Text("Default Camera").tag("")
-                    ForEach(options.cameras, id: \.uniqueID) { Text($0.localizedName).tag($0.uniqueID) }
+                    ForEach(model.cameras, id: \.uniqueID) { Text($0.localizedName).tag($0.uniqueID) }
                 }
                 .pickerStyle(.inline)
             }
@@ -297,15 +246,15 @@ private struct PreRecordBar: View {
 
     private var optionsMenu: some View {
         Menu {
-            Toggle("Show Cursor", isOn: $options.showCursor)
-            Toggle("Highlight Clicks", isOn: $options.highlightClicks)
-            Toggle("Show Keystrokes", isOn: Binding(get: { options.showKeystrokes }, set: { options.setKeystrokes($0) }))
-            if options.showKeystrokes, !Permission.accessibility.isGranted {
+            Toggle("Show Cursor", isOn: $model.settings.showCursor)
+            Toggle("Highlight Clicks", isOn: $model.settings.highlightClicks)
+            Toggle("Show Keystrokes", isOn: Binding(get: { settings.showKeystrokes }, set: { model.setKeystrokes($0) }))
+            if settings.showKeystrokes, !Permission.accessibility.isGranted {
                 Text("Keystrokes need Accessibility access")
             }
             Divider()
-            Toggle("Hide Desktop Icons", isOn: $options.hideDesktopIcons)
-            Picker("Countdown", selection: $options.countdown) {
+            Toggle("Hide Desktop Icons", isOn: $model.settings.hideDesktopIcons)
+            Picker("Countdown", selection: $model.settings.countdown) {
                 Text("No Countdown").tag(0)
                 Text("3 Seconds").tag(3)
                 Text("5 Seconds").tag(5)

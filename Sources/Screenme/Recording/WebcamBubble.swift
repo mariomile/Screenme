@@ -8,6 +8,8 @@ final class WebcamBubble {
     private let session = AVCaptureSession()
     private let bubble: BubbleView
     private(set) var size: WebcamSize
+    /// Called when the user picks a size from the bubble's own menu.
+    var onResize: ((WebcamSize) -> Void)?
 
     /// Returns nil when no camera can be opened.
     init?(near area: CGRect, size: WebcamSize, deviceID: String) {
@@ -36,7 +38,10 @@ final class WebcamBubble {
         panel.isMovableByWindowBackground = true
         bubble = BubbleView(frame: CGRect(origin: .zero, size: frame.size), session: session)
         panel.contentView = bubble
-        bubble.onResize = { [weak self] size in self?.setSize(size) }
+        bubble.onResize = { [weak self] size in
+            self?.setSize(size)
+            self?.onResize?(size)
+        }
         bubble.currentSize = { [weak self] in self?.size ?? .medium }
 
         let session = session
@@ -58,6 +63,20 @@ final class WebcamBubble {
         let session = session
         DispatchQueue.global(qos: .userInitiated).async { session.stopRunning() }
         panel.dismiss()
+    }
+}
+
+enum WebcamSize: String, CaseIterable, Identifiable {
+    case small, medium, large
+
+    var id: String { rawValue }
+    var title: String { rawValue.capitalized }
+    var diameter: CGFloat {
+        switch self {
+        case .small: 120
+        case .medium: 180
+        case .large: 260
+        }
     }
 }
 
