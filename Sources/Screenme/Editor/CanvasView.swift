@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 
 /// The editing surface. It owns zoom and pan, turns mouse input into annotation changes, draws the
 /// selection chrome and crop overlay, and hosts the inline text editor.
@@ -28,11 +29,10 @@ final class CanvasView: NSView, NSTextViewDelegate {
     private var gesture = Gesture.none
     private var marquee: CGRect?
 
-    private var textView: NSTextView?
+    private var textView: InlineTextView?
     private var editingID: UUID?
     /// The document before the inline edit began, including before a new label was added.
     private var textCheckpoint: EditorController.Checkpoint?
-    var isEditingText: Bool { textView != nil }
 
     private var unit: CGFloat { controller.unit }
     private var minZoom: CGFloat { 0.04 / unit }
@@ -51,7 +51,45 @@ final class CanvasView: NSView, NSTextViewDelegate {
     override var isOpaque: Bool { true }
     override var acceptsFirstResponder: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-    override func keyDown(with event: NSEvent) {}
+
+    /// The canvas starts with the keyboard focus, so tool keys work as soon as the window opens.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        window?.makeFirstResponder(self)
+    }
+
+    // MARK: Keyboard
+
+    /// Plain keys, while the canvas has focus. A focused control or the inline text editor keeps its own
+    /// keys; Cmd shortcuts are the window's.
+    override func keyDown(with event: NSEvent) {
+        let mods = event.modifierFlags.intersection([.command, .shift, .option, .control])
+        guard !mods.contains(.command) else { return }
+        let step: CGFloat = mods.contains(.shift) ? 10 : 1
+        switch Int(event.keyCode) {
+        case kVK_Space where mods.isDisjoint(with: [.control, .option]):
+            spaceDown = true
+        case kVK_Return, kVK_ANSI_KeypadEnter:
+            if controller.mode.crop != nil { controller.applyCrop() } else { controller.save() }
+        case kVK_Escape:
+            if controller.mode.crop != nil { controller.cancelCrop() } else if !controller.selection.isEmpty { controller.select([]) }
+        case kVK_Delete, kVK_ForwardDelete:
+            controller.deleteSelection()
+        case kVK_LeftArrow: controller.nudge(dx: -step, dy: 0)
+        case kVK_RightArrow: controller.nudge(dx: step, dy: 0)
+        case kVK_DownArrow: controller.nudge(dx: 0, dy: step)
+        case kVK_UpArrow: controller.nudge(dx: 0, dy: -step)
+        default:
+            let key = event.charactersIgnoringModifiers?.lowercased() ?? ""
+            if mods.isEmpty || mods == .shift, let choice = ToolChoice.all.first(where: { $0.key == key }) {
+                controller.choose(choice)
+            }
+        }
+    }
+
+    override func keyUp(with event: NSEvent) {
+        if Int(event.keyCode) == kVK_Space { spaceDown = false }
+    }
 
     // MARK: Geometry
 
@@ -518,7 +556,8 @@ final class CanvasView: NSView, NSTextViewDelegate {
         finishTextEditing()
         guard let a = annotation(withID: id), case .label(_, let text) = a.shape else { return }
         textCheckpoint = before ?? controller.checkpoint()
-        let tv = NSTextView(frame: .zero)
+        let tv = InlineTextView(frame: .zero)
+        tv.onFinish = { [weak self] in self?.finishTextEditing() }
         tv.drawsBackground = false
         tv.isRichText = false
         tv.allowsUndo = true
@@ -586,5 +625,20 @@ final class CanvasView: NSView, NSTextViewDelegate {
 
     func textDidEndEditing(_ notification: Notification) {
         finishTextEditing()
+    }
+}
+
+/// The inline label editor. Escape or Cmd-Return finishes the edit.
+private final class InlineTextView: NSTextView {
+    var onFinish: () -> Void = {}
+
+    override func keyDown(with event: NSEvent) {
+        let mods = event.modifierFlags.intersection([.command, .shift, .option, .control])
+        let code = Int(event.keyCode)
+        if code == kVK_Escape || (mods == .command && (code == kVK_Return || code == kVK_ANSI_KeypadEnter)) {
+            onFinish()
+            return
+        }
+        super.keyDown(with: event)
     }
 }

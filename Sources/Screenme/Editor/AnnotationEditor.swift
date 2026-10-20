@@ -27,7 +27,7 @@ enum AnnotationEditor {
     }
 }
 
-/// Owns the window, its toolbar and its keyboard shortcuts for one capture.
+/// Owns the window, its toolbar and its Cmd shortcuts for one capture.
 @MainActor
 private final class EditorWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
     private let controller: EditorController
@@ -73,7 +73,7 @@ private final class EditorWindow: NSObject, NSWindowDelegate, NSToolbarDelegate 
         window.toolbarStyle = .unified
         window.center()
 
-        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] event in
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
             let consumed = MainActor.assumeIsolated { self.handle(event) }
             return consumed ? nil : event
@@ -104,14 +104,40 @@ private final class EditorWindow: NSObject, NSWindowDelegate, NSToolbarDelegate 
 
     /// Returns true when the event was used and must not travel on.
     private func handle(_ event: NSEvent) -> Bool {
-        guard event.window === window else { return false }
+        guard event.window === window, let action = command(for: event) else { return false }
+        action()
+        return true
+    }
+
+    /// The Cmd shortcuts. A menu bar app has no Edit menu to hold them, so this table stands in for one.
+    /// While a text field has focus, the standard edit commands go to it through the responder chain.
+    /// Plain keys are not here: the canvas handles them in `keyDown` when it has focus.
+    private func command(for event: NSEvent) -> (() -> Void)? {
+        let mods = event.modifierFlags.intersection([.command, .shift, .option, .control])
+        guard mods.contains(.command) else { return nil }
+        let shift = mods.contains(.shift), option = mods.contains(.option)
         let typing = window.firstResponder is NSText
-        if event.keyCode == 49, !typing, event.modifierFlags.intersection([.command, .control, .option]).isEmpty {
-            controller.canvas?.spaceDown = event.type == .keyDown
-            return true
+        let c = controller
+        let window = window
+        func send(_ action: Selector) -> () -> Void { { NSApp.sendAction(action, to: nil, from: nil) } }
+
+        switch event.charactersIgnoringModifiers?.lowercased() ?? "" {
+        case "z": return typing ? send(shift ? Selector(("redo:")) : Selector(("undo:"))) : (shift ? c.redo : c.undo)
+        case "x": return typing ? send(#selector(NSText.cut(_:))) : nil
+        case "c": return typing ? send(#selector(NSText.copy(_:))) : { if !c.copySelection() { c.copyImage() } }
+        case "v": return typing ? send(#selector(NSText.paste(_:))) : { _ = c.pasteAnnotations() }
+        case "a": return typing ? send(#selector(NSText.selectAll(_:))) : c.selectAll
+        case "s": return shift ? c.saveAs : c.save
+        case "d": return c.duplicateSelection
+        case "]": return { c.arrange(option ? .front : .forward) }
+        case "[": return { c.arrange(option ? .back : .backward) }
+        case "=", "+": return c.zoomIn
+        case "-": return c.zoomOut
+        case "0": return c.zoomFit
+        case "1": return c.zoomActual
+        case "w": return { window.performClose(nil) }
+        default: return nil
         }
-        if event.type == .keyUp { return false }
-        return controller.handleKeyDown(event)
     }
 
     // MARK: NSWindowDelegate
