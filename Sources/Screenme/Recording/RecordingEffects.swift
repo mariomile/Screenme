@@ -19,9 +19,8 @@ final class RecordingEffects {
     init(frame: CGRect, highlightClicks: Bool, showKeystrokes: Bool) {
         self.highlightClicks = highlightClicks
         self.showKeystrokes = showKeystrokes
-        panel = FloatingPanel(frame: frame, level: .popUpMenu, hasShadow: false)
-        panel.ignoresMouseEvents = true
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        panel = FloatingPanel(frame: frame, level: .popUpMenu, hasShadow: false, ignoresMouse: true,
+                              collectionBehavior: [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle])
         root = NSView(frame: CGRect(origin: .zero, size: frame.size))
         root.wantsLayer = true
         root.layer?.masksToBounds = true
@@ -223,8 +222,7 @@ final class AreaDimmer {
     private let panel: FloatingPanel
 
     init(area: CGRect, screen: NSScreen) {
-        panel = FloatingPanel(frame: screen.frame, level: .floating, hasShadow: false)
-        panel.ignoresMouseEvents = true
+        panel = FloatingPanel(frame: screen.frame, level: .floating, hasShadow: false, ignoresMouse: true)
         panel.contentView = DimView(frame: CGRect(origin: .zero, size: screen.frame.size),
                                     hole: area.offsetBy(dx: -screen.frame.minX, dy: -screen.frame.minY))
     }
@@ -276,8 +274,7 @@ final class RecordingOutline {
 
     init(frame: CGRect, insideFrame: Bool) {
         let rect = insideFrame ? frame : frame.insetBy(dx: -3, dy: -3)
-        panel = FloatingPanel(frame: rect, level: .statusBar, hasShadow: false)
-        panel.ignoresMouseEvents = true
+        panel = FloatingPanel(frame: rect, level: .statusBar, hasShadow: false, ignoresMouse: true)
         let content = NSView(frame: CGRect(origin: .zero, size: rect.size))
         content.wantsLayer = true
         border.frame = content.bounds

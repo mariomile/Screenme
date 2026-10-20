@@ -229,7 +229,7 @@ final class RecordingController {
         alert.addButton(withTitle: "Discard")
         alert.addButton(withTitle: "Keep Recording")
         alert.buttons[0].hasDestructiveAction = true
-        NSApp.activate(ignoringOtherApps: true)
+        FocusKeeper.activateSelf()
         if alert.runModal() == .alertFirstButtonReturn {
             Task { await discard() }
         } else if !wasPaused, active === recording {

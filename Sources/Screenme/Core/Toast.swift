@@ -4,7 +4,7 @@ import SwiftUI
 /// A short HUD message at the bottom-center of the screen under the mouse ("Text copied").
 @MainActor
 enum Toast {
-    private static var panel: NSPanel?
+    private static var panel: FloatingPanel?
     private static var hideTask: Task<Void, Never>?
 
     static func show(_ text: String, symbol: String = "checkmark.circle.fill", duration: Double = 1.6) {
@@ -13,20 +13,15 @@ enum Toast {
         let size = view.fittingSize
         let screen = NSScreen.underMouse.visibleFrame
         let frame = CGRect(x: screen.midX - size.width / 2, y: screen.minY + 80, width: size.width, height: size.height)
-        let panel = NSPanel(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-        panel.level = .statusBar
-        panel.isOpaque = false
-        panel.backgroundColor = .clear
-        panel.ignoresMouseEvents = true
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        let panel = FloatingPanel(frame: frame, level: .statusBar, ignoresMouse: true)
         panel.contentView = view
-        panel.orderFrontRegardless()
+        panel.present()
         self.panel = panel
         hideTask?.cancel()
         hideTask = Task {
             try? await Task.sleep(for: .seconds(duration))
             guard !Task.isCancelled else { return }
-            panel.orderOut(nil)
+            panel.dismiss()
         }
     }
 }
@@ -60,7 +55,7 @@ final class WindowPresenter {
                              transparentTitlebar: Bool = true,
                              @ViewBuilder content: () -> Content) -> NSWindow {
         if let window = windows[id] {
-            NSApp.activate(ignoringOtherApps: true)
+            FocusKeeper.activateSelf()
             window.makeKeyAndOrderFront(nil)
             return window
         }
@@ -79,7 +74,7 @@ final class WindowPresenter {
         }
         // A menu bar app needs a regular activation policy for windows to take focus and show in Cmd-Tab.
         NSApp.setActivationPolicy(.regular)
-        NSApp.activate(ignoringOtherApps: true)
+        FocusKeeper.activateSelf()
         window.makeKeyAndOrderFront(nil)
         return window
     }

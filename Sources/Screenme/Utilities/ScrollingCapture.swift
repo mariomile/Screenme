@@ -50,7 +50,7 @@ private final class ScrollSession: ObservableObject {
     private let engine = ScrollStitchEngine()
     private var stream: SCStream?
     private var sink: ScrollFrameSink?
-    private var panel: NSPanel?
+    private var panel: FloatingPanel?
     private var continuation: CheckedContinuation<CGImage?, Never>?
     private var autoTask: Task<Void, Never>?
     private var lastAdvance = Date()
@@ -145,16 +145,8 @@ private final class ScrollSession: ObservableObject {
     }
 
     private func close(with image: CGImage?) {
-        let panel = panel
-        self.panel = nil
-        if let panel {
-            NSAnimationContext.runAnimationGroup({ context in
-                context.duration = 0.15
-                panel.animator().alphaValue = 0
-            }, completionHandler: {
-                MainActor.assumeIsolated { panel.orderOut(nil) }
-            })
-        }
+        panel?.dismiss()
+        panel = nil
         continuation?.resume(returning: image)
         continuation = nil
     }
@@ -243,23 +235,10 @@ private final class ScrollSession: ObservableObject {
         let top = min(frame.maxY, visible.maxY - 12)
         let y = max(visible.minY + 12, top - height)
 
-        let panel = NSPanel(contentRect: CGRect(x: x, y: y, width: size.width, height: height),
-                            styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-        panel.level = .statusBar
-        panel.isOpaque = false
-        panel.backgroundColor = .clear
-        panel.hasShadow = true
+        let panel = FloatingPanel(frame: CGRect(x: x, y: y, width: size.width, height: height), level: .statusBar)
         panel.isMovableByWindowBackground = true
-        panel.hidesOnDeactivate = false
-        panel.isReleasedWhenClosed = false
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.contentView = NSHostingView(rootView: ScrollPanelView(session: self))
-        panel.alphaValue = 0
-        panel.orderFrontRegardless()
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.18
-            panel.animator().alphaValue = 1
-        }
+        panel.present()
         self.panel = panel
     }
 }

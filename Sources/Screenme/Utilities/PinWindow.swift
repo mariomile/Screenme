@@ -102,20 +102,11 @@ private final class PinWindowController: NSObject {
 
         // Not a non-activating panel: a click must activate Screenme, or the pin never gets Esc, ⌘C, ⌘W and the zoom keys.
         // Showing it does not activate anything, so a new pin never takes focus from the user's app.
-        panel = PinFloatingPanel(contentRect: CGRect(origin: origin, size: size), styleMask: [.borderless],
-                         backing: .buffered, defer: false)
+        panel = PinFloatingPanel(frame: CGRect(origin: origin, size: size), level: .floating, canBeKey: true,
+                                 activatesOnClick: true, collectionBehavior: [.canJoinAllSpaces, .fullScreenAuxiliary])
         imageView = PinContentView(image: image, frame: CGRect(origin: .zero, size: size))
         super.init()
 
-        panel.level = .floating
-        panel.isOpaque = false
-        panel.backgroundColor = .clear
-        panel.hasShadow = true
-        panel.hidesOnDeactivate = false
-        panel.isReleasedWhenClosed = false
-        panel.becomesKeyOnlyIfNeeded = false
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        panel.animationBehavior = .none
         panel.contentView = imageView
         panel.keyHandler = { [weak self] event in self?.handleKey(event) ?? false }
 
@@ -126,32 +117,13 @@ private final class PinWindowController: NSObject {
 
     func present() {
         let final = panel.frame
-        let inset = final.insetBy(dx: final.width * 0.03, dy: final.height * 0.03)
-        panel.alphaValue = 0
-        panel.setFrame(inset, display: false)
-        panel.orderFrontRegardless()
-        panel.makeKey()
+        panel.present(makeKey: true, from: final.insetBy(dx: final.width * 0.03, dy: final.height * 0.03))
         panel.makeFirstResponder(imageView)
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.2
-            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            panel.animator().setFrame(final, display: true)
-            panel.animator().alphaValue = 1
-        } completionHandler: { [weak self] in
-            MainActor.assumeIsolated { self?.panel.invalidateShadow() }
-        }
     }
 
     func close(animated: Bool = true) {
-        let panel = panel
         PinWindow.closed(self)
-        guard animated else { panel.orderOut(nil); return }
-        NSAnimationContext.runAnimationGroup({ context in
-            context.duration = 0.14
-            panel.animator().alphaValue = 0
-        }, completionHandler: {
-            MainActor.assumeIsolated { panel.orderOut(nil) }
-        })
+        if animated { panel.dismiss() } else { panel.orderOut(nil) }
     }
 
     // MARK: Zoom
@@ -298,11 +270,8 @@ private final class PinWindowController: NSObject {
 
 // MARK: - Panel
 
-private final class PinFloatingPanel: NSPanel {
+private final class PinFloatingPanel: FloatingPanel {
     var keyHandler: ((NSEvent) -> Bool)?
-
-    override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { false }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if keyHandler?(event) == true { return true }

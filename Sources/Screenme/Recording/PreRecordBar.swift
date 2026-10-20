@@ -130,7 +130,7 @@ final class PreRecordUI {
         panel.contentView = view
         panel.present(makeKey: true)
         barPanel = panel
-        NSApp.activate(ignoringOtherApps: true)
+        FocusKeeper.activateSelf()
 
         installKeyMonitors()
         options.$webcam

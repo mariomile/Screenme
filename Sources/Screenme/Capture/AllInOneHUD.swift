@@ -60,27 +60,21 @@ private final class HUDModel: ObservableObject {
 
 // MARK: - Controller
 
-private final class HUDPanel: NSPanel {
-    override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { false }
-}
-
 @MainActor
 private final class HUDController {
     private let perform: (ShortcutAction) -> Void
     private let released: () -> Void
     private let model = HUDModel()
-    private let panel: HUDPanel
+    private let panel: FloatingPanel
     private var previousApp: NSRunningApplication?
     private var monitors: [Any] = []
     private var resignObserver: NSObjectProtocol?
     private var closing = false
-    private var finalFrame = CGRect.zero
 
     init(perform: @escaping (ShortcutAction) -> Void, released: @escaping () -> Void) {
         self.perform = perform
         self.released = released
-        panel = HUDPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        panel = FloatingPanel(frame: .zero, level: .statusBar, canBeKey: true, collectionBehavior: [.canJoinAllSpaces, .fullScreenAuxiliary])
         model.choose = { [weak self] index in self?.choose(index) }
     }
 
@@ -89,42 +83,12 @@ private final class HUDController {
 
         let host = NSHostingView(rootView: HUDBarView(model: model))
         let size = host.fittingSize
-        let radius: CGFloat = 22
-        let effect = NSVisualEffectView(frame: CGRect(origin: .zero, size: size))
-        effect.material = .popover
-        effect.blendingMode = .behindWindow
-        effect.state = .active
-        effect.maskImage = Self.roundedMask(radius: radius)
-        host.frame = effect.bounds
-        host.autoresizingMask = [.width, .height]
-        effect.addSubview(host)
-
-        panel.level = .statusBar
-        panel.isOpaque = false
-        panel.backgroundColor = .clear
-        panel.hasShadow = true
-        panel.isReleasedWhenClosed = false
-        panel.hidesOnDeactivate = false
-        panel.animationBehavior = .none
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        panel.contentView = effect
-
+        panel.contentView = host
         let screen = NSScreen.underMouse.visibleFrame
-        finalFrame = CGRect(x: (screen.midX - size.width / 2).rounded(), y: screen.minY + 72, width: size.width, height: size.height)
-        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        panel.setFrame(reduceMotion ? finalFrame : finalFrame.offsetBy(dx: 0, dy: -14), display: false)
-        panel.alphaValue = 0
-        panel.orderFrontRegardless()
-        panel.makeKeyAndOrderFront(nil)
-        panel.invalidateShadow()
+        let frame = CGRect(x: (screen.midX - size.width / 2).rounded(), y: screen.minY + 72, width: size.width, height: size.height)
+        panel.setFrame(frame, display: false)
+        panel.present(makeKey: true, from: frame.offsetBy(dx: 0, dy: -14))
         FocusKeeper.activateSelf()
-
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.2
-            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            panel.animator().alphaValue = 1
-            if !reduceMotion { panel.animator().setFrame(finalFrame, display: true) }
-        }
         withAnimation(.spring(response: 0.3, dampingFraction: 0.78)) { model.appeared = true }
 
         installMonitors()
@@ -199,28 +163,7 @@ private final class HUDController {
         monitors.removeAll()
         if let resignObserver { NotificationCenter.default.removeObserver(resignObserver) }
         resignObserver = nil
-        NSAnimationContext.runAnimationGroup({ context in
-            context.duration = 0.12
-            context.timingFunction = CAMediaTimingFunction(name: .easeIn)
-            panel.animator().alphaValue = 0
-        }, completionHandler: { [panel] in
-            MainActor.assumeIsolated {
-                panel.orderOut(nil)
-                completion()
-            }
-        })
-    }
-
-    private static func roundedMask(radius: CGFloat) -> NSImage {
-        let edge = radius * 2 + 1
-        let image = NSImage(size: NSSize(width: edge, height: edge), flipped: false) { rect in
-            NSColor.black.setFill()
-            NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).fill()
-            return true
-        }
-        image.capInsets = NSEdgeInsets(top: radius, left: radius, bottom: radius, right: radius)
-        image.resizingMode = .stretch
-        return image
+        panel.dismiss(completion: completion)
     }
 }
 
@@ -252,6 +195,7 @@ private struct HUDBarView: View {
         )
         .scaleEffect(model.appeared ? 1 : 0.95)
         .opacity(model.appeared ? 1 : 0)
+        .background(VisualEffectBackground(material: .popover).clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous)))
     }
 }
 

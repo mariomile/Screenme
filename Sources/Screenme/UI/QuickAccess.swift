@@ -189,10 +189,10 @@ final class QuickAccess {
         panel.canCreateDirectories = true
         if let type = UTType(filenameExtension: item.url.pathExtension) { panel.allowedContentTypes = [type] }
         // The save panel needs the app active; hand focus back to where it was afterwards.
-        let previous = NSWorkspace.shared.frontmostApplication
-        NSApp.activate(ignoringOtherApps: true)
+        let previous = FocusKeeper.frontmostExternal()
+        FocusKeeper.activateSelf()
         let response = panel.runModal()
-        if previous?.bundleIdentifier != Bundle.main.bundleIdentifier { previous?.activate() }
+        Task { await FocusKeeper.restore(previous) }
         guard response == .OK, let destination = panel.url else { return }
         do {
             if FileManager.default.fileExists(atPath: destination.path) { try FileManager.default.removeItem(at: destination) }
@@ -233,7 +233,7 @@ final class QuickAccess {
 @MainActor
 final class QuickAccessCard {
     let model: CardModel
-    let panel: CardPanel
+    let panel: FloatingPanel
     let size: CGSize
     let screen: NSScreen
     private unowned let owner: QuickAccess
@@ -260,7 +260,8 @@ final class QuickAccessCard {
 
         let inset = QuickAccess.inset
         let frame = CGRect(x: 0, y: 0, width: width + inset * 2, height: height + inset * 2)
-        panel = CardPanel(contentRect: frame)
+        panel = FloatingPanel(frame: frame, level: .statusBar, hasShadow: false,
+                              collectionBehavior: [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary])
         let root = CardRootView(frame: frame)
         let hosting = FirstMouseHostingView(rootView: QuickAccessCardView(model: model, size: size))
         hosting.frame = frame
@@ -382,24 +383,6 @@ final class QuickAccessCard {
 }
 
 // MARK: - Panel and views
-
-final class CardPanel: NSPanel {
-    init(contentRect: CGRect) {
-        super.init(contentRect: contentRect, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-        level = .statusBar
-        isOpaque = false
-        backgroundColor = .clear
-        hasShadow = false
-        hidesOnDeactivate = false
-        isReleasedWhenClosed = false
-        animationBehavior = .none
-        becomesKeyOnlyIfNeeded = true
-        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
-    }
-
-    override var canBecomeKey: Bool { false }
-    override var canBecomeMain: Bool { false }
-}
 
 /// Reports mouse enter and exit even though the panel is never key.
 private final class CardRootView: NSView {

@@ -147,7 +147,7 @@ final class CaptureCoordinator {
         if !state.screenRecordingGranted {
             alert.informativeText = "Screenme needs Screen Recording permission. Open Settings > Permissions to turn it on."
         }
-        NSApp.activate(ignoringOtherApps: true)
+        FocusKeeper.activateSelf()
         alert.runModal()
     }
 }

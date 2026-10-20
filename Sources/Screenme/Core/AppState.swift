@@ -64,7 +64,7 @@ final class AppState: ObservableObject {
         panel.canCreateDirectories = true
         panel.directoryURL = saveDirectory
         panel.prompt = "Choose"
-        NSApp.activate(ignoringOtherApps: true)
+        FocusKeeper.activateSelf()
         if panel.runModal() == .OK, let url = panel.url {
             Prefs[Pref.saveDirectory] = url.path
             objectWillChange.send()

@@ -113,88 +113,6 @@ enum InputDevices {
     }
 }
 
-// MARK: - Panels
-
-/// A borderless floating panel that never activates the app it belongs to.
-final class FloatingPanel: NSPanel {
-    private let allowsKey: Bool
-
-    override var canBecomeKey: Bool { allowsKey }
-    override var canBecomeMain: Bool { false }
-
-    init(frame: CGRect, level: NSWindow.Level, canBeKey: Bool = false, hasShadow: Bool = true) {
-        allowsKey = canBeKey
-        super.init(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-        self.level = level
-        isOpaque = false
-        backgroundColor = .clear
-        self.hasShadow = hasShadow
-        isReleasedWhenClosed = false
-        hidesOnDeactivate = false
-        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
-    }
-
-    /// Fades the panel in.
-    func present(makeKey: Bool = false) {
-        alphaValue = 0
-        if makeKey { makeKeyAndOrderFront(nil) } else { orderFrontRegardless() }
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.18
-            animator().alphaValue = 1
-        }
-    }
-
-    /// Fades the panel out and removes it.
-    func dismiss() {
-        NSAnimationContext.runAnimationGroup({ context in
-            context.duration = 0.15
-            animator().alphaValue = 0
-        }, completionHandler: { [weak self] in
-            MainActor.assumeIsolated { self?.orderOut(nil) }
-        })
-    }
-}
-
-/// Dark, blurred background used by every recording control.
-struct VisualEffectBackground: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
-        view.material = .hudWindow
-        view.blendingMode = .behindWindow
-        view.state = .active
-        return view
-    }
-
-    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
-}
-
-// MARK: - Placement
-
-enum Placement {
-    /// The screen a target lives on.
-    static func screen(for target: CaptureTarget) -> NSScreen {
-        switch target {
-        case .area(_, let screen), .display(let screen): screen
-        case .window: NSScreen.at(CGPoint(x: target.cocoaFrame.midX, y: target.cocoaFrame.midY))
-        }
-    }
-
-    /// Puts a bar of `size` just below `area`, or above it, or inside its bottom edge when neither fits.
-    static func barFrame(size: CGSize, near area: CGRect, on screen: NSScreen, gap: CGFloat = 14) -> CGRect {
-        let visible = screen.visibleFrame
-        var y = area.minY - gap - size.height
-        if y < visible.minY + 8 {
-            y = area.maxY + gap
-            if y + size.height > visible.maxY - 8 {
-                y = max(visible.minY + 8, area.minY + 20)
-            }
-        }
-        var x = area.midX - size.width / 2
-        x = min(max(x, visible.minX + 8), visible.maxX - size.width - 8)
-        return CGRect(x: x, y: y, width: size.width, height: size.height)
-    }
-}
-
 // MARK: - Sample buffer timing
 
 extension CMSampleBuffer {
@@ -242,8 +160,7 @@ final class ProgressHUD {
         let size = view.fittingSize
         let visible = NSScreen.underMouse.visibleFrame
         let frame = CGRect(x: visible.midX - size.width / 2, y: visible.minY + 80, width: size.width, height: size.height)
-        let panel = FloatingPanel(frame: frame, level: .statusBar)
-        panel.ignoresMouseEvents = true
+        let panel = FloatingPanel(frame: frame, level: .statusBar, ignoresMouse: true)
         panel.contentView = view
         panel.present()
         self.panel = panel

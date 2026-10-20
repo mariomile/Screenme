@@ -18,7 +18,7 @@ enum AnnotationEditor {
             let alert = NSAlert()
             alert.messageText = "Screenme could not open this image."
             alert.informativeText = item.url.lastPathComponent
-            NSApp.activate(ignoringOtherApps: true)
+            FocusKeeper.activateSelf()
             alert.runModal()
             return
         }
@@ -89,7 +89,7 @@ private final class EditorWindow: NSObject, NSWindowDelegate, NSToolbarDelegate 
     }
 
     func bringToFront() {
-        NSApp.activate(ignoringOtherApps: true)
+        FocusKeeper.activateSelf()
         window.makeKeyAndOrderFront(nil)
     }
 

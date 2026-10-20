@@ -76,7 +76,7 @@ struct SettingsView: View {
         HStack(spacing: 0) {
             sidebar
                 .frame(width: 214)
-                .background(SidebarMaterial().ignoresSafeArea())
+                .background(VisualEffectBackground(material: .sidebar, state: .followsWindowActiveState).ignoresSafeArea())
             Divider().ignoresSafeArea()
             VStack(alignment: .leading, spacing: 0) {
                 Text(tab.title)
@@ -599,17 +599,4 @@ private struct AboutPane: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
-}
-
-/// The translucent sidebar background used by System Settings.
-private struct SidebarMaterial: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
-        view.material = .sidebar
-        view.blendingMode = .behindWindow
-        view.state = .followsWindowActiveState
-        return view
-    }
-
-    func updateNSView(_ view: NSVisualEffectView, context: Context) {}
 }

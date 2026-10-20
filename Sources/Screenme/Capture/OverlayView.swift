@@ -2,23 +2,13 @@ import AppKit
 import QuartzCore
 
 /// One borderless panel per display. It never draws anything itself: `OverlayView` is layer based.
-final class OverlayPanel: NSPanel {
+final class OverlayPanel: FloatingPanel {
     init(screen: NSScreen) {
-        super.init(contentRect: screen.frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-        level = .screenSaver
-        isOpaque = false
-        backgroundColor = .clear
-        hasShadow = false
-        isReleasedWhenClosed = false
-        hidesOnDeactivate = false
+        super.init(frame: screen.frame, level: .screenSaver, canBeKey: true, hasShadow: false,
+                   collectionBehavior: [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle])
         acceptsMouseMovedEvents = true
-        animationBehavior = .none
-        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         setFrame(screen.frame, display: false)
     }
-
-    override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { false }
     /// Keep the panel over the menu bar instead of letting AppKit push it down.
     override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect { frameRect }
 }

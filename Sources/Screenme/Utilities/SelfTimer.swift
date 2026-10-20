@@ -38,7 +38,7 @@ private final class SelfTimerSession {
     private let frame: CGRect
     private var completion: ((Bool) -> Void)?
     private let model = SelfTimerModel()
-    private var panel: NSPanel?
+    private var panel: FloatingPanel?
     private var timer: Timer?
     private var remaining: Int
 
@@ -52,20 +52,10 @@ private final class SelfTimerSession {
     func start() {
         let side: CGFloat = 220
         let rect = CGRect(x: frame.midX - side / 2, y: frame.midY - side / 2, width: side, height: side)
-        let panel = NSPanel(contentRect: rect, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-        panel.level = .screenSaver
-        panel.isOpaque = false
-        panel.backgroundColor = .clear
-        panel.hasShadow = false
-        panel.ignoresMouseEvents = true
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
+        let panel = FloatingPanel(frame: rect, level: .screenSaver, hasShadow: false, ignoresMouse: true,
+                                  collectionBehavior: [.canJoinAllSpaces, .fullScreenAuxiliary, .transient])
         panel.contentView = NSHostingView(rootView: SelfTimerView(model: model))
-        panel.alphaValue = 0
-        panel.orderFrontRegardless()
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.15
-            panel.animator().alphaValue = 1
-        }
+        panel.present()
         self.panel = panel
 
         SelfTimerEscapeKey.register()
@@ -104,16 +94,10 @@ private final class SelfTimerSession {
         // Fade out and make sure the window is off screen before the capture starts.
         guard let panel else { completion(completed); return }
         self.panel = nil
-        NSAnimationContext.runAnimationGroup({ context in
-            context.duration = 0.12
-            panel.animator().alphaValue = 0
-        }, completionHandler: {
-            MainActor.assumeIsolated {
-                panel.orderOut(nil)
-                // Give the window server a beat to drop the window from the next frame.
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { completion(completed) }
-            }
-        })
+        panel.dismiss {
+            // Give the window server a beat to drop the window from the next frame.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { completion(completed) }
+        }
     }
 }
 

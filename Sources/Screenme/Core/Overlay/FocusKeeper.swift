@@ -5,7 +5,7 @@ struct EventBox: @unchecked Sendable {
     let event: NSEvent
 }
 
-/// Activation and pointer helpers shared by the selection overlay and the All-in-One bar.
+/// Activation and pointer helpers for every overlay, alert and save panel.
 /// Screenme is an accessory app: to receive keys it has to take focus, and to leave no trace
 /// it has to hand focus back to whoever had it.
 @MainActor
@@ -17,16 +17,10 @@ enum FocusKeeper {
         return front
     }
 
-    /// Brings Screenme forward so its panels receive keyboard events.
+    /// Brings Screenme forward so its panels, alerts and save panels receive keyboard events.
+    /// Not the cooperative `activate()`: macOS can decline that when a global hot key woke Screenme.
     static func activateSelf() {
-        NSApp.activate()
-        // Cooperative activation can be declined when a global hot key launched us.
-        // The older entry point is still honored and is looked up at runtime to avoid the deprecation.
-        let selector = NSSelectorFromString("activateIgnoringOtherApps:")
-        if NSApp.responds(to: selector), let method = NSApp.method(for: selector) {
-            typealias Activate = @convention(c) (AnyObject, Selector, Bool) -> Void
-            unsafeBitCast(method, to: Activate.self)(NSApp, selector, true)
-        }
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     /// Gives focus back to `app` and waits briefly until macOS has switched, so a capture taken
