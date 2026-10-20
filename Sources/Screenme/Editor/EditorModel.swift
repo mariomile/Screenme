@@ -211,6 +211,16 @@ struct EditState: Equatable {
 }
 
 extension EditState {
+    /// The dim only shows around spotlights. On a document without one, a different dim is the same picture:
+    /// moving the Dim slider before drawing the first spotlight is not an edit, an undo step or a reason to ask to save.
+    static func == (a: EditState, b: EditState) -> Bool {
+        a.annotations == b.annotations && a.cropRect == b.cropRect && a.outputScale == b.outputScale
+            && a.canvasFill == b.canvasFill && a.background == b.background
+            && (a.spotlightDim == b.spotlightDim || !a.annotations.contains { $0.kind == .spotlight })
+    }
+}
+
+extension EditState {
     /// Where everything lands in the exported picture.
     var exportLayout: Layout { Layout.make(crop: cropRect, background: background) }
 }
