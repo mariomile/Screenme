@@ -2,14 +2,6 @@ import AppKit
 import AVFoundation
 import SwiftUI
 
-struct CaptureItem: Identifiable {
-    enum Kind { case image, video }
-
-    let id = UUID()
-    var url: URL
-    let kind: Kind
-}
-
 /// The overlay shown after every capture: drag it into any app, or copy, save, trim, export.
 @MainActor
 final class QuickAccess {
@@ -83,7 +75,7 @@ private struct QuickAccessView: View {
                 }
                 if item.kind == .video {
                     HStack(spacing: 8) {
-                        pill("Trim") { Trimmer.open(item.url) { item.url = $0 } }
+                        pill("Edit") { VideoEditor.open(item) }
                         pill("GIF") { exportGIF() }
                     }
                 }

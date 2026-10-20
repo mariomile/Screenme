@@ -160,3 +160,28 @@ private final class SelectionView: NSView {
         }
     }
 }
+
+enum SelectionMode { case screenshot, window, recording, scrolling, text }
+
+/// What the picker returns. `frozenImage` is set when the screen was frozen during selection:
+/// it is already cropped to the target and should be used instead of a fresh capture.
+struct SelectionResult {
+    let target: CaptureTarget
+    let frozenImage: CGImage?
+}
+
+extension SelectionOverlay {
+    private static var active: SelectionOverlay?
+
+    /// Shows the picker and returns the user's choice, or nil when cancelled.
+    static func select(_ mode: SelectionMode) async -> SelectionResult? {
+        guard active == nil, let overlay = try? await make() else { return nil }
+        active = overlay
+        return await withCheckedContinuation { continuation in
+            overlay.begin { target in
+                active = nil
+                continuation.resume(returning: target.map { SelectionResult(target: $0, frozenImage: nil) })
+            }
+        }
+    }
+}

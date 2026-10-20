@@ -23,3 +23,9 @@ Context of the questions: Q1 A = fragmentation, uses 3-4 apps (Shottr, Xnapper, 
 > Facciamo repo
 
 Context: Q1 A = frame accepted. Q2 A = build anyway, owning the tool is part of the value (preference, not evidence); CleanShot trial runs in parallel as benchmark. Q3 B = build layer 1 now and use it for 10 working days as the test. Q4 B = video in the first round, recording with minimal editing (trim).
+
+## Full product request (2026-10-20)
+
+> Ma non c'è un puntatore per quando si fa lo screen, non c'è un cazzo. Hai capito che devi essere la copia di cleanshoot? Porca troia fai un prodotto completo. Chiedimi se non sai ma devi fare un prodotto super completo
+
+Answers: shortcuts = "Scorciatoie di sistema + la possibilità di personalizzarle e vedere già quelle in uso"; cloud = excluded; Studio Mode (auto-zoom editor) = later; signing = Mario creates an Apple Development certificate.

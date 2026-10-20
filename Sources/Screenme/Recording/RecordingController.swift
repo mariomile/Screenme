@@ -4,7 +4,9 @@ import ScreenCaptureKit
 
 /// Screen recording to MP4 through ScreenCaptureKit's built-in recording output.
 @MainActor
-final class Recorder: NSObject, SCStreamDelegate, SCRecordingOutputDelegate {
+final class RecordingController: NSObject, SCStreamDelegate, SCRecordingOutputDelegate {
+    static let shared = RecordingController()
+
     private var stream: SCStream?
     private var url: URL?
     private var outline: NSPanel?
@@ -30,22 +32,24 @@ final class Recorder: NSObject, SCStreamDelegate, SCRecordingOutputDelegate {
         try await stream.startCapture()
         self.stream = stream
         self.url = url
+        AppState.shared.isRecording = true
         showOutline(around: target.cocoaFrame)
     }
 
     /// Stops the stream and returns the finished file once it is fully written.
     @MainActor
-    func stop() async -> URL? {
+    func stop() async -> CaptureItem? {
         guard let stream else { return nil }
         await withCheckedContinuation { continuation in
             finished = continuation
             Task { try? await stream.stopCapture() }
         }
         self.stream = nil
+        AppState.shared.isRecording = false
         outline?.orderOut(nil)
         outline = nil
         guard let url, FileManager.default.fileExists(atPath: url.path) else { return nil }
-        return url
+        return CaptureItem(url: url, kind: .video)
     }
 
     nonisolated func recordingOutputDidFinishRecording(_ recordingOutput: SCRecordingOutput) {

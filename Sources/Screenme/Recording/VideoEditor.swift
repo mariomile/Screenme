@@ -90,3 +90,13 @@ enum GIFExporter {
         return output
     }
 }
+
+/// Opens a recording for editing. Stub: trim only; the full editor replaces this.
+@MainActor
+enum VideoEditor {
+    static func open(_ item: CaptureItem) {
+        Trimmer.open(item.url) { url in
+            CaptureCoordinator.shared.afterCapture(CaptureItem(url: url, kind: .video))
+        }
+    }
+}

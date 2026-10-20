@@ -17,11 +17,13 @@ extension NSScreen {
 enum ScreenmeError: LocalizedError {
     case displayNotFound
     case recordingFailed
+    case nothingToCapture
 
     var errorDescription: String? {
         switch self {
         case .displayNotFound: "Screenme could not find the display to capture."
         case .recordingFailed: "The recording could not be saved."
+        case .nothingToCapture: "There is no previous area to capture yet."
         }
     }
 }
@@ -29,17 +31,20 @@ enum ScreenmeError: LocalizedError {
 extension CaptureTarget {
     /// Builds the ScreenCaptureKit filter and configuration for this target.
     /// Screenme's own windows (overlays, Quick Access) are always excluded.
-    func streamSetup() async throws -> (SCContentFilter, SCStreamConfiguration) {
+    /// `retina: false` produces 1x output (one pixel per point).
+    func streamSetup(showsCursor: Bool = false, retina: Bool = true) async throws -> (SCContentFilter, SCStreamConfiguration) {
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
         let ownApps = content.applications.filter { $0.bundleIdentifier == Bundle.main.bundleIdentifier }
         let config = SCStreamConfiguration()
-        config.showsCursor = false
+        config.showsCursor = showsCursor
+        config.ignoreShadowsSingleWindow = !Prefs[Pref.windowShadow]
 
         switch self {
         case .window(let window):
             let filter = SCContentFilter(desktopIndependentWindow: window)
-            config.width = Int(filter.contentRect.width * CGFloat(filter.pointPixelScale))
-            config.height = Int(filter.contentRect.height * CGFloat(filter.pointPixelScale))
+            let windowScale = retina ? CGFloat(filter.pointPixelScale) : 1
+            config.width = Int(filter.contentRect.width * windowScale)
+            config.height = Int(filter.contentRect.height * windowScale)
             return (filter, config)
 
         case .display(let screen), .area(_, let screen):
@@ -47,7 +52,7 @@ extension CaptureTarget {
                 throw ScreenmeError.displayNotFound
             }
             let filter = SCContentFilter(display: display, excludingApplications: ownApps, exceptingWindows: [])
-            let scale = screen.backingScaleFactor
+            let scale = retina ? screen.backingScaleFactor : 1
             var size = screen.frame.size
             if case .area(let rect, _) = self {
                 // ScreenCaptureKit wants display-local points with a top-left origin.
