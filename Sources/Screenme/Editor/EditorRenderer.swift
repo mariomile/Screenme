@@ -39,7 +39,7 @@ enum EditorRenderer {
         }
         drawBase(source, ctx: ctx)
         for a in state.annotations where a.kind.isRedaction { drawRedaction(a, source: source, unit: unit, ctx: ctx) }
-        drawSpotlights(state.annotations, crop: layout.cropRect, ctx: ctx)
+        drawSpotlights(state.annotations, dim: state.spotlightDim, crop: layout.cropRect, ctx: ctx)
         ctx.restoreGState()
 
         // Annotations may spill past the image onto the background. Without one the image fills the canvas.
@@ -158,12 +158,12 @@ enum EditorRenderer {
         }
     }
 
-    private static func drawSpotlights(_ annotations: [Annotation], crop: CGRect, ctx: CGContext) {
+    private static func drawSpotlights(_ annotations: [Annotation], dim: Double, crop: CGRect, ctx: CGContext) {
         let spots = annotations.filter { $0.kind == .spotlight && $0.rect.width >= 1 && $0.rect.height >= 1 }
-        guard let first = spots.first else { return }
+        guard !spots.isEmpty else { return }
         ctx.saveGState()
         ctx.beginTransparencyLayer(auxiliaryInfo: nil)
-        ctx.setFillColor(CGColor(gray: 0, alpha: CGFloat(first.style.dim)))
+        ctx.setFillColor(CGColor(gray: 0, alpha: CGFloat(dim)))
         ctx.fill(crop.insetBy(dx: -4, dy: -4))
         ctx.setBlendMode(.clear)
         for s in spots {

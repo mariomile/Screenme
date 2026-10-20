@@ -45,6 +45,7 @@ final class EditorController: ObservableObject {
         self.source = source
         var initial = EditState(cropRect: source.bounds)
         initial.background = EditorStore.background()
+        initial.spotlightDim = Prefs[Pref.editorSpotlightDim]
         state = initial
         savedState = initial
         styles = Dictionary(uniqueKeysWithValues: ToolKind.allCases.filter(\.isAnnotation).map { ($0, EditorStore.style(for: $0)) })
@@ -172,12 +173,18 @@ final class EditorController: ObservableObject {
             for i in s.annotations.indices where ids.contains(s.annotations[i].id) {
                 change(&s.annotations[i].style)
             }
-            // One dim level for every spotlight keeps the overlay consistent.
-            if kind == .spotlight {
-                for i in s.annotations.indices where s.annotations[i].kind == .spotlight { s.annotations[i].style.dim = remembered.dim }
-            }
             state = s
         }
+        if !live { endChange() }
+        notify()
+    }
+
+    /// Sets the document's spotlight dim and remembers it for the next document.
+    /// Pass `live: true` for slider drags: the caller brackets them with `beginChange()` and `endChange()`.
+    func setSpotlightDim(_ dim: Double, live: Bool = false) {
+        if !live { beginChange() }
+        state.spotlightDim = dim
+        Prefs[Pref.editorSpotlightDim] = dim
         if !live { endChange() }
         notify()
     }

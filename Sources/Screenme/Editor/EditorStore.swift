@@ -8,6 +8,8 @@ extension Pref {
     }
     static let editorBackground = PrefKey(name: "editor.background", defaultValue: "")
     static let editorBackgroundPresets = PrefKey(name: "editor.backgroundPresets", defaultValue: "")
+    /// The spotlight dim level a new document starts with: the last one used.
+    static let editorSpotlightDim = PrefKey(name: "editor.spotlightDim", defaultValue: 0.6)
 }
 
 enum EditorStore {

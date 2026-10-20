@@ -435,7 +435,13 @@ private struct StyleControls: View {
                     Text("Ellipse").tag(true)
                 }
                 .pickerStyle(.segmented).labelsHidden().fixedSize()
-                HStack(spacing: 6) { caption("Dim"); slider(\.dim, in: 0.15...0.95) }
+                HStack(spacing: 6) {
+                    caption("Dim")
+                    Slider(value: Binding(get: { c.state.spotlightDim }, set: { c.setSpotlightDim($0, live: true) }), in: 0.15...0.95) { editing in
+                        if editing { c.beginChange() } else { c.endChange() }
+                    }
+                    .frame(width: 120)
+                }
             default:
                 EmptyView()
             }

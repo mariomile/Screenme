@@ -169,7 +169,6 @@ struct ToolStyle: Codable, Equatable {
     var intensity = 0.5
     // Spotlight
     var ellipseSpot = false
-    var dim = 0.6
 
     static func defaults(for kind: ToolKind) -> ToolStyle {
         var s = ToolStyle(color: Palette.red)
@@ -380,6 +379,8 @@ struct EditState: Equatable {
     /// Fills the part of the crop rect outside the image.
     var canvasFill = RGBA.white
     var background = BackgroundSettings()
+    /// How dark the picture gets around spotlights, 0...1. One level for the whole document.
+    var spotlightDim = 0.6
 }
 
 extension EditState {
