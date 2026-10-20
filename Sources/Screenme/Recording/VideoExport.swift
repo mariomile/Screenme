@@ -222,7 +222,7 @@ enum VideoTranscoder {
         guard let videoTrack = try await asset.loadTracks(withMediaType: .video).first else { throw ScreenmeError.recordingFailed }
         let audioTracks = settings.mute ? [] : try await asset.loadTracks(withMediaType: .audio)
         let nominal = try await videoTrack.load(.nominalFrameRate)
-        let fps = nominal > 1 ? min(max(Double(nominal), 24), 60) : 30
+        let fps = nominal > 1 ? Int(min(max(nominal, 24), 60).rounded()) : 30
 
         let job = try TranscodeJob(asset: asset, videoTrack: videoTrack, audioTracks: audioTracks, settings: settings, fps: fps, progress: progress)
         return try await withTaskCancellationHandler {
@@ -247,7 +247,7 @@ private final class TranscodeJob: @unchecked Sendable {
     private let progress: (@Sendable (Double) -> Void)?
 
     init(asset: AVURLAsset, videoTrack: AVAssetTrack, audioTracks: [AVAssetTrack], settings: VideoExportSettings,
-         fps: Double, progress: (@Sendable (Double) -> Void)?) throws {
+         fps: Int, progress: (@Sendable (Double) -> Void)?) throws {
         self.progress = progress
         start = settings.range.start
         duration = max(settings.range.duration.seconds, 0.04)
@@ -262,24 +262,9 @@ private final class TranscodeJob: @unchecked Sendable {
         reader.add(videoOutput)
 
         writer = try AVAssetWriter(outputURL: outputURL, fileType: .mp4)
-        let bitrate = settings.size.width * settings.size.height * fps * settings.quality.bitsPerPixel
-        videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: [
-            AVVideoCodecKey: AVVideoCodecType.h264,
-            AVVideoWidthKey: Int(settings.size.width),
-            AVVideoHeightKey: Int(settings.size.height),
-            AVVideoScalingModeKey: AVVideoScalingModeResizeAspectFill,
-            AVVideoColorPropertiesKey: [
-                AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,
-                AVVideoTransferFunctionKey: AVVideoTransferFunction_IEC_sRGB,
-                AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_709_2,
-            ],
-            AVVideoCompressionPropertiesKey: [
-                AVVideoAverageBitRateKey: Int(min(max(bitrate, 500_000), 80_000_000)),
-                AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
-                AVVideoMaxKeyFrameIntervalKey: Int(fps) * 2,
-                AVVideoExpectedSourceFrameRateKey: Int(fps),
-            ] as [String: Any],
-        ])
+        videoInput = AVAssetWriterInput(mediaType: .video,
+                                        outputSettings: H264.settings(width: Int(settings.size.width), height: Int(settings.size.height),
+                                                                      fps: fps, quality: settings.quality, realTime: false))
         videoInput.expectsMediaDataInRealTime = false
         writer.add(videoInput)
 

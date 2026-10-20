@@ -63,7 +63,7 @@ final class StreamRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
     private let width: Int
     private let height: Int
     private let fps: Int
-    private let bitsPerSecond: Int
+    private let quality: VideoQuality
     private let wantsSystemAudio: Bool
     private let wantsMicrophone: Bool
 
@@ -102,8 +102,7 @@ final class StreamRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
         self.width = width
         self.height = height
         self.fps = fps
-        let rate = Double(width * height) * Double(fps) * quality.bitsPerPixel
-        bitsPerSecond = Int(min(max(rate, 1_000_000), 80_000_000))
+        self.quality = quality
         wantsSystemAudio = systemAudio
         wantsMicrophone = microphone
         super.init()
@@ -270,7 +269,8 @@ final class StreamRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
 
         do {
             let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
-            let video = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings())
+            let video = AVAssetWriterInput(mediaType: .video, outputSettings: H264.settings(width: width, height: height, fps: fps,
+                                                                                         quality: quality, realTime: true))
             video.expectsMediaDataInRealTime = true
             writer.add(video)
             if let format = systemFormat, wantsSystemAudio {
@@ -299,26 +299,6 @@ final class StreamRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
         } catch {
             fail(error)
         }
-    }
-
-    private func videoSettings() -> [String: Any] {
-        [
-            AVVideoCodecKey: AVVideoCodecType.h264,
-            AVVideoWidthKey: width,
-            AVVideoHeightKey: height,
-            AVVideoColorPropertiesKey: [
-                AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,
-                AVVideoTransferFunctionKey: AVVideoTransferFunction_IEC_sRGB,
-                AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_709_2,
-            ],
-            AVVideoCompressionPropertiesKey: [
-                AVVideoAverageBitRateKey: bitsPerSecond,
-                AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
-                AVVideoMaxKeyFrameIntervalKey: fps * 2,
-                AVVideoExpectedSourceFrameRateKey: fps,
-                AVVideoAllowFrameReorderingKey: false,
-            ] as [String: Any],
-        ]
     }
 
     private func audioInput(_ format: CMFormatDescription) throws -> AVAssetWriterInput {
