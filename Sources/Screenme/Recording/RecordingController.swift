@@ -128,7 +128,7 @@ final class RecordingController {
         guard let recording = active, !recording.isEnding else { return nil }
         recording.isEnding = true
         guard let url = await finish(recording, discard: false) else { return nil }
-        if recording.settings.format == .gif { return await convertToGIF(url) }
+        if recording.settings.format == .gif { return await convertToGIF(url, size: CGSize(width: recording.setup.width, height: recording.setup.height)) }
         return CaptureItem(url: url, kind: .video)
     }
 
@@ -151,11 +151,15 @@ final class RecordingController {
         return url
     }
 
-    private func convertToGIF(_ video: URL) async -> CaptureItem? {
+    /// `size` is the recording's pixel size; the GIF gets the video editor's starting size for it.
+    private func convertToGIF(_ video: URL, size: CGSize) async -> CaptureItem? {
         let toast = Toast.progress("Creating GIF")
         defer { toast.finish() }
         do {
-            let gif = try await GIFExporter.export(video, fps: 15, maxWidth: 1000) { value in
+            let duration = try await AVURLAsset(url: video).load(.duration)
+            let gif = try await GIFExporter.export(video, range: CMTimeRange(start: .zero, duration: duration),
+                                                   size: ExportResolution.gif(for: size).outputSize(for: size),
+                                                   fps: 15, quality: .high) { value in
                 Task { @MainActor in toast.update(value) }
             }
             try? FileManager.default.removeItem(at: video)

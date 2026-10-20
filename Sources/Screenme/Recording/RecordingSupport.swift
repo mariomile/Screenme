@@ -60,6 +60,23 @@ struct RecordingSettings {
     }
 }
 
+/// How the stream is filmed for the chosen format, resolved once from the settings.
+struct CaptureProfile {
+    let retina: Bool
+    let fps: Int
+    let capturesAudio: Bool
+}
+
+extension RecordingSettings {
+    /// GIFs are filmed at 1x, at most 30 fps and without sound: they end up small and silent anyway.
+    var profile: CaptureProfile {
+        switch format {
+        case .video: CaptureProfile(retina: true, fps: fps, capturesAudio: true)
+        case .gif: CaptureProfile(retina: false, fps: min(fps, 30), capturesAudio: false)
+        }
+    }
+}
+
 // MARK: - Sample buffer timing
 
 extension CMSampleBuffer {

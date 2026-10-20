@@ -14,8 +14,8 @@ struct CaptureSetup {
     /// `overlays` (click highlights, keystrokes, webcam) are Screenme windows filmed on purpose.
     @MainActor
     static func make(for target: CaptureTarget, settings: RecordingSettings, overlays: [NSWindow]) async throws -> CaptureSetup {
-        // GIFs are filmed at 1x: they end up small anyway.
-        let (filter, config) = try await target.streamSetup(showsCursor: settings.showCursor, retina: settings.format != .gif,
+        let profile = settings.profile
+        let (filter, config) = try await target.streamSetup(showsCursor: settings.showCursor, retina: profile.retina,
                                                             including: overlays.map { CGWindowID($0.windowNumber) })
         var width = CGFloat(config.width)
         var height = CGFloat(config.height)
@@ -30,21 +30,20 @@ struct CaptureSetup {
         config.width = pixelWidth
         config.height = pixelHeight
 
-        let fps = settings.format == .gif ? min(settings.fps, 30) : settings.fps
-        config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
+        config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(profile.fps))
         config.queueDepth = 8
         config.colorSpaceName = CGColorSpace.sRGB
 
-        if settings.systemAudio && settings.format == .video {
+        if settings.systemAudio && profile.capturesAudio {
             config.capturesAudio = true
             config.excludesCurrentProcessAudio = true
             config.sampleRate = 48000
             config.channelCount = 2
         }
-        if settings.microphone && settings.format == .video && Permission.microphone.isGranted {
+        if settings.microphone && profile.capturesAudio && Permission.microphone.isGranted {
             config.captureMicrophone = true
             if !settings.microphoneID.isEmpty { config.microphoneCaptureDeviceID = settings.microphoneID }
         }
-        return CaptureSetup(filter: filter, configuration: config, width: pixelWidth, height: pixelHeight, fps: fps)
+        return CaptureSetup(filter: filter, configuration: config, width: pixelWidth, height: pixelHeight, fps: profile.fps)
     }
 }

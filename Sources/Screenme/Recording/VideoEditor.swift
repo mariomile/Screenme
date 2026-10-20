@@ -53,8 +53,7 @@ final class VideoEditorModel: ObservableObject {
 
     @Published var format = ExportFormat.mp4 {
         didSet {
-            // GIFs at full size are huge: start from 720p when the source is large.
-            if format == .gif, oldValue != .gif, resolution == .original, videoSize.width > 1280 { resolution = .p720 }
+            if format == .gif, oldValue != .gif, resolution == .original { resolution = .gif(for: videoSize) }
         }
     }
     @Published var resolution = ExportResolution.original
@@ -301,8 +300,8 @@ final class VideoEditorModel: ObservableObject {
                                                        progress: progress)
             return CaptureItem(url: url, kind: .video)
         case .gif:
-            let url = try await GIFExporter.export(item.url, range: range, fps: Double(gifFPS), outputSize: outputSize,
-                                                   colors: quality.gifColors, dither: quality.gifDither, progress: progress)
+            let url = try await GIFExporter.export(item.url, range: range, size: outputSize, fps: gifFPS, quality: quality,
+                                                   progress: progress)
             return CaptureItem(url: url, kind: .gif)
         }
     }
