@@ -224,6 +224,8 @@ private final class Session {
         outline.show()
         self.outline = outline
 
+        // The clock exists since the pre-record bar closed; the recording starts now.
+        clock.reset()
         let controller = RecordingController.shared
         let bar = RecordingControlBar(clock: clock, area: frame, screen: Placement.screen(for: target),
                                       pause: { controller.togglePause() },
