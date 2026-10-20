@@ -1,5 +1,4 @@
 import AppKit
-import ApplicationServices
 import CoreMedia
 import CoreVideo
 import ScreenCaptureKit
@@ -19,17 +18,27 @@ enum ScrollingCapture {
 
 // MARK: - Session
 
+/// One scrolling capture, from the panel opening to Done or Cancel. It keeps the facts
+/// (phase, lost, limit, end of page, error, auto-scrolling) and the panel's message follows from them.
 @MainActor
-private final class ScrollSession: ObservableObject {
-    enum Phase { case ready, capturing, finishing }
+final class ScrollSession: ObservableObject {
+    enum Phase { case ready, starting, capturing, finishing }
 
-    @Published var phase: Phase = .ready
-    @Published var status = Message.ready
-    @Published var rows = 0
-    @Published var preview: CGImage?
-    @Published var isAutoScrolling = false
+    @Published private(set) var phase: Phase = .ready
+    @Published private(set) var rows = 0
+    @Published private(set) var preview: CGImage?
+    @Published private(set) var isAutoScrolling = false
+    /// The last frames did not match the content seen so far.
+    @Published private var lost = false
+    @Published private var limitReached = false
+    /// Auto-scroll stopped because the page stopped moving.
+    @Published private var endReached = false
+    /// Auto-scroll was asked for without Accessibility access.
+    @Published private var needsAccess = false
+    /// Why the stream could not start.
+    @Published private var error: String?
 
-    enum Message {
+    private enum Message {
         static let ready = "Place the page where you want it, press Start, then scroll the area. Or let Screenme scroll for you."
         static let capturing = "Scroll slowly. Screenme stitches as you go."
         static let lost = "Lost track of the content. Scroll back a little."
@@ -39,12 +48,22 @@ private final class ScrollSession: ObservableObject {
         static let needsAccess = "Auto-scroll needs Accessibility access. Allow Screenme in System Settings, or scroll yourself."
     }
 
+    /// What the panel tells the user, from the facts above.
+    var status: String {
+        if let error { return "Could not start: \(error)" }
+        if limitReached { return Message.limit }
+        if lost { return Message.lost }
+        if needsAccess { return Message.needsAccess }
+        if endReached { return Message.end }
+        if isAutoScrolling { return Message.auto }
+        return phase == .ready ? Message.ready : Message.capturing
+    }
+
     private let frame: CGRect
     private let filter: SCContentFilter
     private let configuration: SCStreamConfiguration
     private let engine = ScrollStitchEngine()
     private var stream: SCStream?
-    private var sink: ScrollFrameSink?
     private var panel: FloatingPanel?
     private var continuation: CheckedContinuation<CGImage?, Never>?
     private var autoTask: Task<Void, Never>?
@@ -70,48 +89,50 @@ private final class ScrollSession: ObservableObject {
 
     func start() async {
         guard phase == .ready else { return }
-        phase = .capturing
-        status = Message.capturing
+        phase = .starting
+        error = nil
+        needsAccess = false
         configuration.minimumFrameInterval = CMTime(value: 1, timescale: 30)
         configuration.queueDepth = 5
         configuration.pixelFormat = kCVPixelFormatType_32BGRA
         configuration.showsCursor = false
 
-        let sink = ScrollFrameSink(engine: engine)
-        let stream = SCStream(filter: filter, configuration: configuration, delegate: sink)
+        let stream = SCStream(filter: filter, configuration: configuration, delegate: engine)
         do {
-            try stream.addStreamOutput(sink, type: .screen, sampleHandlerQueue: sink.queue)
+            try stream.addStreamOutput(engine, type: .screen, sampleHandlerQueue: engine.queue)
             try await stream.startCapture()
-            // Cancel was pressed while the stream started: nothing will stop it later, so stop it now.
-            guard phase == .capturing else {
-                try? await stream.stopCapture()
-                return
-            }
-            self.sink = sink
-            self.stream = stream
-            lastAdvance = Date()
         } catch {
-            guard phase == .capturing else { return }
+            guard phase == .starting else { return }
             phase = .ready
-            status = "Could not start: \(error.localizedDescription)"
+            self.error = error.localizedDescription
+            return
         }
+        // Cancel was pressed while the stream started: nothing will stop it later, so stop it now.
+        guard phase == .starting else {
+            try? await stream.stopCapture()
+            return
+        }
+        self.stream = stream
+        phase = .capturing
+        lastAdvance = Date()
     }
 
     func toggleAutoScroll() async {
         if isAutoScrolling {
             stopAutoScroll()
-            status = Message.capturing
             return
         }
         guard Permission.accessibility.isGranted else {
             Permission.accessibility.request()
-            status = Message.needsAccess
+            error = nil
+            needsAccess = true
             return
         }
         if phase == .ready { await start() }
         guard phase == .capturing, stream != nil else { return }
+        needsAccess = false
+        endReached = false
         isAutoScrolling = true
-        status = Message.auto
         autoTask = Task { [weak self] in await self?.autoScrollLoop() }
     }
 
@@ -120,8 +141,7 @@ private final class ScrollSession: ObservableObject {
         phase = .finishing
         stopAutoScroll()
         await stopStream()
-        let image = engine.finish()
-        close(with: image)
+        close(with: engine.finish())
     }
 
     func cancel() async {
@@ -137,7 +157,6 @@ private final class ScrollSession: ObservableObject {
         engine.onUpdate = nil
         if let stream { try? await stream.stopCapture() }
         stream = nil
-        sink = nil
     }
 
     private func close(with image: CGImage?) {
@@ -154,13 +173,14 @@ private final class ScrollSession: ObservableObject {
         if update.rows != rows { lastAdvance = Date() }
         rows = update.rows
         if let image = update.preview { preview = image }
-        if update.limitReached {
+        switch update.outcome {
+        case .limit:
+            limitReached = true
             stopAutoScroll()
-            status = Message.limit
-        } else if update.lost {
-            status = Message.lost
-        } else if status == Message.lost {
-            status = isAutoScrolling ? Message.auto : Message.capturing
+        case .lost:
+            lost = true
+        case .first, .advanced, .still, .scrolledBack:
+            lost = false
         }
     }
 
@@ -204,7 +224,7 @@ private final class ScrollSession: ObservableObject {
             }
             if checkedDirection, Date().timeIntervalSince(lastAdvance) > 1.6 {
                 stopAutoScroll()
-                status = Message.end
+                endReached = true
                 return
             }
         }
@@ -230,262 +250,5 @@ private final class ScrollSession: ObservableObject {
         panel.contentView = NSHostingView(rootView: ScrollPanelView(session: self))
         panel.present()
         self.panel = panel
-    }
-}
-
-// MARK: - Frame pipeline
-
-/// Receives ScreenCaptureKit frames on its own queue.
-private final class ScrollFrameSink: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
-    let queue = DispatchQueue(label: "dev.mariomiletta.Screenme.scrolling", qos: .userInitiated)
-    private let engine: ScrollStitchEngine
-
-    init(engine: ScrollStitchEngine) {
-        self.engine = engine
-    }
-
-    func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
-        guard type == .screen, sampleBuffer.isValid,
-              let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
-              let raw = attachments.first?[.status] as? Int, SCFrameStatus(rawValue: raw) == .complete,
-              let pixels = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-        engine.process(pixels)
-    }
-
-    func stream(_ stream: SCStream, didStopWithError error: Error) {
-        NSLog("Screenme: scrolling capture stream stopped: \(error.localizedDescription)")
-    }
-}
-
-/// Owns the stitcher and serializes access to it between the frame queue and the main actor.
-private final class ScrollStitchEngine: @unchecked Sendable {
-    struct Update {
-        var rows: Int
-        var preview: CGImage?
-        var lost: Bool
-        var limitReached: Bool
-    }
-
-    var onUpdate: (@Sendable (Update) -> Void)?
-
-    private let lock = NSLock()
-    private var stitcher: ScrollStitcher?
-    private var closed = false
-    private var lastPublish = Date.distantPast
-    private var publishedRows = -1
-    private var lost = false
-    private var limit = false
-    private var advances = 0
-    private var backs = 0
-
-    func process(_ buffer: CVPixelBuffer) {
-        lock.lock()
-        defer { lock.unlock() }
-        guard !closed else { return }
-
-        CVPixelBufferLockBaseAddress(buffer, .readOnly)
-        defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
-        guard let base = CVPixelBufferGetBaseAddress(buffer) else { return }
-        let width = CVPixelBufferGetWidth(buffer)
-        let height = CVPixelBufferGetHeight(buffer)
-
-        if stitcher == nil {
-            stitcher = ScrollStitcher(width: width, height: height)
-            if let space = CVImageBufferGetColorSpace(buffer)?.takeUnretainedValue() {
-                stitcher?.colorSpace = space
-            } else if let space = CGColorSpace(name: CGColorSpace.sRGB) {
-                stitcher?.colorSpace = space
-            }
-        }
-        guard let stitcher, stitcher.width == width, stitcher.height == height else { return }
-
-        let outcome = stitcher.add(base.assumingMemoryBound(to: UInt8.self), bytesPerRow: CVPixelBufferGetBytesPerRow(buffer))
-        switch outcome {
-        case .lost: lost = true
-        case .advanced: lost = false; advances += 1
-        case .scrolledBack: lost = false; backs += 1
-        case .limit: limit = true
-        case .first, .still: lost = false
-        }
-
-        let now = Date()
-        let changed = stitcher.totalRows != publishedRows
-        guard now.timeIntervalSince(lastPublish) > 0.2 || outcome == .lost || outcome == .limit else { return }
-        lastPublish = now
-        let image = changed ? stitcher.previewImage() : nil
-        publishedRows = stitcher.totalRows
-        onUpdate?(Update(rows: stitcher.totalRows, preview: image, lost: lost, limitReached: limit))
-    }
-
-    /// Frames that moved the page forward and backward since the last call.
-    func motionCounts() -> (advances: Int, backs: Int) {
-        lock.lock()
-        defer { lock.unlock() }
-        defer { advances = 0; backs = 0 }
-        return (advances, backs)
-    }
-
-    func finish() -> CGImage? {
-        lock.lock()
-        defer { lock.unlock() }
-        closed = true
-        return stitcher?.finish()
-    }
-
-    func cancel() {
-        lock.lock()
-        defer { lock.unlock() }
-        closed = true
-        stitcher = nil
-    }
-}
-
-// MARK: - Panel UI
-
-private struct ScrollPanelView: View {
-    @ObservedObject var session: ScrollSession
-
-    var body: some View {
-        HStack(spacing: 0) {
-            previewColumn
-            Divider().opacity(0.5)
-            controls
-        }
-        .background(.regularMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5))
-    }
-
-    // MARK: Preview
-
-    private var previewColumn: some View {
-        ZStack(alignment: .top) {
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(Color(nsColor: .underPageBackgroundColor))
-            if let preview = session.preview {
-                Image(decorative: preview, scale: 1)
-                    .resizable()
-                    .interpolation(.medium)
-                    .scaledToFit()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                    .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-            } else {
-                VStack(spacing: 8) {
-                    Image(systemName: "rectangle.stack.badge.plus")
-                        .font(.system(size: 22, weight: .light))
-                    Text("Live preview")
-                        .font(.system(size: 11))
-                }
-                .foregroundStyle(.tertiary)
-                .frame(maxHeight: .infinity)
-            }
-        }
-        .overlay(alignment: .bottom) {
-            if session.rows > 0 {
-                Text("\(session.rows.formatted()) px")
-                    .font(.system(size: 10.5, weight: .semibold).monospacedDigit())
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 8).padding(.vertical, 3)
-                    .background(.black.opacity(0.65), in: Capsule())
-                    .padding(.bottom, 8)
-            }
-        }
-        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.5))
-        .padding(12)
-        .frame(width: 136)
-    }
-
-    // MARK: Controls
-
-    private var controls: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 6) {
-                Image(systemName: "arrow.up.and.down.text.horizontal")
-                    .foregroundStyle(Color.accentColor)
-                Text("Scrolling Capture").font(.system(size: 13, weight: .semibold))
-            }
-            .padding(.top, 14)
-
-            Text(session.status)
-                .font(.system(size: 11.5))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-                .animation(.easeOut(duration: 0.15), value: session.status)
-
-            Spacer(minLength: 8)
-
-            VStack(spacing: 7) {
-                startButton
-                Button { Task { await session.toggleAutoScroll() } } label: {
-                    Label(session.isAutoScrolling ? "Stop Auto-scroll" : "Auto-scroll",
-                          systemImage: session.isAutoScrolling ? "stop.fill" : "arrow.down.to.line")
-                }
-                .buttonStyle(ScrollPanelButtonStyle(kind: .secondary))
-                .disabled(session.phase == .finishing)
-
-                Button { Task { await session.done() } } label: {
-                    Label("Done", systemImage: "checkmark")
-                }
-                .buttonStyle(ScrollPanelButtonStyle(kind: session.phase == .capturing ? .primary : .secondary))
-                .disabled(session.phase != .capturing)
-
-                Button("Cancel") { Task { await session.cancel() } }
-                    .buttonStyle(ScrollPanelButtonStyle(kind: .plain))
-                    .disabled(session.phase == .finishing)
-            }
-            .padding(.bottom, 14)
-        }
-        .padding(.horizontal, 14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    @ViewBuilder
-    private var startButton: some View {
-        Button { Task { await session.start() } } label: {
-            if session.phase == .ready {
-                Label("Start", systemImage: "play.fill")
-            } else {
-                HStack(spacing: 6) {
-                    Circle().fill(.red).frame(width: 7, height: 7)
-                    Text("Capturing")
-                }
-            }
-        }
-        .buttonStyle(ScrollPanelButtonStyle(kind: session.phase == .ready ? .primary : .secondary))
-        .disabled(session.phase != .ready)
-    }
-}
-
-private struct ScrollPanelButtonStyle: ButtonStyle {
-    enum Kind { case primary, secondary, plain }
-    let kind: Kind
-    @Environment(\.isEnabled) private var isEnabled
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 12.5, weight: .medium))
-            .labelStyle(.titleAndIcon)
-            .foregroundStyle(foreground)
-            .frame(maxWidth: .infinity)
-            .frame(height: 30)
-            .background(background(pressed: configuration.isPressed), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .opacity(isEnabled ? 1 : 0.5)
-            .contentShape(Rectangle())
-    }
-
-    private var foreground: Color {
-        switch kind {
-        case .primary: .white
-        case .secondary: .primary
-        case .plain: .secondary
-        }
-    }
-
-    private func background(pressed: Bool) -> Color {
-        switch kind {
-        case .primary: Color.accentColor.opacity(pressed ? 0.75 : 1)
-        case .secondary: Color.primary.opacity(pressed ? 0.16 : 0.09)
-        case .plain: Color.primary.opacity(pressed ? 0.08 : 0)
-        }
     }
 }

@@ -16,7 +16,7 @@ import Foundation
 final class ScrollStitcher {
     enum Outcome: Equatable {
         case first
-        case advanced(rows: Int)
+        case advanced
         case still
         case scrolledBack
         case lost
@@ -107,7 +107,7 @@ final class ScrollStitcher {
                 footer.append(contentsOf: UnsafeBufferPointer(start: base + y * bytesPerRow, count: width * 4))
             }
         }
-        return .advanced(rows: to - from)
+        return .advanced
     }
 
     // MARK: Output
