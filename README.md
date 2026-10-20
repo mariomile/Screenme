@@ -23,7 +23,7 @@ On first launch, allow Screenme in System Settings > Privacy & Security > Screen
 
 ## Where files go
 
-Captures are kept in `~/Library/Caches/Screenme` until you save them. Save copies to the Desktop.
+Captures are kept in `~/Library/Application Support/Screenme/Captures` until you save them. Save copies to your save folder (the Desktop by default).
 
 ## License
 

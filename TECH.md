@@ -29,7 +29,7 @@
 - Deployment target macOS 15 (needed for `SCRecordingOutput`).
 - Menu bar only app (`LSUIElement`). Global shortcuts via Carbon hot keys: no Accessibility permission.
 - Screenme's own windows are excluded from every capture through the content filter.
-- Captures live in `~/Library/Caches/Screenme`; Save copies to the Desktop.
+- Captures live in `~/Library/Application Support/Screenme/Captures`; Save copies to the chosen save folder (Desktop by default).
 
 ## Known traps
 - Builds are ad-hoc signed (no signing identity on this Mac, 2026-10-20). macOS ties the Screen Recording permission to the code signature, so a rebuild can drop the permission: re-enable Screenme in System Settings after rebuilding. Fix: sign with a stable certificate.
