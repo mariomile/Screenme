@@ -84,9 +84,9 @@ final class RecordingControlBar {
                 PulseDot(paused: clock.isPaused)
                     .padding(.trailing, 6)
 
-                ControlButton(symbol: clock.isPaused ? "play.fill" : "pause.fill", help: clock.isPaused ? "Resume" : "Pause", action: togglePause)
-                ControlButton(symbol: "arrow.counterclockwise", help: "Restart recording", action: restart)
-                ControlButton(symbol: "trash", help: "Discard recording", action: discard)
+                BarButton(symbol: clock.isPaused ? "play.fill" : "pause.fill", help: clock.isPaused ? "Resume" : "Pause", action: togglePause)
+                BarButton(symbol: "arrow.counterclockwise", help: "Restart recording", action: restart)
+                BarButton(symbol: "trash", help: "Discard recording", action: discard)
             }
             .padding(6)
             .background(VisualEffectBackground().clipShape(Capsule()))
@@ -109,25 +109,28 @@ final class RecordingControlBar {
                 .onAppear { on = true }
         }
     }
+}
 
-    private struct ControlButton: View {
-        let symbol: String
-        let help: String
-        let action: () -> Void
-        @State private var hovering = false
+/// A round symbol button for the dark recording bars, before and during a recording.
+struct BarButton: View {
+    let symbol: String
+    var active = false
+    let help: String
+    let action: () -> Void
+    @State private var hovering = false
 
-        var body: some View {
-            Button(action: action) {
-                Image(systemName: symbol)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white.opacity(hovering ? 1 : 0.75))
-                    .frame(width: 32, height: 32)
-                    .background(Circle().fill(.white.opacity(hovering ? 0.14 : 0)))
-                    .contentShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .onHover { hovering = $0 }
-            .help(help)
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.white.opacity(active ? 1 : 0.7))
+                .frame(width: 34, height: 34)
+                .background(Circle().fill(.white.opacity(active ? 0.2 : hovering ? 0.1 : 0)))
+                .contentShape(Circle())
         }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(help)
+        .animation(.easeOut(duration: 0.12), value: active)
     }
 }

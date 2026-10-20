@@ -284,29 +284,6 @@ private struct ChevronLabel: View {
     }
 }
 
-private struct BarButton: View {
-    let symbol: String
-    var active = false
-    let help: String
-    let action: () -> Void
-    @State private var hovering = false
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.white.opacity(active ? 1 : 0.7))
-                .frame(width: 34, height: 34)
-                .background(Circle().fill(.white.opacity(active ? 0.2 : hovering ? 0.1 : 0)))
-                .contentShape(Circle())
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
-        .help(help)
-        .animation(.easeOut(duration: 0.12), value: active)
-    }
-}
-
 private struct FormatSwitch: View {
     @Binding var format: RecordingFormat
 
