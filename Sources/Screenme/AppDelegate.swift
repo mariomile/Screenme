@@ -16,26 +16,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let hotKeys = HotKeyCenter()
     private let recorder = Recorder()
     private var selection: SelectionOverlay?
+    private let state = AppState.shared
+    private let windows = WindowPresenter()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         showIdleStatus()
 
         let modifiers = cmdKey | shiftKey
-        let registered = [
-            hotKeys.register(keyCode: kVK_ANSI_1, modifiers: modifiers) { [weak self] in self?.captureSelection() },
-            hotKeys.register(keyCode: kVK_ANSI_2, modifiers: modifiers) { [weak self] in self?.toggleRecording() },
-        ]
-        if registered.contains(false) {
-            let alert = NSAlert()
-            alert.messageText = "Another app is using ⌘⇧1 or ⌘⇧2"
-            alert.informativeText = "Turn off that shortcut in the other app (for example Shottr), then relaunch Screenme. The menu bar items still work."
-            NSApp.activate(ignoringOtherApps: true)
-            alert.runModal()
-        }
+        hotKeys.register(keyCode: kVK_ANSI_1, modifiers: modifiers) { [weak self] in self?.captureSelection() }
+        hotKeys.register(keyCode: kVK_ANSI_2, modifiers: modifiers) { [weak self] in self?.toggleRecording() }
+        state.retryShortcuts = { [hotKeys] in hotKeys.retry() }
+        state.shortcutsRegistered = hotKeys.allRegistered
 
-        if !CGPreflightScreenCaptureAccess() {
-            CGRequestScreenCaptureAccess()
+        if state.needsSetup { showOnboarding() }
+    }
+
+    // MARK: Windows
+
+    @objc private func showOnboarding() {
+        if state.onboardingDone {
+            // Coming back to fix something: jump to the first step that needs it.
+            state.onboardingStep = !state.screenRecordingGranted ? 1 : (!state.shortcutsRegistered ? 2 : 0)
+        }
+        windows.close("settings")
+        windows.show("onboarding", title: "Welcome to Screenme", size: CGSize(width: 600, height: 480)) {
+            OnboardingView(state: state) { [weak self] in
+                self?.state.onboardingDone = true
+                self?.state.onboardingStep = 0
+                self?.windows.close("onboarding")
+            }
+        }
+    }
+
+    @objc private func showSettings() {
+        windows.show("settings", title: "Screenme Settings", size: CGSize(width: 500, height: 500)) {
+            SettingsView(state: state) { [weak self] in self?.showOnboarding() }
         }
     }
 
@@ -46,6 +62,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(item("Capture Area or Window", key: "1", action: #selector(captureSelection)))
         menu.addItem(item("Capture Screen", key: "", action: #selector(captureScreen)))
         menu.addItem(item("Record Area or Window", key: "2", action: #selector(toggleRecording)))
+        menu.addItem(.separator())
+        menu.addItem(item("Settings…", key: ",", action: #selector(showSettings), modifiers: .command))
         menu.addItem(.separator())
         menu.addItem(item("Quit Screenme", key: "q", action: #selector(quit), modifiers: .command))
         statusItem.menu = menu
@@ -73,12 +91,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func captureSelection() {
         guard !recorder.isRecording else { return }
+        guard state.screenRecordingGranted else { return showOnboarding() }
         select { target in
             Task { await self.capture(target) }
         }
     }
 
     @objc private func captureScreen() {
+        guard state.screenRecordingGranted else { return showOnboarding() }
         let screen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main!
         Task { await capture(.display(screen)) }
     }
@@ -92,6 +112,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             return
         }
+        guard state.screenRecordingGranted else { return showOnboarding() }
         select { target in
             Task {
                 do {
@@ -131,7 +152,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             let image = try await Capturer.screenshot(target)
             let url = try Storage.writePNG(image)
-            Clipboard.copyImage(at: url)
+            if state.copyAfterCapture { Clipboard.copyImage(at: url) }
             QuickAccess.shared.show(CaptureItem(url: url, kind: .image))
         } catch {
             report(error)

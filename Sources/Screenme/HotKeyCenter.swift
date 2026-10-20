@@ -2,8 +2,14 @@ import Carbon.HIToolbox
 
 /// Global shortcuts via Carbon hot keys: no Accessibility permission needed.
 final class HotKeyCenter {
+    private struct Shortcut {
+        let keyCode: Int
+        let modifiers: Int
+        var ref: EventHotKeyRef?
+    }
+
     private var actions: [UInt32: () -> Void] = [:]
-    private var refs: [EventHotKeyRef] = []
+    private var shortcuts: [UInt32: Shortcut] = [:]
 
     init() {
         var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
@@ -18,15 +24,29 @@ final class HotKeyCenter {
         }, 1, &spec, Unmanaged.passUnretained(self).toOpaque(), nil)
     }
 
-    /// Returns false when the shortcut is already taken by another app.
-    @discardableResult
-    func register(keyCode: Int, modifiers: Int, action: @escaping () -> Void) -> Bool {
+    /// True when every shortcut is registered; false when another app holds one of them.
+    var allRegistered: Bool { shortcuts.values.allSatisfy { $0.ref != nil } }
+
+    func register(keyCode: Int, modifiers: Int, action: @escaping () -> Void) {
         let id = UInt32(actions.count + 1)
         actions[id] = action
+        shortcuts[id] = Shortcut(keyCode: keyCode, modifiers: modifiers)
+        attempt(id)
+    }
+
+    /// Tries again the shortcuts that were taken, e.g. after the user quits a conflicting app.
+    @discardableResult
+    func retry() -> Bool {
+        for id in shortcuts.keys where shortcuts[id]?.ref == nil { attempt(id) }
+        return allRegistered
+    }
+
+    private func attempt(_ id: UInt32) {
+        guard let shortcut = shortcuts[id] else { return }
         var ref: EventHotKeyRef?
         let hotKeyID = EventHotKeyID(signature: OSType(0x5343_4D45), id: id) // "SCME"
-        let status = RegisterEventHotKey(UInt32(keyCode), UInt32(modifiers), hotKeyID, GetApplicationEventTarget(), 0, &ref)
-        if let ref { refs.append(ref) }
-        return status == noErr
+        let status = RegisterEventHotKey(UInt32(shortcut.keyCode), UInt32(shortcut.modifiers), hotKeyID,
+                                         GetApplicationEventTarget(), 0, &ref)
+        shortcuts[id]?.ref = status == noErr ? ref : nil
     }
 }

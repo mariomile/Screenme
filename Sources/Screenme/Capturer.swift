@@ -18,9 +18,8 @@ enum Storage {
         return url
     }()
 
-    static var saveDirectory: URL {
-        FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask)[0]
-    }
+    @MainActor
+    static var saveDirectory: URL { AppState.shared.saveDirectory }
 
     static func newURL(extension ext: String) -> URL {
         let formatter = DateFormatter()
@@ -39,7 +38,7 @@ enum Storage {
     }
 
     /// Copies a capture to the save folder, never overwriting an existing file.
-    @discardableResult
+    @MainActor @discardableResult
     static func save(_ url: URL) throws -> URL {
         let base = url.deletingPathExtension().lastPathComponent
         var destination = saveDirectory.appendingPathComponent(url.lastPathComponent)
