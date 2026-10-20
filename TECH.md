@@ -9,7 +9,8 @@
 | UI | AppKit for overlays and panels, SwiftUI for editor and settings | AppKit controls borderless always-on-top windows; SwiftUI is faster to write | inherited |
 | Capture | ScreenCaptureKit | Modern Apple capture API for stills and video | inherited |
 | OCR | Vision | On-device, no dependency | inherited |
-| Video | AVFoundation, ImageIO for GIF | System frameworks, no dependency | inherited |
+| Video | AVFoundation | System framework, no dependency | inherited |
+| GIF | Own encoder, `Recording/GIFEncoder.swift` | ImageIO's GIF writer can't do what keeps screen GIFs small and clean: one palette shared by every frame (no colour flicker), frames that hold only the rectangle that changed, and unchanged pixels left transparent. | decided 2026-10-20 in the recording module review: keep it |
 | Project | XcodeGen (`project.yml`), .xcodeproj gitignored | Readable, diffable project instead of a .pbxproj | inherited |
 | Language mode | Swift 5 mode on the Swift 6.4 compiler | Avoids strict-concurrency churn around ScreenCaptureKit delegates | inherited |
 
