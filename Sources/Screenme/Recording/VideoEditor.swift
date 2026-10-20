@@ -648,9 +648,7 @@ private struct TrimTimeline: View {
         }
         .frame(width: handleWidth, height: height)
         .contentShape(Rectangle())
-        .onHover { inside in
-            if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
-        }
+        .modifier(ResizeCursorOnHover())
     }
 
     private var playhead: some View {
@@ -662,5 +660,28 @@ private struct TrimTimeline: View {
         }
         .frame(width: 9)
         .offset(x: -3.5, y: -4)
+    }
+}
+
+/// The resize cursor over a trim handle. Pops on disappear too, so closing the window mid-hover
+/// does not leave the cursor stack unbalanced.
+private struct ResizeCursorOnHover: ViewModifier {
+    @State private var pushed = false
+
+    func body(content: Content) -> some View {
+        content
+            .onHover { inside in
+                if inside, !pushed {
+                    NSCursor.resizeLeftRight.push()
+                    pushed = true
+                } else if !inside, pushed {
+                    NSCursor.pop()
+                    pushed = false
+                }
+            }
+            .onDisappear {
+                if pushed { NSCursor.pop() }
+                pushed = false
+            }
     }
 }
