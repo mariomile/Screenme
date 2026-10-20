@@ -76,6 +76,11 @@ enum ExportResolution: String, CaseIterable, Identifiable {
         }
     }
 
+    /// Where a GIF starts: full-size GIFs are huge, so a source wider than 1280 goes to 720p.
+    static func gif(for size: CGSize) -> ExportResolution {
+        size.width > 1280 ? .p720 : .original
+    }
+
     /// The output size for a source of `size`. Never scales up; dimensions are even.
     func outputSize(for size: CGSize) -> CGSize {
         guard size.width > 0, size.height > 0 else { return size }
@@ -92,31 +97,22 @@ enum ExportResolution: String, CaseIterable, Identifiable {
 /// Converts video to an animated GIF with a shared adaptive palette, ordered dithering,
 /// changed-rectangle frames and an infinite loop.
 enum GIFExporter {
-    /// - Parameters:
-    ///   - range: the part of the video to convert; all of it by default.
-    ///   - outputSize: exact pixel size; otherwise the video is scaled down to `maxWidth`.
-    static func export(_ url: URL, range: CMTimeRange? = nil, fps: Double = 15, maxWidth: CGFloat = 960,
-                       outputSize: CGSize? = nil, colors: Int = 255, dither: Bool = true,
-                       progress: (@Sendable (Double) -> Void)? = nil) async throws -> URL {
+    /// Converts `range` of the video at `url` to a `size` GIF at `fps` (at most 30).
+    /// `quality` sets the palette size and the dithering.
+    static func export(_ url: URL, range: CMTimeRange, size: CGSize, fps: Int, quality: VideoQuality,
+                       progress: @escaping @Sendable (Double) -> Void) async throws -> URL {
         let asset = AVURLAsset(url: url)
         guard let track = try await asset.loadTracks(withMediaType: .video).first else { throw ScreenmeError.recordingFailed }
-        let natural = try await track.load(.naturalSize).applying(track.load(.preferredTransform))
-        let source = CGSize(width: abs(natural.width), height: abs(natural.height))
-        let duration = try await asset.load(.duration)
-        let clip = range ?? CMTimeRange(start: .zero, duration: duration)
-
-        var size = outputSize ?? source
-        if outputSize == nil, source.width > maxWidth {
-            size = CGSize(width: maxWidth, height: (source.height * maxWidth / source.width).rounded())
-        }
         let width = max(2, Int(size.width.rounded()))
         let height = max(2, Int(size.height.rounded()))
-        let rate = min(max(fps, 1), 30)
+        let rate = Double(min(max(fps, 1), 30))
+        let colors = quality.gifColors
+        let dither = quality.gifDither
 
         let cancel = ExportCancel()
         let data: Data = try await withTaskCancellationHandler {
             try await Task.detached(priority: .userInitiated) {
-                try await encode(asset: asset, track: track, range: clip, width: width, height: height, fps: rate,
+                try await encode(asset: asset, track: track, range: range, width: width, height: height, fps: rate,
                                  colors: colors, dither: dither, cancel: cancel, progress: progress)
             }.value
         } onCancel: {
@@ -125,13 +121,13 @@ enum GIFExporter {
 
         let output = Storage.newURL(extension: "gif")
         try data.write(to: output)
-        progress?(1)
+        progress(1)
         return output
     }
 
     private static func encode(asset: AVURLAsset, track: AVAssetTrack, range: CMTimeRange, width: Int, height: Int, fps: Double,
                                colors: Int, dither: Bool, cancel: ExportCancel,
-                               progress: (@Sendable (Double) -> Void)?) async throws -> Data {
+                               progress: @Sendable (Double) -> Void) async throws -> Data {
         let frame = RGBAFrame(width: width, height: height)
         let start = range.start.seconds
         let total = max(range.duration.seconds, 0.04)
@@ -196,7 +192,7 @@ enum GIFExporter {
             emitTicks(before: time)
             held = sample
             heldDrawn = false
-            progress?(min(max(time / total, 0), 1) * 0.97)
+            progress(min(max(time / total, 0), 1) * 0.97)
         }
         if reader.status == .failed { throw reader.error ?? ScreenmeError.recordingFailed }
         emitTicks(before: total)
@@ -222,7 +218,7 @@ enum VideoTranscoder {
         guard let videoTrack = try await asset.loadTracks(withMediaType: .video).first else { throw ScreenmeError.recordingFailed }
         let audioTracks = settings.mute ? [] : try await asset.loadTracks(withMediaType: .audio)
         let nominal = try await videoTrack.load(.nominalFrameRate)
-        let fps = nominal > 1 ? min(max(Double(nominal), 24), 60) : 30
+        let fps = nominal > 1 ? Int(min(max(nominal, 24), 60).rounded()) : 30
 
         let job = try TranscodeJob(asset: asset, videoTrack: videoTrack, audioTracks: audioTracks, settings: settings, fps: fps, progress: progress)
         return try await withTaskCancellationHandler {
@@ -247,7 +243,7 @@ private final class TranscodeJob: @unchecked Sendable {
     private let progress: (@Sendable (Double) -> Void)?
 
     init(asset: AVURLAsset, videoTrack: AVAssetTrack, audioTracks: [AVAssetTrack], settings: VideoExportSettings,
-         fps: Double, progress: (@Sendable (Double) -> Void)?) throws {
+         fps: Int, progress: (@Sendable (Double) -> Void)?) throws {
         self.progress = progress
         start = settings.range.start
         duration = max(settings.range.duration.seconds, 0.04)
@@ -262,24 +258,9 @@ private final class TranscodeJob: @unchecked Sendable {
         reader.add(videoOutput)
 
         writer = try AVAssetWriter(outputURL: outputURL, fileType: .mp4)
-        let bitrate = settings.size.width * settings.size.height * fps * settings.quality.bitsPerPixel
-        videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: [
-            AVVideoCodecKey: AVVideoCodecType.h264,
-            AVVideoWidthKey: Int(settings.size.width),
-            AVVideoHeightKey: Int(settings.size.height),
-            AVVideoScalingModeKey: AVVideoScalingModeResizeAspectFill,
-            AVVideoColorPropertiesKey: [
-                AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,
-                AVVideoTransferFunctionKey: AVVideoTransferFunction_IEC_sRGB,
-                AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_709_2,
-            ],
-            AVVideoCompressionPropertiesKey: [
-                AVVideoAverageBitRateKey: Int(min(max(bitrate, 500_000), 80_000_000)),
-                AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
-                AVVideoMaxKeyFrameIntervalKey: Int(fps) * 2,
-                AVVideoExpectedSourceFrameRateKey: Int(fps),
-            ] as [String: Any],
-        ])
+        videoInput = AVAssetWriterInput(mediaType: .video,
+                                        outputSettings: H264.settings(width: Int(settings.size.width), height: Int(settings.size.height),
+                                                                      fps: fps, quality: settings.quality, realTime: false))
         videoInput.expectsMediaDataInRealTime = false
         writer.add(videoInput)
 
