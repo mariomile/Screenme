@@ -80,7 +80,9 @@ final class CaptureCoordinator {
 
         case .selfTimer:
             guard let result = await SelectionOverlay.select(.screenshot) else { return }
-            guard await Countdown.run(seconds: Prefs[Pref.selfTimerSeconds], around: result.target.cocoaFrame) else { return }
+            // Clicks go through the ring: the user may be opening the menu or hover state to capture.
+            guard await Countdown.run(seconds: Prefs[Pref.selfTimerSeconds], around: result.target.cocoaFrame,
+                                      cancelsOnClick: false) else { return }
             try await finishScreenshot(SelectionResult(target: result.target, frozenImage: nil))
 
         case .captureText:

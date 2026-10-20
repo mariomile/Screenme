@@ -3,18 +3,20 @@ import Carbon.HIToolbox
 import SwiftUI
 
 /// A large countdown with a ring, centered on the area about to be captured or recorded.
-/// Esc (or a click on it) cancels without taking focus from the user's app. The panel is gone before `run` returns,
+/// Esc cancels without taking focus from the user's app. The panel is gone before `run` returns,
 /// so it never appears in the shot.
 @MainActor
 enum Countdown {
     private static var session: CountdownSession?
 
     /// Returns false when cancelled (Esc), true when the countdown reached zero.
-    static func run(seconds: Int, around frame: CGRect) async -> Bool {
+    /// `cancelsOnClick`: a click on the ring cancels too. Off, clicks go through to the app below,
+    /// which the self-timer needs to set up the shot.
+    static func run(seconds: Int, around frame: CGRect, cancelsOnClick: Bool = true) async -> Bool {
         guard seconds > 0 else { return true }
         session?.finish(false)
         return await withCheckedContinuation { continuation in
-            let session = CountdownSession(seconds: seconds, frame: frame) { result in
+            let session = CountdownSession(seconds: seconds, frame: frame, cancelsOnClick: cancelsOnClick) { result in
                 continuation.resume(returning: result)
             }
             self.session = session
@@ -32,6 +34,7 @@ enum Countdown {
 @MainActor
 private final class CountdownSession {
     private let frame: CGRect
+    private let cancelsOnClick: Bool
     private var completion: ((Bool) -> Void)?
     private let model = CountdownModel()
     private var panel: FloatingPanel?
@@ -39,9 +42,10 @@ private final class CountdownSession {
     private var escape: TemporaryHotKey?
     private var remaining: Int
 
-    init(seconds: Int, frame: CGRect, completion: @escaping (Bool) -> Void) {
+    init(seconds: Int, frame: CGRect, cancelsOnClick: Bool, completion: @escaping (Bool) -> Void) {
         self.remaining = seconds
         self.frame = frame
+        self.cancelsOnClick = cancelsOnClick
         self.completion = completion
     }
 
@@ -51,9 +55,11 @@ private final class CountdownSession {
         let rect = CGRect(x: min(max(frame.midX - side / 2, screen.minX), screen.maxX - side),
                           y: min(max(frame.midY - side / 2, screen.minY), screen.maxY - side),
                           width: side, height: side)
-        let panel = FloatingPanel(frame: rect, level: .screenSaver, canBeKey: true, hasShadow: false,
+        let panel = FloatingPanel(frame: rect, level: .screenSaver, canBeKey: cancelsOnClick, hasShadow: false,
+                                  ignoresMouse: !cancelsOnClick,
                                   collectionBehavior: [.canJoinAllSpaces, .fullScreenAuxiliary, .transient])
-        panel.contentView = NSHostingView(rootView: CountdownView(model: model) { [weak self] in self?.finish(false) })
+        let cancel: (() -> Void)? = cancelsOnClick ? { [weak self] in self?.finish(false) } : nil
+        panel.contentView = NSHostingView(rootView: CountdownView(model: model, cancel: cancel))
         panel.present()
         self.panel = panel
 
@@ -122,7 +128,8 @@ private final class CountdownModel: ObservableObject {
 
 private struct CountdownView: View {
     @ObservedObject var model: CountdownModel
-    let cancel: () -> Void
+    /// Nil when clicks go through.
+    let cancel: (() -> Void)?
     @State private var appeared = false
 
     var body: some View {
@@ -155,7 +162,8 @@ private struct CountdownView: View {
         .scaleEffect(appeared ? 1 : 0.78)
         .opacity(appeared ? 1 : 0)
         .contentShape(Circle())
-        .onTapGesture(perform: cancel)
+        .onTapGesture { cancel?() }
+        .allowsHitTesting(cancel != nil)
         .onAppear { withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) { appeared = true } }
         .environment(\.colorScheme, .dark)
     }
