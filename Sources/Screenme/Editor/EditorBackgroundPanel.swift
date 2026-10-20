@@ -162,7 +162,7 @@ struct BackgroundPanel: View {
                 Text("Custom").font(.system(size: 12)).foregroundStyle(.secondary)
                 ColorPicker("Custom background color", selection: Binding(
                     get: { current.color },
-                    set: { new in c.setBackgroundColorLive(RGBA(NSColor(new)).with(alpha: 1)) }
+                    set: { new in c.setBackgroundColor(RGBA(NSColor(new)).with(alpha: 1)) }
                 ), supportsOpacity: false)
                 .labelsHidden()
             }
@@ -197,24 +197,26 @@ struct BackgroundPanel: View {
     private var spacing: some View {
         Section {
             VStack(spacing: 12) {
-                sliderRow("Padding", value: Binding(get: { settings.padding }, set: { v in c.updateBackground(live: true) { $0.padding = v } }),
-                          range: 0...40, label: "\(Int(settings.padding))%")
-                sliderRow("Corners", value: Binding(get: { settings.cornerRadius }, set: { v in c.updateBackground(live: true) { $0.cornerRadius = v } }),
-                          range: 0...48, label: "\(Int(settings.cornerRadius))")
-                sliderRow("Shadow", value: Binding(get: { settings.shadow }, set: { v in c.updateBackground(live: true) { $0.shadow = v } }),
-                          range: 0...1, label: "\(Int(settings.shadow * 100))%")
+                sliderRow("Padding", value: settings.padding, range: 0...40, label: "\(Int(settings.padding))%") { v in
+                    c.applyBackground { $0.padding = v }
+                }
+                sliderRow("Corners", value: settings.cornerRadius, range: 0...48, label: "\(Int(settings.cornerRadius))") { v in
+                    c.applyBackground { $0.cornerRadius = v }
+                }
+                sliderRow("Shadow", value: settings.shadow, range: 0...1, label: "\(Int(settings.shadow * 100))%") { v in
+                    c.applyBackground { $0.shadow = v }
+                }
             }
         } header: {
             header("Image")
         }
     }
 
-    private func sliderRow(_ title: String, value: Binding<Double>, range: ClosedRange<Double>, label: String) -> some View {
+    private func sliderRow(_ title: String, value: Double, range: ClosedRange<Double>, label: String,
+                           apply: @escaping (Double) -> Void) -> some View {
         HStack(spacing: 10) {
             Text(title).font(.system(size: 12)).frame(width: 56, alignment: .leading)
-            Slider(value: value, in: range) { editing in
-                if editing { c.beginChange() } else { c.endChange() }
-            }
+            EditSlider(c: c, value: value, range: range, apply: apply)
             Text(label)
                 .font(.system(size: 11).monospacedDigit())
                 .foregroundStyle(.secondary)

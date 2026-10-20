@@ -2,14 +2,13 @@ import AppKit
 
 // MARK: - Text layout
 
-/// Measures text annotations. The renderer and the inline editor both use this so they agree.
+/// Measures and places text labels. The renderer, the inline editor and label creation all use it so they agree.
 enum TextLayout {
     struct Result {
         /// Pill/outline box, or just the text bounds for plain text.
         var box: CGRect
         var textOrigin: CGPoint
         var textSize: CGSize
-        var padding: CGFloat
         var radius: CGFloat
     }
 
@@ -25,18 +24,31 @@ enum TextLayout {
         [.font: font(style, unit: unit), .foregroundColor: textColor(style).nsColor]
     }
 
-    static func layout(_ a: Annotation, unit: CGFloat) -> Result {
-        let font = font(a.style, unit: unit)
-        let probe = (a.text + "\u{200B}") as NSString
+    /// Horizontal space between the backdrop's edge and the text; the vertical space is 0.62 of it.
+    private static func padding(_ style: ToolStyle, font: NSFont) -> CGFloat {
+        style.backdrop == .plain ? 0 : (font.pointSize * 0.42).rounded()
+    }
+
+    /// `origin` is the top-left of the label's box.
+    static func layout(text: String, at origin: CGPoint, style: ToolStyle, unit: CGFloat) -> Result {
+        let font = font(style, unit: unit)
+        let probe = (text + "\u{200B}") as NSString
         var size = probe.boundingRect(with: CGSize(width: 100_000, height: 100_000),
                                       options: [.usesLineFragmentOrigin, .usesFontLeading],
                                       attributes: [.font: font]).size
         size = CGSize(width: ceil(max(size.width, font.pointSize * 0.1)), height: ceil(size.height))
-        let pad = a.style.backdrop == .plain ? 0 : (font.pointSize * 0.42).rounded()
-        let box = CGRect(x: a.rect.minX, y: a.rect.minY, width: size.width + 2 * pad, height: size.height + 2 * pad * 0.62)
-        let origin = CGPoint(x: box.minX + pad, y: box.minY + pad * 0.62)
-        let radius = a.style.backdrop == .pill ? box.height / 2 : min(box.height * 0.28, font.pointSize * 0.5)
-        return Result(box: box, textOrigin: origin, textSize: size, padding: pad, radius: radius)
+        let pad = padding(style, font: font)
+        let box = CGRect(x: origin.x, y: origin.y, width: size.width + 2 * pad, height: size.height + 2 * pad * 0.62)
+        let textOrigin = CGPoint(x: box.minX + pad, y: box.minY + pad * 0.62)
+        let radius = style.backdrop == .pill ? box.height / 2 : min(box.height * 0.28, font.pointSize * 0.5)
+        return Result(box: box, textOrigin: textOrigin, textSize: size, radius: radius)
+    }
+
+    /// The box origin for a new label clicked at `p`: the text starts at the click, its first line centered on it.
+    static func origin(clickedAt p: CGPoint, style: ToolStyle, unit: CGFloat) -> CGPoint {
+        let font = font(style, unit: unit)
+        let pad = padding(style, font: font)
+        return CGPoint(x: p.x - pad, y: p.y - font.pointSize * 0.6 - pad * 0.62)
     }
 }
 
@@ -47,33 +59,108 @@ enum Handle: Hashable {
     case start, end, bend
 
     var isCorner: Bool { self == .tl || self == .tr || self == .br || self == .bl }
+
+    private static let rectHandles: [Handle] = [.tl, .t, .tr, .r, .br, .b, .bl, .l]
+
+    /// The eight handles around `r`, clockwise from the top left.
+    static func points(for r: CGRect) -> [(Handle, CGPoint)] {
+        rectHandles.map { ($0, $0.point(in: r)) }
+    }
+
+    /// The first handle within `radius` of `p`. `handles` and `p` must be in the same coordinates.
+    static func hitHandle(_ handles: [(Handle, CGPoint)], at p: CGPoint, radius: CGFloat) -> Handle? {
+        handles.first { hypot($0.1.x - p.x, $0.1.y - p.y) <= radius }?.0
+    }
+
+    /// Where this rect handle sits on `r`.
+    func point(in r: CGRect) -> CGPoint {
+        switch self {
+        case .tl: CGPoint(x: r.minX, y: r.minY)
+        case .t: CGPoint(x: r.midX, y: r.minY)
+        case .tr: CGPoint(x: r.maxX, y: r.minY)
+        case .r: CGPoint(x: r.maxX, y: r.midY)
+        case .br: CGPoint(x: r.maxX, y: r.maxY)
+        case .b: CGPoint(x: r.midX, y: r.maxY)
+        case .bl: CGPoint(x: r.minX, y: r.maxY)
+        case .l, .start, .end, .bend: CGPoint(x: r.minX, y: r.midY)
+        }
+    }
+
+    /// The rect handle across from this one: the point that stays put while this one is dragged.
+    var opposite: Handle {
+        switch self {
+        case .tl: .br
+        case .t: .b
+        case .tr: .bl
+        case .r: .l
+        case .br: .tl
+        case .b: .t
+        case .bl: .tr
+        case .l, .start, .end, .bend: .r
+        }
+    }
+
+    /// `r` with this handle dragged to `p`. A corner may lock to `ratio`; an edge moves only its own side.
+    func drag(_ r: CGRect, to p: CGPoint, ratio: CGFloat?) -> CGRect {
+        let anchor = opposite.point(in: r)
+        switch self {
+        case .t, .b: return .dragRect(anchor: CGPoint(x: r.minX, y: anchor.y), to: CGPoint(x: r.maxX, y: p.y), ratio: nil)
+        case .l, .r: return .dragRect(anchor: CGPoint(x: anchor.x, y: r.minY), to: CGPoint(x: p.x, y: r.maxY), ratio: nil)
+        default: return .dragRect(anchor: anchor, to: p, ratio: ratio)
+        }
+    }
+
+    var resizeCursor: NSCursor {
+        switch self {
+        case .tl: NSCursor.frameResize(position: .topLeft, directions: .all)
+        case .tr: NSCursor.frameResize(position: .topRight, directions: .all)
+        case .bl: NSCursor.frameResize(position: .bottomLeft, directions: .all)
+        case .br: NSCursor.frameResize(position: .bottomRight, directions: .all)
+        case .t: NSCursor.frameResize(position: .top, directions: .all)
+        case .b: NSCursor.frameResize(position: .bottom, directions: .all)
+        case .l: NSCursor.frameResize(position: .left, directions: .all)
+        case .r: NSCursor.frameResize(position: .right, directions: .all)
+        case .start, .end, .bend: NSCursor.crosshair
+        }
+    }
+}
+
+extension CGRect {
+    /// The rect between a fixed `anchor` and a dragged point `p`. With a `ratio` (width / height) the short side grows to match.
+    static func dragRect(anchor: CGPoint, to p: CGPoint, ratio: CGFloat?) -> CGRect {
+        var w = abs(p.x - anchor.x), h = abs(p.y - anchor.y)
+        if let ratio {
+            if w / max(h, 0.001) > ratio { h = w / ratio } else { w = h * ratio }
+        }
+        return CGRect(x: p.x >= anchor.x ? anchor.x : anchor.x - w, y: p.y >= anchor.y ? anchor.y : anchor.y - h, width: w, height: h)
+    }
 }
 
 // MARK: - Annotation geometry
 
+/// Everything that depends on an annotation's shape. Each operation is one switch over the five shapes;
+/// the kind only contributes data from `ToolKind.traits`.
 extension Annotation {
-    var strokeWidth: CGFloat { style.points(for: kind) }
-
-    /// Counters are centered on `p0`.
-    func counterRect(unit: CGFloat) -> CGRect {
-        let d = style.points(for: .counter) * unit
-        return CGRect(x: p0.x - d / 2, y: p0.y - d / 2, width: d, height: d)
+    /// Stroke width, diameter or thickness in points. 0 for kinds without a size.
+    var strokeWidth: CGFloat {
+        let sizes = kind.traits.sizes
+        return sizes.isEmpty ? 0 : sizes[min(max(style.sizeIndex, 0), 2)]
     }
 
-    func curveControl() -> CGPoint {
-        let mid = CGPoint(x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2)
-        let dx = p1.x - p0.x, dy = p1.y - p0.y
-        let len = hypot(dx, dy)
-        guard len > 0.001 else { return mid }
-        return CGPoint(x: mid.x - dy / len * bend * len, y: mid.y + dx / len * bend * len)
+    /// A box drawn as an outline: it has a stroke you can grab, rather than an area.
+    private var isOutlinedBox: Bool { !kind.traits.sizes.isEmpty && !style.filled }
+
+    /// The counter's disc, centered on its point.
+    func markerRect(_ center: CGPoint, unit: CGFloat) -> CGRect {
+        let d = strokeWidth * unit
+        return CGRect(x: center.x - d / 2, y: center.y - d / 2, width: d, height: d)
     }
 
-    var isCurved: Bool { kind == .arrow && style.curved }
-
-    /// Points along the arrow or line.
+    /// Points along a segment: the straight line, or the arrow's curve. Empty for other shapes.
     func centerline(samples: Int = 32) -> [CGPoint] {
-        guard isCurved else { return [p0, p1] }
-        let c = curveControl()
+        guard case .segment(let p0, let p1, let bend) = shape else { return [] }
+        guard style.curved else { return [p0, p1] }
+        let c = Self.curveControl(p0, p1, bend: bend)
         return (0...samples).map { i in
             let t = CGFloat(i) / CGFloat(samples)
             let u = 1 - t
@@ -82,35 +169,175 @@ extension Annotation {
         }
     }
 
-    /// The point the curvature handle sits on.
-    func bendHandle() -> CGPoint {
-        let c = curveControl()
+    private static func curveControl(_ p0: CGPoint, _ p1: CGPoint, bend: CGFloat) -> CGPoint {
+        let mid = CGPoint(x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2)
+        let dx = p1.x - p0.x, dy = p1.y - p0.y
+        let len = hypot(dx, dy)
+        guard len > 0.001 else { return mid }
+        return CGPoint(x: mid.x - dy / len * bend * len, y: mid.y + dx / len * bend * len)
+    }
+
+    /// Where the curvature handle sits.
+    private static func bendHandle(_ p0: CGPoint, _ p1: CGPoint, bend: CGFloat) -> CGPoint {
+        let c = curveControl(p0, p1, bend: bend)
         let mid = CGPoint(x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2)
         return CGPoint(x: mid.x + (c.x - mid.x) / 2, y: mid.y + (c.y - mid.y) / 2)
     }
 
     /// Bounds used for selection chrome and marquee selection, in document pixels.
     func bounds(unit: CGFloat) -> CGRect {
-        switch kind {
-        case .arrow, .line:
-            var pts = centerline(samples: 12)
-            if pts.count == 2 { pts = [p0, p1] }
-            return Self.boundingBox(pts).insetBy(dx: -strokeWidth * unit * 1.2, dy: -strokeWidth * unit * 1.2)
-        case .pen, .highlighter:
+        switch shape {
+        case .segment:
+            let w = strokeWidth * unit * 1.2
+            return Self.boundingBox(centerline(samples: 12)).insetBy(dx: -w, dy: -w)
+        case .box(let r):
+            let w = isOutlinedBox ? strokeWidth * unit / 2 : 0
+            return r.insetBy(dx: -w, dy: -w)
+        case .stroke(let points):
             guard !points.isEmpty else { return .zero }
             let w = strokeWidth * unit / 2
             return Self.boundingBox(points).insetBy(dx: -w, dy: -w)
-        case .counter:
-            return counterRect(unit: unit)
-        case .text:
-            return TextLayout.layout(self, unit: unit).box
-        case .rectangle, .ellipse:
-            let w = style.filled ? 0 : strokeWidth * unit / 2
-            return rect.insetBy(dx: -w, dy: -w)
-        default:
-            return rect
+        case .marker(let center):
+            return markerRect(center, unit: unit)
+        case .label(let origin, let text):
+            return TextLayout.layout(text: text, at: origin, style: style, unit: unit).box
         }
     }
+
+    /// `tol` is in document pixels (the canvas converts from screen points).
+    func hit(_ p: CGPoint, tol: CGFloat, unit: CGFloat) -> Bool {
+        switch shape {
+        case .segment:
+            return Self.distance(from: p, toPolyline: centerline()) <= tol + strokeWidth * unit * 0.8
+        case .box(let r):
+            // Redactions and spotlights are areas.
+            guard !kind.traits.sizes.isEmpty else { return r.insetBy(dx: -tol * 0.5, dy: -tol * 0.5).contains(p) }
+            let reach = tol + strokeWidth * unit / 2
+            if kind.traits.oval {
+                let rx = r.width / 2, ry = r.height / 2
+                guard rx > 0, ry > 0 else { return false }
+                let nx = (p.x - r.midX) / (rx + reach), ny = (p.y - r.midY) / (ry + reach)
+                if nx * nx + ny * ny > 1 { return false }
+                if style.filled { return true }
+                let ix = (p.x - r.midX) / max(rx - reach, 0.001), iy = (p.y - r.midY) / max(ry - reach, 0.001)
+                return rx - reach <= 0 || ry - reach <= 0 || ix * ix + iy * iy >= 1
+            }
+            if style.filled { return r.insetBy(dx: -tol, dy: -tol).contains(p) }
+            let outer = r.insetBy(dx: -reach, dy: -reach)
+            let inner = r.insetBy(dx: reach, dy: reach)
+            return outer.contains(p) && (inner.width <= 0 || inner.height <= 0 || !inner.contains(p))
+        case .stroke(let points):
+            let reach = tol + strokeWidth * unit / 2
+            if points.count == 1 { return hypot(p.x - points[0].x, p.y - points[0].y) <= reach }
+            return Self.distance(from: p, toPolyline: points) <= reach
+        case .marker(let center):
+            let r = markerRect(center, unit: unit)
+            return hypot(p.x - r.midX, p.y - r.midY) <= r.width / 2 + tol * 0.5
+        case .label(let origin, let text):
+            return TextLayout.layout(text: text, at: origin, style: style, unit: unit).box.insetBy(dx: -tol * 0.5, dy: -tol * 0.5).contains(p)
+        }
+    }
+
+    func handlePoints(unit: CGFloat) -> [(Handle, CGPoint)] {
+        switch shape {
+        case .segment(let p0, let p1, let bend):
+            var result: [(Handle, CGPoint)] = [(.start, p0), (.end, p1)]
+            if style.curved { result.append((.bend, Self.bendHandle(p0, p1, bend: bend))) }
+            return result
+        case .box(let r):
+            return Handle.points(for: r)
+        case .label(let origin, let text):
+            let box = TextLayout.layout(text: text, at: origin, style: style, unit: unit).box
+            return Handle.points(for: box).filter { $0.0.isCorner }
+        case .stroke, .marker:
+            return []
+        }
+    }
+
+    /// Moves `handle` to `p`, starting from `original` so a drag never accumulates error.
+    /// `constrain` (Shift) snaps segment ends to 45 degrees and keeps box corners square.
+    mutating func apply(handle: Handle, to p: CGPoint, original o: Annotation, unit: CGFloat, constrain: Bool) {
+        switch o.shape {
+        case .segment(let p0, let p1, let bend):
+            switch handle {
+            case .start:
+                shape = .segment(p0: constrain ? Self.snapAngle(from: p1, to: p) : p, p1: p1, bend: bend)
+            case .end:
+                shape = .segment(p0: p0, p1: constrain ? Self.snapAngle(from: p0, to: p) : p, bend: bend)
+            case .bend:
+                let mid = CGPoint(x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2)
+                let dx = p1.x - p0.x, dy = p1.y - p0.y
+                let len = hypot(dx, dy)
+                guard len > 0.001 else { return }
+                let perp = CGPoint(x: -dy / len, y: dx / len)
+                shape = .segment(p0: p0, p1: p1, bend: 2 * ((p.x - mid.x) * perp.x + (p.y - mid.y) * perp.y) / len)
+            default:
+                break
+            }
+        case .box(let r):
+            shape = .box(handle.drag(r, to: p, ratio: constrain ? 1 : nil))
+        case .label(let origin, let text):
+            // Corners scale the font around the opposite corner.
+            let box = TextLayout.layout(text: text, at: origin, style: o.style, unit: unit).box
+            let anchor = handle.opposite.point(in: box), moving = handle.point(in: box)
+            let oldDist = hypot(moving.x - anchor.x, moving.y - anchor.y)
+            guard oldDist > 0 else { return }
+            let scale = max(0.2, min(8, hypot(p.x - anchor.x, p.y - anchor.y) / oldDist))
+            let newSize = max(8, min(400, o.style.fontSize * Double(scale)))
+            let applied = CGFloat(newSize / o.style.fontSize)
+            style.fontSize = newSize
+            shape = .label(origin: CGPoint(x: anchor.x - (anchor.x - origin.x) * applied, y: anchor.y - (anchor.y - origin.y) * applied), text: text)
+        case .stroke, .marker:
+            break
+        }
+    }
+
+    mutating func translate(dx: CGFloat, dy: CGFloat) {
+        func moved(_ p: CGPoint) -> CGPoint { CGPoint(x: p.x + dx, y: p.y + dy) }
+        switch shape {
+        case .segment(let p0, let p1, let bend): shape = .segment(p0: moved(p0), p1: moved(p1), bend: bend)
+        case .box(let r): shape = .box(r.offsetBy(dx: dx, dy: dy))
+        case .stroke(let points): shape = .stroke(points.map(moved))
+        case .marker(let center): shape = .marker(moved(center))
+        case .label(let origin, let text): shape = .label(origin: moved(origin), text: text)
+        }
+    }
+
+    /// Reshapes a new annotation as it is dragged out from `start` to `p`. `constrain` (Shift) snaps
+    /// segments to 45 degrees, makes boxes square and freehand strokes straight. `minStep` is the shortest
+    /// freehand segment kept, in document pixels.
+    mutating func dragOut(from start: CGPoint, to p: CGPoint, constrain: Bool, minStep: CGFloat) {
+        switch shape {
+        case .segment(let p0, _, let bend):
+            shape = .segment(p0: p0, p1: constrain ? Self.snapAngle(from: start, to: p) : p, bend: bend)
+        case .box:
+            shape = .box(.dragRect(anchor: start, to: p, ratio: constrain ? 1 : nil))
+        case .stroke(var points):
+            if constrain {
+                points = [start, p]
+            } else if let last = points.last, hypot(p.x - last.x, p.y - last.y) >= minStep {
+                points.append(p)
+            }
+            shape = .stroke(points)
+        case .marker:
+            shape = .marker(p)
+        case .label:
+            break
+        }
+    }
+
+    /// True for an annotation not worth keeping once made: a click without a drag (`minLength` in document
+    /// pixels), or a label left blank.
+    func isTooSmall(minLength: CGFloat) -> Bool {
+        switch shape {
+        case .segment(let p0, let p1, _): hypot(p1.x - p0.x, p1.y - p0.y) < minLength
+        case .box(let r): max(r.width, r.height) < minLength
+        case .stroke, .marker: false
+        case .label(_, let text): text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+    }
+
+    // MARK: Helpers
 
     static func boundingBox(_ pts: [CGPoint]) -> CGRect {
         guard let first = pts.first else { return .zero }
@@ -137,132 +364,6 @@ extension Annotation {
         return best
     }
 
-    /// `tol` is in document pixels (the canvas converts from screen points).
-    func hit(_ p: CGPoint, tol: CGFloat, unit: CGFloat) -> Bool {
-        switch kind {
-        case .arrow, .line:
-            return Self.distance(from: p, toPolyline: centerline()) <= tol + strokeWidth * unit * 0.8
-        case .pen, .highlighter:
-            let reach = tol + strokeWidth * unit / 2
-            if points.count == 1 { return hypot(p.x - points[0].x, p.y - points[0].y) <= reach }
-            return Self.distance(from: p, toPolyline: points) <= reach
-        case .counter:
-            let r = counterRect(unit: unit)
-            return hypot(p.x - r.midX, p.y - r.midY) <= r.width / 2 + tol * 0.5
-        case .text:
-            return TextLayout.layout(self, unit: unit).box.insetBy(dx: -tol * 0.5, dy: -tol * 0.5).contains(p)
-        case .rectangle:
-            if style.filled { return rect.insetBy(dx: -tol, dy: -tol).contains(p) }
-            let reach = tol + strokeWidth * unit / 2
-            let outer = rect.insetBy(dx: -reach, dy: -reach)
-            let inner = rect.insetBy(dx: reach, dy: reach)
-            return outer.contains(p) && (inner.width <= 0 || inner.height <= 0 || !inner.contains(p))
-        case .ellipse:
-            let reach = tol + strokeWidth * unit / 2
-            let rx = rect.width / 2, ry = rect.height / 2
-            guard rx > 0, ry > 0 else { return false }
-            let nx = (p.x - rect.midX) / (rx + reach), ny = (p.y - rect.midY) / (ry + reach)
-            if nx * nx + ny * ny > 1 { return false }
-            if style.filled { return true }
-            let ix = (p.x - rect.midX) / max(rx - reach, 0.001), iy = (p.y - rect.midY) / max(ry - reach, 0.001)
-            return rx - reach <= 0 || ry - reach <= 0 || ix * ix + iy * iy >= 1
-        case .pixelate, .blur, .spotlight:
-            return rect.insetBy(dx: -tol * 0.5, dy: -tol * 0.5).contains(p)
-        default:
-            return false
-        }
-    }
-
-    // MARK: Handles
-
-    func handlePoints(unit: CGFloat) -> [(Handle, CGPoint)] {
-        switch kind {
-        case .arrow:
-            var result: [(Handle, CGPoint)] = [(.start, p0), (.end, p1)]
-            if isCurved { result.append((.bend, bendHandle())) }
-            return result
-        case .line:
-            return [(.start, p0), (.end, p1)]
-        case .rectangle, .ellipse, .pixelate, .blur, .spotlight:
-            let r = rect
-            return [(.tl, CGPoint(x: r.minX, y: r.minY)), (.t, CGPoint(x: r.midX, y: r.minY)),
-                    (.tr, CGPoint(x: r.maxX, y: r.minY)), (.r, CGPoint(x: r.maxX, y: r.midY)),
-                    (.br, CGPoint(x: r.maxX, y: r.maxY)), (.b, CGPoint(x: r.midX, y: r.maxY)),
-                    (.bl, CGPoint(x: r.minX, y: r.maxY)), (.l, CGPoint(x: r.minX, y: r.midY))]
-        case .text:
-            let r = TextLayout.layout(self, unit: unit).box
-            return [(.tl, CGPoint(x: r.minX, y: r.minY)), (.tr, CGPoint(x: r.maxX, y: r.minY)),
-                    (.br, CGPoint(x: r.maxX, y: r.maxY)), (.bl, CGPoint(x: r.minX, y: r.maxY))]
-        default:
-            return []
-        }
-    }
-
-    /// Moves `handle` to `p`, starting from `original` so a drag never accumulates error.
-    mutating func apply(handle: Handle, to p: CGPoint, original o: Annotation, unit: CGFloat, constrain: Bool) {
-        switch kind {
-        case .arrow, .line:
-            switch handle {
-            case .start: p0 = p
-            case .end: p1 = p
-            case .bend:
-                let mid = CGPoint(x: (o.p0.x + o.p1.x) / 2, y: (o.p0.y + o.p1.y) / 2)
-                let dx = o.p1.x - o.p0.x, dy = o.p1.y - o.p0.y
-                let len = hypot(dx, dy)
-                guard len > 0.001 else { return }
-                let perp = CGPoint(x: -dy / len, y: dx / len)
-                bend = 2 * ((p.x - mid.x) * perp.x + (p.y - mid.y) * perp.y) / len
-            default: break
-            }
-            if constrain, handle == .start || handle == .end {
-                let anchor = handle == .start ? p1 : p0
-                let moved = Self.snapAngle(from: anchor, to: p)
-                if handle == .start { p0 = moved } else { p1 = moved }
-            }
-        case .text:
-            let layout = TextLayout.layout(o, unit: unit).box
-            let anchor: CGPoint
-            let moving: CGPoint
-            switch handle {
-            case .tl: anchor = CGPoint(x: layout.maxX, y: layout.maxY); moving = CGPoint(x: layout.minX, y: layout.minY)
-            case .tr: anchor = CGPoint(x: layout.minX, y: layout.maxY); moving = CGPoint(x: layout.maxX, y: layout.minY)
-            case .br: anchor = CGPoint(x: layout.minX, y: layout.minY); moving = CGPoint(x: layout.maxX, y: layout.maxY)
-            default: anchor = CGPoint(x: layout.maxX, y: layout.minY); moving = CGPoint(x: layout.minX, y: layout.maxY)
-            }
-            let oldDist = hypot(moving.x - anchor.x, moving.y - anchor.y)
-            guard oldDist > 0 else { return }
-            let scale = max(0.2, min(8, hypot(p.x - anchor.x, p.y - anchor.y) / oldDist))
-            let newSize = max(8, min(400, o.style.fontSize * Double(scale)))
-            let applied = CGFloat(newSize / o.style.fontSize)
-            style.fontSize = newSize
-            rect.origin = CGPoint(x: anchor.x - (anchor.x - o.rect.minX) * applied,
-                                  y: anchor.y - (anchor.y - o.rect.minY) * applied)
-        default:
-            var l = o.rect.minX, r = o.rect.maxX, t = o.rect.minY, b = o.rect.maxY
-            switch handle {
-            case .tl: l = p.x; t = p.y
-            case .t: t = p.y
-            case .tr: r = p.x; t = p.y
-            case .r: r = p.x
-            case .br: r = p.x; b = p.y
-            case .b: b = p.y
-            case .bl: l = p.x; b = p.y
-            case .l: l = p.x
-            default: break
-            }
-            if constrain, handle.isCorner {
-                let side = max(abs(r - l), abs(b - t))
-                switch handle {
-                case .tl: l = r - side; t = b - side
-                case .tr: r = l + side; t = b - side
-                case .br: r = l + side; b = t + side
-                default: l = r - side; b = t + side
-                }
-            }
-            rect = CGRect(x: min(l, r), y: min(t, b), width: abs(r - l), height: abs(b - t))
-        }
-    }
-
     /// Snaps the direction from `a` to `p` to the nearest 45 degrees.
     static func snapAngle(from a: CGPoint, to p: CGPoint) -> CGPoint {
         let dx = p.x - a.x, dy = p.y - a.y
@@ -271,81 +372,5 @@ extension Annotation {
         let step = CGFloat.pi / 4
         let angle = (atan2(dy, dx) / step).rounded() * step
         return CGPoint(x: a.x + cos(angle) * len, y: a.y + sin(angle) * len)
-    }
-}
-
-// MARK: - Crop math
-
-enum CropMath {
-    static func handlePoints(_ r: CGRect) -> [(Handle, CGPoint)] {
-        [(.tl, CGPoint(x: r.minX, y: r.minY)), (.t, CGPoint(x: r.midX, y: r.minY)),
-         (.tr, CGPoint(x: r.maxX, y: r.minY)), (.r, CGPoint(x: r.maxX, y: r.midY)),
-         (.br, CGPoint(x: r.maxX, y: r.maxY)), (.b, CGPoint(x: r.midX, y: r.maxY)),
-         (.bl, CGPoint(x: r.minX, y: r.maxY)), (.l, CGPoint(x: r.minX, y: r.midY))]
-    }
-
-    /// Resizes `rect` by dragging `handle` to `p`, inside `limit`, optionally locked to `ratio` (width / height).
-    static func resize(_ rect: CGRect, handle: Handle, to point: CGPoint, ratio: CGFloat?, limit: CGRect, minSize: CGFloat) -> CGRect {
-        let p = CGPoint(x: min(max(point.x, limit.minX), limit.maxX), y: min(max(point.y, limit.minY), limit.maxY))
-        var l = rect.minX, r = rect.maxX, t = rect.minY, b = rect.maxY
-        switch handle {
-        case .tl: l = p.x; t = p.y
-        case .t: t = p.y
-        case .tr: r = p.x; t = p.y
-        case .r: r = p.x
-        case .br: r = p.x; b = p.y
-        case .b: b = p.y
-        case .bl: l = p.x; b = p.y
-        case .l: l = p.x
-        default: break
-        }
-        guard let ratio else {
-            var out = CGRect(x: min(l, r), y: min(t, b), width: abs(r - l), height: abs(b - t))
-            if out.width < minSize { out.size.width = minSize; if l > r { out.origin.x = r } }
-            if out.height < minSize { out.size.height = minSize; if t > b { out.origin.y = b } }
-            return out.intersection(limit).isNull ? rect : out
-        }
-
-        if handle.isCorner {
-            let anchor = CGPoint(x: (handle == .tl || handle == .bl) ? rect.maxX : rect.minX,
-                                 y: (handle == .tl || handle == .tr) ? rect.maxY : rect.minY)
-            let sx: CGFloat = p.x >= anchor.x ? 1 : -1
-            let sy: CGFloat = p.y >= anchor.y ? 1 : -1
-            let availW = sx > 0 ? limit.maxX - anchor.x : anchor.x - limit.minX
-            let availH = sy > 0 ? limit.maxY - anchor.y : anchor.y - limit.minY
-            var w = max(abs(p.x - anchor.x), minSize)
-            var h = w / ratio
-            if h < abs(p.y - anchor.y) { h = abs(p.y - anchor.y); w = h * ratio }
-            let scale = min(1, availW / max(w, 1), availH / max(h, 1))
-            w *= scale; h *= scale
-            return CGRect(x: sx > 0 ? anchor.x : anchor.x - w, y: sy > 0 ? anchor.y : anchor.y - h, width: w, height: h)
-        }
-
-        // Edge handle: the dragged edge sets one dimension, the other follows around the center.
-        let horizontal = handle == .l || handle == .r
-        if horizontal {
-            let fixedX = handle == .r ? rect.minX : rect.maxX
-            var w = max(abs(p.x - fixedX), minSize)
-            var h = w / ratio
-            let maxH = 2 * min(rect.midY - limit.minY, limit.maxY - rect.midY)
-            if h > maxH { h = maxH; w = h * ratio }
-            let x = handle == .r ? fixedX : fixedX - w
-            return CGRect(x: x, y: rect.midY - h / 2, width: w, height: h)
-        } else {
-            let fixedY = handle == .b ? rect.minY : rect.maxY
-            var h = max(abs(p.y - fixedY), minSize)
-            var w = h * ratio
-            let maxW = 2 * min(rect.midX - limit.minX, limit.maxX - rect.midX)
-            if w > maxW { w = maxW; h = w / ratio }
-            let y = handle == .b ? fixedY : fixedY - h
-            return CGRect(x: rect.midX - w / 2, y: y, width: w, height: h)
-        }
-    }
-
-    /// The biggest rect of `ratio` that fits inside `rect`, centered.
-    static func fit(_ rect: CGRect, ratio: CGFloat) -> CGRect {
-        var w = rect.width, h = rect.width / ratio
-        if h > rect.height { h = rect.height; w = h * ratio }
-        return CGRect(x: rect.midX - w / 2, y: rect.midY - h / 2, width: w, height: h)
     }
 }

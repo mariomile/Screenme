@@ -8,6 +8,8 @@ extension Pref {
     }
     static let editorBackground = PrefKey(name: "editor.background", defaultValue: "")
     static let editorBackgroundPresets = PrefKey(name: "editor.backgroundPresets", defaultValue: "")
+    /// The spotlight dim level a new document starts with: the last one used.
+    static let editorSpotlightDim = PrefKey(name: "editor.spotlightDim", defaultValue: 0.6)
 }
 
 enum EditorStore {
@@ -23,7 +25,7 @@ enum EditorStore {
     }
 
     static func style(for tool: ToolKind) -> ToolStyle {
-        load(Pref.editorStyle(tool), as: ToolStyle.self) ?? .defaults(for: tool)
+        load(Pref.editorStyle(tool), as: ToolStyle.self) ?? tool.traits.style
     }
 
     static func save(style: ToolStyle, for tool: ToolKind) {

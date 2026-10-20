@@ -49,186 +49,33 @@ enum Palette {
     static let presets: [RGBA] = [red, orange, yellow, green, blue, purple, ink, white]
 }
 
-// MARK: - Tools
-
-enum ToolKind: String, Codable, CaseIterable, Identifiable {
-    case select, arrow, line, rectangle, ellipse, text, pen, highlighter, counter, pixelate, blur, spotlight, crop
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .select: "Select"
-        case .arrow: "Arrow"
-        case .line: "Line"
-        case .rectangle: "Rectangle"
-        case .ellipse: "Ellipse"
-        case .text: "Text"
-        case .pen: "Pen"
-        case .highlighter: "Highlighter"
-        case .counter: "Counter"
-        case .pixelate: "Pixelate"
-        case .blur: "Blur"
-        case .spotlight: "Spotlight"
-        case .crop: "Crop"
-        }
-    }
-
-    /// Single-letter shortcut.
-    var key: String {
-        switch self {
-        case .select: "v"
-        case .arrow: "a"
-        case .line: "l"
-        case .rectangle: "r"
-        case .ellipse: "o"
-        case .text: "t"
-        case .pen: "p"
-        case .highlighter: "h"
-        case .counter: "n"
-        case .pixelate: "x"
-        case .blur: "b"
-        case .spotlight: "s"
-        case .crop: "c"
-        }
-    }
-
-    var tooltip: String { "\(title) (\(key.uppercased()))" }
-
-    var symbol: String {
-        switch self {
-        case .select: "cursorarrow"
-        case .arrow: "arrow.up.right"
-        case .line: "line.diagonal"
-        case .rectangle: "rectangle"
-        case .ellipse: "circle"
-        case .text: "textformat"
-        case .pen: "pencil.tip"
-        case .highlighter: "highlighter"
-        case .counter: "1.circle"
-        case .pixelate: "squareshape.split.3x3"
-        case .blur: "drop"
-        case .spotlight: "flashlight.on.fill"
-        case .crop: "crop"
-        }
-    }
-
-    var isLineLike: Bool { self == .arrow || self == .line }
-    var isFreehand: Bool { self == .pen || self == .highlighter }
-    var isRedaction: Bool { self == .pixelate || self == .blur }
-    /// Kinds that are dragged out as a rectangle.
-    var isBox: Bool { self == .rectangle || self == .ellipse || isRedaction || self == .spotlight }
-    var isAnnotation: Bool { self != .select && self != .crop }
-}
-
-enum TextBackdrop: String, Codable, CaseIterable, Identifiable {
-    case plain, pill, outline
-    var id: String { rawValue }
-    var title: String {
-        switch self {
-        case .plain: "Plain"
-        case .pill: "Pill"
-        case .outline: "Outline"
-        }
-    }
-}
-
-enum FontWeightChoice: String, Codable, CaseIterable, Identifiable {
-    case regular, medium, semibold, bold, heavy
-    var id: String { rawValue }
-    var title: String { rawValue.capitalized }
-    var weight: NSFont.Weight {
-        switch self {
-        case .regular: .regular
-        case .medium: .medium
-        case .semibold: .semibold
-        case .bold: .bold
-        case .heavy: .heavy
-        }
-    }
-}
-
-/// Everything the inspector can change about an annotation. One per tool is remembered.
-struct ToolStyle: Codable, Equatable {
-    var color: RGBA
-    /// 0, 1, 2 for S, M, L.
-    var sizeIndex = 1
-    var filled = false
-    var rounded = false
-    var dashed = false
-    var shadow = false
-    var opacity = 1.0
-    // Arrow
-    var curved = false
-    var outline = false
-    // Text
-    var fontSize = 24.0
-    var weight = FontWeightChoice.semibold
-    var backdrop = TextBackdrop.plain
-    // Redaction strength, 0...1
-    var intensity = 0.5
-    // Spotlight
-    var ellipseSpot = false
-    var dim = 0.6
-
-    static func defaults(for kind: ToolKind) -> ToolStyle {
-        var s = ToolStyle(color: Palette.red)
-        switch kind {
-        case .highlighter:
-            s.color = Palette.yellow
-            s.opacity = 0.85
-        case .arrow:
-            s.shadow = true
-        case .counter:
-            s.shadow = true
-        case .text:
-            s.fontSize = 26
-        case .pixelate, .blur:
-            s.intensity = 0.55
-        default:
-            break
-        }
-        return s
-    }
-
-    /// Stroke width, diameter or thickness in points for the S/M/L choice.
-    func points(for kind: ToolKind) -> CGFloat {
-        let i = min(max(sizeIndex, 0), 2)
-        switch kind {
-        case .arrow: return [3, 5, 8][i]
-        case .highlighter: return [14, 22, 34][i]
-        case .counter: return [24, 32, 44][i]
-        default: return [2, 4, 7][i]
-        }
-    }
-}
-
 // MARK: - Annotation
 
 struct Annotation: Identifiable, Equatable {
+    /// The geometry, in document pixels. Which case an annotation has follows from its kind (`ToolKind.Traits.shape`).
+    enum Shape: Equatable {
+        /// Arrow and line: the endpoints, and the arrow's curvature as a fraction of its length.
+        case segment(p0: CGPoint, p1: CGPoint, bend: CGFloat)
+        /// Rectangle, ellipse, redactions and spotlight.
+        case box(CGRect)
+        /// Pen and highlighter.
+        case stroke([CGPoint])
+        /// Counter: its center.
+        case marker(CGPoint)
+        /// Text: the top-left of its box, and the text.
+        case label(origin: CGPoint, text: String)
+    }
+
     var id = UUID()
     var kind: ToolKind
     var style: ToolStyle
-    /// Box-like kinds (rectangle, ellipse, redaction, spotlight) and the text origin. Document pixels.
-    var rect = CGRect.zero
-    /// Arrow and line endpoints, and the counter center (`p0`).
-    var p0 = CGPoint.zero
-    var p1 = CGPoint.zero
-    /// Arrow curvature, as a fraction of the arrow length.
-    var bend: CGFloat = 0.3
-    var points: [CGPoint] = []
-    var text = ""
+    var shape: Shape
 
-    init(kind: ToolKind, style: ToolStyle) {
+    /// A new annotation of `kind` started at `p`.
+    init(kind: ToolKind, style: ToolStyle, at p: CGPoint) {
         self.kind = kind
         self.style = style
-    }
-
-    mutating func translate(dx: CGFloat, dy: CGFloat) {
-        rect.origin.x += dx; rect.origin.y += dy
-        p0.x += dx; p0.y += dy
-        p1.x += dx; p1.y += dy
-        for i in points.indices { points[i].x += dx; points[i].y += dy }
+        self.shape = kind.traits.shape(p)
     }
 }
 
@@ -348,27 +195,6 @@ enum SolidSwatches {
 
 // MARK: - Document state
 
-enum CropAspect: String, CaseIterable, Identifiable {
-    case free, square, fourThree, sixteenNine
-    var id: String { rawValue }
-    var title: String {
-        switch self {
-        case .free: "Free"
-        case .square: "1:1"
-        case .fourThree: "4:3"
-        case .sixteenNine: "16:9"
-        }
-    }
-    var ratio: CGFloat? {
-        switch self {
-        case .free: nil
-        case .square: 1
-        case .fourThree: 4.0 / 3.0
-        case .sixteenNine: 16.0 / 9.0
-        }
-    }
-}
-
 /// Everything that is undoable. The image itself is never modified: crop, resize and
 /// background are all applied only when the picture is flattened.
 struct EditState: Equatable {
@@ -380,6 +206,13 @@ struct EditState: Equatable {
     /// Fills the part of the crop rect outside the image.
     var canvasFill = RGBA.white
     var background = BackgroundSettings()
+    /// How dark the picture gets around spotlights, 0...1. One level for the whole document.
+    var spotlightDim = 0.6
+}
+
+extension EditState {
+    /// Where everything lands in the exported picture.
+    var exportLayout: Layout { Layout.make(crop: cropRect, background: background) }
 }
 
 /// Where the cropped image lands on the final canvas.
@@ -388,6 +221,8 @@ struct Layout: Equatable {
     /// The crop rect placed on the canvas.
     var contentRect: CGRect
     var cropRect: CGRect
+    /// The wrap around the image. Nil when the image fills the canvas: no background, or the crop preview.
+    var background: BackgroundSettings?
 
     /// Translation from image pixels to canvas pixels.
     var docOffset: CGPoint { CGPoint(x: contentRect.minX - cropRect.minX, y: contentRect.minY - cropRect.minY) }
@@ -395,9 +230,9 @@ struct Layout: Equatable {
     func canvasToDoc(_ p: CGPoint) -> CGPoint { CGPoint(x: p.x - docOffset.x, y: p.y - docOffset.y) }
     func docToCanvas(_ p: CGPoint) -> CGPoint { CGPoint(x: p.x + docOffset.x, y: p.y + docOffset.y) }
 
-    static func make(crop: CGRect, background bg: BackgroundSettings) -> Layout {
+    static func make(crop: CGRect, background bg: BackgroundSettings?) -> Layout {
         let cw = crop.width, ch = crop.height
-        guard bg.enabled else {
+        guard let bg, bg.enabled else {
             return Layout(canvasSize: crop.size, contentRect: CGRect(origin: .zero, size: crop.size), cropRect: crop)
         }
         let pad = (bg.padding / 100) * min(cw, ch)
@@ -411,6 +246,6 @@ struct Layout: Equatable {
         let y = pad + (h - 2 * pad - ch) * bg.alignment.fy
         return Layout(canvasSize: CGSize(width: w, height: h),
                       contentRect: CGRect(x: x.rounded(), y: y.rounded(), width: cw, height: ch),
-                      cropRect: crop)
+                      cropRect: crop, background: bg)
     }
 }

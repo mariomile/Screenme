@@ -1,6 +1,5 @@
 import AppKit
 import Combine
-import UniformTypeIdentifiers
 
 enum EditorSheet: Identifiable {
     case resizeImage, resizeCanvas
@@ -15,27 +14,24 @@ final class EditorController: ObservableObject {
     let source: ImageSource
     var unit: CGFloat { source.unit }
 
-    /// The document. Mutating it redraws the canvas; SwiftUI is told separately with `notify()`.
-    var state: EditState {
-        didSet { canvas?.documentChanged() }
+    /// The document. It changes only through `update` and `perform` (and undo), so every change
+    /// redraws the canvas and tells SwiftUI here.
+    private(set) var state: EditState {
+        didSet {
+            canvas?.documentChanged()
+            notify()
+        }
     }
     private(set) var savedState: EditState
-    private var undoStack: [EditState] = []
-    private var redoStack: [EditState] = []
-    private var pendingSnapshot: EditState?
+    private var history = UndoHistory()
     private var annotationClipboard: [Annotation] = []
 
-    @Published var tool: ToolKind = .select {
-        didSet { toolChanged(from: oldValue) }
-    }
+    @Published private(set) var mode = Mode.select
     @Published var selection: Set<UUID> = []
     @Published var styles: [ToolKind: ToolStyle]
-    @Published var cropPending: CGRect?
-    @Published var cropAspect = CropAspect.free
     @Published var zoomPercent = 100
     @Published var sheet: EditorSheet?
     @Published var presets: [BackgroundPreset]
-    @Published var isEditingText = false
 
     weak var canvas: CanvasView?
     weak var window: NSWindow?
@@ -45,81 +41,76 @@ final class EditorController: ObservableObject {
         self.source = source
         var initial = EditState(cropRect: source.bounds)
         initial.background = EditorStore.background()
+        initial.spotlightDim = Prefs[Pref.editorSpotlightDim]
         state = initial
         savedState = initial
-        styles = Dictionary(uniqueKeysWithValues: ToolKind.allCases.filter(\.isAnnotation).map { ($0, EditorStore.style(for: $0)) })
+        styles = Dictionary(uniqueKeysWithValues: ToolKind.allCases.map { ($0, EditorStore.style(for: $0)) })
         presets = EditorStore.presets()
     }
 
     func notify() { objectWillChange.send() }
 
     var isDirty: Bool { state != savedState }
-    var canUndo: Bool { !undoStack.isEmpty }
-    var canRedo: Bool { !redoStack.isEmpty }
+    var canUndo: Bool { history.canUndo }
+    var canRedo: Bool { history.canRedo }
+
+    /// The document as it is now is what the file holds.
+    func markSaved() { savedState = state }
 
     // MARK: Layout
 
+    /// How far a crop can reach: the image, plus any canvas added around it.
     var cropLimit: CGRect { source.bounds.union(state.cropRect) }
-
-    var isCropping: Bool { tool == .crop && cropPending != nil }
 
     /// What the canvas shows. While cropping, the whole image is shown without the background wrap.
     var layout: Layout {
-        if isCropping {
-            var plain = state.background
-            plain.enabled = false
-            return Layout.make(crop: cropLimit, background: plain)
-        }
-        return Layout.make(crop: state.cropRect, background: state.background)
+        mode.crop != nil ? Layout.make(crop: cropLimit, background: nil) : state.exportLayout
     }
 
     /// Size of the exported picture in pixels.
     var outputSize: CGSize {
-        let size = Layout.make(crop: state.cropRect, background: state.background).canvasSize
+        let size = state.exportLayout.canvasSize
         return CGSize(width: (size.width * state.outputScale).rounded(), height: (size.height * state.outputScale).rounded())
     }
 
     // MARK: Undo
 
-    func beginChange() {
-        if pendingSnapshot == nil { pendingSnapshot = state }
+    typealias Checkpoint = UndoHistory.Checkpoint
+
+    /// A drag, a slider or an inline text edit takes a checkpoint when it starts, changes the document
+    /// with `update`, and ends with `commit(since:)`.
+    func checkpoint() -> Checkpoint { history.checkpoint(state) }
+
+    /// Changes the document without an undo step of its own: the interaction around it commits.
+    func update(_ change: (inout EditState) -> Void) {
+        change(&state)
     }
 
-    func endChange() {
-        guard let snapshot = pendingSnapshot else { return }
-        pendingSnapshot = nil
-        if snapshot != state {
-            undoStack.append(snapshot)
-            if undoStack.count > 300 { undoStack.removeFirst() }
-            redoStack.removeAll()
-        }
+    /// Makes everything since `before` one undo step (see `UndoHistory.commit`).
+    func commit(since before: Checkpoint, coalesce key: String? = nil) {
+        history.commit(from: before, to: state, coalesce: key)
         notify()
     }
 
+    /// A one-shot edit: one undo step.
     func perform(_ change: (inout EditState) -> Void) {
-        beginChange()
-        change(&state)
-        endChange()
+        let before = checkpoint()
+        update(change)
+        commit(since: before)
     }
 
     func undo() {
         canvas?.finishTextEditing()
-        endChange()
-        guard let previous = undoStack.popLast() else { return }
-        redoStack.append(state)
+        guard let previous = history.undo(from: state) else { return }
         state = previous
         pruneSelection()
-        notify()
     }
 
     func redo() {
         canvas?.finishTextEditing()
-        endChange()
-        guard let next = redoStack.popLast() else { return }
-        undoStack.append(state)
+        guard let next = history.redo(from: state) else { return }
         state = next
         pruneSelection()
-        notify()
     }
 
     private func pruneSelection() {
@@ -130,18 +121,22 @@ final class EditorController: ObservableObject {
 
     // MARK: Tools
 
-    private func toolChanged(from old: ToolKind) {
-        guard tool != old else { return }
+    /// Switches tool. Picking the current one again does nothing, so a crop in progress survives.
+    func choose(_ choice: ToolChoice) {
+        guard choice != mode.choice else { return }
+        let wasCropping = mode.crop != nil
         canvas?.finishTextEditing()
-        if old == .crop { cropPending = nil }
-        if tool == .crop {
+        switch choice {
+        case .select:
+            mode = .select
+        case .draw(let kind):
             selection = []
-            cropAspect = .free
-            cropPending = state.cropRect
-        } else if tool != .select {
+            mode = .draw(kind)
+        case .crop:
             selection = []
+            mode = .crop(CropSession(rect: state.cropRect))
         }
-        canvas?.documentChanged(refit: old == .crop || tool == .crop)
+        canvas?.documentChanged(refit: wasCropping || mode.crop != nil)
         canvas?.refreshCursor()
     }
 
@@ -154,7 +149,7 @@ final class EditorController: ObservableObject {
         let kinds = Set(selectedAnnotations.map(\.kind))
         if kinds.count == 1 { return kinds.first }
         if kinds.count > 1 { return nil }
-        return tool.isAnnotation ? tool : nil
+        return mode.drawKind
     }
 
     var contextStyle: ToolStyle? {
@@ -162,29 +157,42 @@ final class EditorController: ObservableObject {
         return selectedAnnotations.first?.style ?? styles[kind]
     }
 
-    /// Applies a style change to the selection (undoably) and remembers it as the tool's style.
-    /// Pass `live: true` for slider drags: the caller brackets them with `beginChange()` and `endChange()`.
-    func updateStyle(live: Bool = false, _ change: (inout ToolStyle) -> Void) {
+    /// Applies a style change to the selection and remembers it as the kind's style, without an undo step:
+    /// for slider drags, which commit when they end.
+    func applyStyle(_ change: (inout ToolStyle) -> Void) {
         guard let kind = contextKind else { return }
         let ids = selection
-        if !live { beginChange() }
-        var remembered = contextStyle ?? .defaults(for: kind)
+        var remembered = contextStyle ?? kind.traits.style
         change(&remembered)
         styles[kind] = remembered
         EditorStore.save(style: remembered, for: kind)
-        if !ids.isEmpty {
-            var s = state
+        guard !ids.isEmpty else { return }
+        update { s in
             for i in s.annotations.indices where ids.contains(s.annotations[i].id) {
                 change(&s.annotations[i].style)
             }
-            // One dim level for every spotlight keeps the overlay consistent.
-            if kind == .spotlight {
-                for i in s.annotations.indices where s.annotations[i].kind == .spotlight { s.annotations[i].style.dim = remembered.dim }
-            }
-            state = s
         }
-        if !live { endChange() }
-        notify()
+    }
+
+    /// A style change as one undo step.
+    func updateStyle(_ change: (inout ToolStyle) -> Void) {
+        let before = checkpoint()
+        applyStyle(change)
+        commit(since: before)
+    }
+
+    /// The custom color well. The color panel sends a stream of colors while the user drags in it:
+    /// they make one undo step as long as nothing else happens in between.
+    func setColor(_ color: RGBA) {
+        let before = checkpoint()
+        applyStyle { $0.color = color }
+        commit(since: before, coalesce: "color " + selection.map(\.uuidString).sorted().joined())
+    }
+
+    /// Sets the document's spotlight dim and remembers it for the next document, without an undo step.
+    func applySpotlightDim(_ dim: Double) {
+        update { $0.spotlightDim = dim }
+        Prefs[Pref.editorSpotlightDim] = dim
     }
 
     func select(_ ids: Set<UUID>) {
@@ -193,7 +201,7 @@ final class EditorController: ObservableObject {
     }
 
     func selectAll() {
-        tool = .select
+        choose(.select)
         selection = Set(state.annotations.map(\.id))
         canvas?.needsDisplay = true
     }
@@ -285,33 +293,37 @@ final class EditorController: ObservableObject {
 
     // MARK: Crop
 
+    /// Changes the crop being set up. Does nothing outside the crop tool.
+    func updateCrop(_ change: (inout CropSession) -> Void) {
+        guard case .crop(var session) = mode else { return }
+        change(&session)
+        mode = .crop(session)
+        canvas?.needsDisplay = true
+    }
+
     func setCropAspect(_ aspect: CropAspect) {
-        cropAspect = aspect
-        if let ratio = aspect.ratio, let pending = cropPending {
-            cropPending = CropMath.fit(pending, ratio: ratio)
-            canvas?.needsDisplay = true
+        updateCrop { session in
+            session.aspect = aspect
+            if let ratio = aspect.ratio { session.rect = CropMath.fit(session.rect, ratio: ratio) }
         }
     }
 
     func resetCropSelection() {
-        cropPending = cropLimit
-        cropAspect = .free
-        canvas?.needsDisplay = true
+        let limit = cropLimit
+        updateCrop { $0 = CropSession(rect: limit) }
     }
 
     func applyCrop() {
-        guard let pending = cropPending else { return }
-        let rect = pending.integral.intersection(cropLimit)
-        cropPending = nil
+        guard let session = mode.crop else { return }
+        let rect = session.rect.integral.intersection(cropLimit)
+        choose(.select)
         if rect.width >= 4, rect.height >= 4, rect != state.cropRect {
             perform { $0.cropRect = rect }
         }
-        tool = .select
     }
 
     func cancelCrop() {
-        cropPending = nil
-        tool = .select
+        choose(.select)
     }
 
     /// Back to the full image.
@@ -323,7 +335,7 @@ final class EditorController: ObservableObject {
     // MARK: Resize
 
     func resizeImage(toWidth width: CGFloat) {
-        let base = Layout.make(crop: state.cropRect, background: state.background).canvasSize.width
+        let base = state.exportLayout.canvasSize.width
         guard base > 0, width >= 1 else { return }
         perform { $0.outputScale = width / base }
     }
@@ -342,42 +354,28 @@ final class EditorController: ObservableObject {
     // MARK: Background
 
     func toggleBackground() {
-        if tool == .crop { cancelCrop() }
+        if mode.crop != nil { cancelCrop() }
         updateBackground { $0.enabled.toggle() }
     }
 
-    private var colorSettleTask: Task<Void, Never>?
-
-    /// A color picker drags continuously: group the drag into one undo step that closes when it goes quiet.
-    private func settleLater() {
-        colorSettleTask?.cancel()
-        colorSettleTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(600))
-            guard !Task.isCancelled else { return }
-            self?.endChange()
-        }
+    /// Changes the background and remembers it for the next document, without an undo step.
+    func applyBackground(_ change: (inout BackgroundSettings) -> Void) {
+        update { change(&$0.background) }
+        EditorStore.save(background: state.background)
     }
 
-    func setColorLive(_ color: RGBA) {
-        beginChange()
-        updateStyle(live: true) { $0.color = color }
-        settleLater()
+    /// A background change as one undo step.
+    func updateBackground(_ change: (inout BackgroundSettings) -> Void) {
+        let before = checkpoint()
+        applyBackground(change)
+        commit(since: before)
     }
 
-    func setBackgroundColorLive(_ color: RGBA) {
-        beginChange()
-        updateBackground(live: true) { $0.fill = .solid(color) }
-        settleLater()
-    }
-
-    func updateBackground(live: Bool = false, _ change: (inout BackgroundSettings) -> Void) {
-        if !live { beginChange() }
-        var s = state
-        change(&s.background)
-        state = s
-        EditorStore.save(background: s.background)
-        if !live { endChange() }
-        notify()
+    /// The custom background color well: one undo step per color panel drag, like `setColor`.
+    func setBackgroundColor(_ color: RGBA) {
+        let before = checkpoint()
+        applyBackground { $0.fill = .solid(color) }
+        commit(since: before, coalesce: "background color")
     }
 
     func savePreset(named name: String) {
@@ -402,236 +400,4 @@ final class EditorController: ObservableObject {
     func zoomOut() { canvas?.zoomStep(0.8) }
     func zoomFit() { canvas?.zoomToFit() }
     func zoomActual() { canvas?.zoomToActual() }
-
-    // MARK: Output
-
-    /// Pixels for the current document in the file's own format family.
-    private func flatten(for url: URL) -> (CGImage, UTType)? {
-        let jpeg = ImageFormat(of: url) == .jpg
-        guard let image = EditorRenderer.flatten(state: state, source: source, opaque: jpeg) else { return nil }
-        return (image, jpeg ? .jpeg : .png)
-    }
-
-    private func encode(_ image: CGImage, as type: UTType) -> Data? {
-        let data = NSMutableData()
-        guard let destination = CGImageDestinationCreateWithData(data, type.identifier as CFString, 1, nil) else { return nil }
-        let dpi = 72 * unit * state.outputScale
-        var properties: [CFString: Any] = [kCGImagePropertyDPIWidth: dpi, kCGImagePropertyDPIHeight: dpi]
-        if type == .jpeg { properties[kCGImageDestinationLossyCompressionQuality] = Prefs[Pref.jpegQuality] }
-        CGImageDestinationAddImage(destination, image, properties as CFDictionary)
-        return CGImageDestinationFinalize(destination) ? data as Data : nil
-    }
-
-    /// Done: flattens, overwrites the capture file in place, tells the rest of the app, closes.
-    func save() {
-        canvas?.finishTextEditing()
-        if isCropping { applyCrop() }
-        guard let (image, type) = flatten(for: item.url), let data = encode(image, as: type) else {
-            alert("Screenme could not render the image.")
-            return
-        }
-        do {
-            try data.write(to: item.url, options: .atomic)
-        } catch {
-            alert("Screenme could not save the image: \(error.localizedDescription)")
-            return
-        }
-        savedState = state
-        NotificationCenter.default.post(name: .captureUpdated, object: item.url)
-        if Prefs[Pref.afterShotCopy] { Clipboard.copyImage(at: item.url) }
-        window?.close()
-    }
-
-    /// Copies the flattened image without closing.
-    func copyImage() {
-        canvas?.finishTextEditing()
-        guard let image = EditorRenderer.flatten(state: state, source: source, opaque: false),
-              let data = encode(image, as: .png) else { return }
-        let board = NSPasteboard.general
-        board.clearContents()
-        board.setData(data, forType: .png)
-        CaptureAction.copy.confirm()
-    }
-
-    func saveAs() {
-        canvas?.finishTextEditing()
-        guard let window else { return }
-        let panel = NSSavePanel()
-        panel.directoryURL = Storage.saveDirectory
-        panel.canCreateDirectories = true
-        let stem = item.url.deletingPathExtension().lastPathComponent
-        let startJPEG = ImageFormat(of: item.url) == .jpg
-        panel.allowedContentTypes = [startJPEG ? .jpeg : .png]
-        panel.nameFieldStringValue = "\(stem).\(startJPEG ? "jpg" : "png")"
-
-        let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 120, height: 26), pullsDown: false)
-        popup.addItems(withTitles: ["PNG", "JPEG"])
-        popup.selectItem(at: startJPEG ? 1 : 0)
-        let label = NSTextField(labelWithString: "Format:")
-        let row = NSStackView(views: [label, popup])
-        row.spacing = 8
-        row.edgeInsets = NSEdgeInsets(top: 8, left: 0, bottom: 8, right: 0)
-        panel.accessoryView = row
-        let handler = FormatPopupHandler(panel: panel, stem: stem)
-        popup.target = handler
-        popup.action = #selector(FormatPopupHandler.changed(_:))
-
-        panel.beginSheetModal(for: window) { [weak self] response in
-            withExtendedLifetime(handler) {}
-            guard response == .OK, let url = panel.url, let self else { return }
-            let jpeg = popup.indexOfSelectedItem == 1
-            guard let image = EditorRenderer.flatten(state: self.state, source: self.source, opaque: jpeg),
-                  let data = self.encode(image, as: jpeg ? .jpeg : .png) else { return }
-            do {
-                try data.write(to: url, options: .atomic)
-                CaptureAction.saveAs.confirm(savedTo: url)
-            } catch {
-                self.alert("Screenme could not save the image: \(error.localizedDescription)")
-            }
-        }
-    }
-
-    /// A file holding the flattened image, for dragging out of the toolbar.
-    func dragFile() -> URL? {
-        canvas?.finishTextEditing()
-        guard let (image, type) = flatten(for: item.url), let data = encode(image, as: type) else { return nil }
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("ScreenmeEditorDrag/\(UUID().uuidString)", isDirectory: true)
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let url = folder.appendingPathComponent(item.url.lastPathComponent)
-        guard (try? data.write(to: url)) != nil else { return nil }
-        return url
-    }
-
-    func alert(_ text: String) {
-        let alert = NSAlert()
-        alert.messageText = text
-        alert.runModal()
-    }
-
-    // MARK: Closing
-
-    /// Asks what to do with unsaved edits. Returns true when the window may close right away.
-    func windowShouldClose(_ sender: NSWindow) -> Bool {
-        canvas?.finishTextEditing()
-        guard isDirty else { return true }
-        let alert = NSAlert()
-        alert.messageText = "Do you want to save the changes to this screenshot?"
-        alert.informativeText = "Your annotations will be lost if you don't save."
-        alert.addButton(withTitle: "Save")
-        alert.addButton(withTitle: "Don't Save")
-        alert.addButton(withTitle: "Cancel")
-        alert.beginSheetModal(for: sender) { [weak self] response in
-            guard let self else { return }
-            switch response {
-            case .alertFirstButtonReturn:
-                self.save()
-            case .alertSecondButtonReturn:
-                self.savedState = self.state
-                sender.close()
-            default:
-                break
-            }
-        }
-        return false
-    }
-
-    // MARK: Keyboard
-
-    /// Called from the window's key monitor. Returns true when the event was used.
-    func handleKeyDown(_ event: NSEvent) -> Bool {
-        let mods = event.modifierFlags.intersection([.command, .shift, .option, .control])
-        let key = event.charactersIgnoringModifiers?.lowercased() ?? ""
-        let inTextField = window?.firstResponder is NSText
-
-        if isEditingText {
-            if event.keyCode == 53 || (mods == .command && (event.keyCode == 36 || event.keyCode == 76)) {
-                canvas?.finishTextEditing()
-                return true
-            }
-        }
-
-        if mods.contains(.command) {
-            if inTextField, let selector = editSelector(for: key, shift: mods.contains(.shift)) {
-                NSApp.sendAction(selector, to: nil, from: nil)
-                return true
-            }
-            let shift = mods.contains(.shift)
-            let option = mods.contains(.option)
-            switch key {
-            case "z": shift ? redo() : undo(); return true
-            case "s": shift ? saveAs() : save(); return true
-            case "c":
-                guard !inTextField else { return false }
-                if !copySelection() { copyImage() }
-                return true
-            case "v": return inTextField ? false : pasteAnnotations()
-            case "d": duplicateSelection(); return true
-            case "a": if inTextField { return false }; selectAll(); return true
-            case "]": arrange(option ? .front : .forward); return true
-            case "[": arrange(option ? .back : .backward); return true
-            case "=", "+": zoomIn(); return true
-            case "-": zoomOut(); return true
-            case "0": zoomFit(); return true
-            case "1": zoomActual(); return true
-            case "w": window?.performClose(nil); return true
-            default: return false
-            }
-        }
-
-        guard !inTextField else { return false }
-
-        switch event.keyCode {
-        case 36, 76: // Return, Enter
-            if isCropping { applyCrop() } else { save() }
-            return true
-        case 53: // Escape
-            if isCropping { cancelCrop() } else if !selection.isEmpty { select([]) }
-            return true
-        case 51, 117: // Delete, Forward Delete
-            deleteSelection()
-            return true
-        case 123: nudge(dx: mods.contains(.shift) ? -10 : -1, dy: 0); return true
-        case 124: nudge(dx: mods.contains(.shift) ? 10 : 1, dy: 0); return true
-        case 125: nudge(dx: 0, dy: mods.contains(.shift) ? 10 : 1); return true
-        case 126: nudge(dx: 0, dy: mods.contains(.shift) ? -10 : -1); return true
-        default: break
-        }
-
-        if mods.isEmpty || mods == .shift, let match = ToolKind.allCases.first(where: { $0.key == key }) {
-            tool = match
-            return true
-        }
-        return false
-    }
-
-    private func editSelector(for key: String, shift: Bool) -> Selector? {
-        switch key {
-        case "z": return Selector(shift ? ("redo:") : ("undo:"))
-        case "x": return #selector(NSText.cut(_:))
-        case "c": return #selector(NSText.copy(_:))
-        case "v": return #selector(NSText.paste(_:))
-        case "a": return #selector(NSText.selectAll(_:))
-        default: return nil
-        }
-    }
-}
-
-/// Keeps the save panel's file extension in step with the format popup.
-@MainActor
-final class FormatPopupHandler: NSObject {
-    private let panel: NSSavePanel
-    private let stem: String
-
-    init(panel: NSSavePanel, stem: String) {
-        self.panel = panel
-        self.stem = stem
-    }
-
-    @objc func changed(_ sender: NSPopUpButton) {
-        let jpeg = sender.indexOfSelectedItem == 1
-        panel.allowedContentTypes = [jpeg ? .jpeg : .png]
-        let current = panel.nameFieldStringValue as NSString
-        let base = current.deletingPathExtension.isEmpty ? stem : current.deletingPathExtension
-        panel.nameFieldStringValue = "\(base).\(jpeg ? "jpg" : "png")"
-    }
 }
