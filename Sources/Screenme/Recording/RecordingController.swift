@@ -25,12 +25,16 @@ final class RecordingController {
         defer { preparing = false }
         _ = RecordingPrefs.registered
 
+        // The pre-record bar activates Screenme to receive Return and Esc; the user's app gets focus back after.
+        let previousApp = FocusKeeper.frontmostExternal()
+
         // 1. Pre-record bar.
         let preRecord = PreRecordUI(target: target)
         let decision = await preRecord.run()
         preRecord.dismiss()
         guard decision == .record else {
             preRecord.closeWebcam()
+            await FocusKeeper.restore(previousApp)
             return
         }
         let settings = RecordingSettings.current()
@@ -38,7 +42,7 @@ final class RecordingController {
         // 2. Desktop icons: hidden for the duration, restored afterwards.
         var hidIcons = false
         if settings.hideDesktopIcons, !DesktopIcons.isHidden {
-            DesktopIcons.toggle()
+            DesktopIcons.setHidden(true)
             hidIcons = true
             if settings.countdown == 0 { try? await Task.sleep(for: .milliseconds(700)) }
         }
@@ -48,19 +52,21 @@ final class RecordingController {
             let completed = await CountdownHUD().run(seconds: settings.countdown, around: target.cocoaFrame)
             guard completed else {
                 preRecord.closeWebcam()
-                if hidIcons { DesktopIcons.toggle() }
+                if hidIcons { DesktopIcons.setHidden(false) }
+                await FocusKeeper.restore(previousApp)
                 return
             }
         }
 
-        // 4. Capture.
+        // 4. Capture, with the user's app in front so it records as active and keeps the keyboard.
+        await FocusKeeper.restore(previousApp)
         let webcam = settings.webcam ? preRecord.takeWebcam() : nil
         if !settings.webcam { preRecord.closeWebcam() }
         do {
             active = try await begin(target, settings: settings, webcam: webcam, hidIcons: hidIcons)
         } catch {
             webcam?.close()
-            if hidIcons { DesktopIcons.toggle() }
+            if hidIcons { DesktopIcons.setHidden(false) }
             throw error
         }
         AppState.shared.isRecording = true
@@ -143,7 +149,7 @@ final class RecordingController {
         let url = await recording.recorder.finish(discard: discard)
         recording.effects?.stop()
         recording.webcam?.close()
-        if recording.hidIcons { DesktopIcons.toggle() }
+        if recording.hidIcons { DesktopIcons.setHidden(false) }
         active = nil
         AppState.shared.isRecording = false
         return url
@@ -197,6 +203,11 @@ final class RecordingController {
         }
         do {
             try await next.start(recording.setup)
+            // Stop or discard ran while the new stream was starting: it finished the old recorder, so drop this one.
+            guard active === recording, !recording.isEnding else {
+                _ = await next.finish(discard: true)
+                return
+            }
             recording.recorder = next
             recording.clock.reset()
             recording.outline?.setPaused(false)
