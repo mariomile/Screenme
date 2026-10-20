@@ -103,7 +103,6 @@ enum CropMath {
 // MARK: - Interaction
 
 /// The crop tool's mouse handling, cursor and overlay. The canvas hands its events here while the mode is `.crop`.
-/// `toView` converts document pixels to canvas view points.
 @MainActor
 struct CropInteraction {
     private enum Drag {
@@ -119,14 +118,14 @@ struct CropInteraction {
 
     private let drag: Drag
 
-    private static func handle(at view: CGPoint, of rect: CGRect, toView: (CGPoint) -> CGPoint) -> Handle? {
-        Handle.hitHandle(Handle.points(for: rect).map { ($0.0, toView($0.1)) }, at: view, radius: handleReach)
+    private static func handle(at view: CGPoint, of rect: CGRect, viewport: Viewport) -> Handle? {
+        Handle.hitHandle(Handle.points(for: rect).map { ($0.0, viewport.toView($0.1)) }, at: view, radius: handleReach)
     }
 
     /// A mouse-down at `doc` (`view` in canvas points): grabs a handle, moves the rect, or starts a new one.
-    init(mouseDownAt doc: CGPoint, view: CGPoint, controller: EditorController, toView: (CGPoint) -> CGPoint) {
+    init(mouseDownAt doc: CGPoint, view: CGPoint, controller: EditorController, viewport: Viewport) {
         let rect = controller.mode.crop?.rect ?? controller.cropLimit
-        if let handle = Self.handle(at: view, of: rect, toView: toView) {
+        if let handle = Self.handle(at: view, of: rect, viewport: viewport) {
             drag = .resize(handle, original: rect)
         } else if rect.contains(doc) {
             drag = .move(start: doc, original: rect)
@@ -160,18 +159,17 @@ struct CropInteraction {
         controller.resetCropSelection()
     }
 
-    static func cursor(at view: CGPoint, doc: CGPoint, session: CropSession, toView: (CGPoint) -> CGPoint) -> NSCursor {
-        if let handle = handle(at: view, of: session.rect, toView: toView) { return handle.resizeCursor }
+    static func cursor(at view: CGPoint, doc: CGPoint, session: CropSession, viewport: Viewport) -> NSCursor {
+        if let handle = handle(at: view, of: session.rect, viewport: viewport) { return handle.resizeCursor }
         return session.rect.contains(doc) ? .openHand : .crosshair
     }
 
     /// Dims everything outside the crop and draws its frame, thirds, handles and size.
-    static func drawOverlay(_ ctx: CGContext, session: CropSession, canvasRect: CGRect, viewBounds: CGRect, toView: (CGPoint) -> CGPoint) {
+    static func drawOverlay(_ ctx: CGContext, session: CropSession, viewport: Viewport, viewBounds: CGRect) {
         let pending = session.rect
-        let a = toView(pending.origin), b = toView(CGPoint(x: pending.maxX, y: pending.maxY))
-        let r = CGRect(x: a.x, y: a.y, width: b.x - a.x, height: b.y - a.y)
+        let r = viewport.toView(pending)
         let dim = CGMutablePath()
-        dim.addRect(canvasRect)
+        dim.addRect(viewport.canvasRect)
         dim.addRect(r)
         ctx.saveGState()
         ctx.addPath(dim)
@@ -197,7 +195,7 @@ struct CropInteraction {
         ctx.setLineWidth(3.5)
         ctx.setLineCap(.round)
         let arm: CGFloat = min(18, min(r.width, r.height) / 3)
-        for (h, p) in Handle.points(for: pending).map({ ($0.0, toView($0.1)) }) {
+        for (h, p) in Handle.points(for: pending).map({ ($0.0, viewport.toView($0.1)) }) {
             switch h {
             case .tl: ctx.move(to: CGPoint(x: p.x, y: p.y + arm)); ctx.addLine(to: p); ctx.addLine(to: CGPoint(x: p.x + arm, y: p.y))
             case .tr: ctx.move(to: CGPoint(x: p.x - arm, y: p.y)); ctx.addLine(to: p); ctx.addLine(to: CGPoint(x: p.x, y: p.y + arm))

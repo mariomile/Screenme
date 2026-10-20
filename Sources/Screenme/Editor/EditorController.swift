@@ -1,6 +1,5 @@
 import AppKit
 import Combine
-import UniformTypeIdentifiers
 
 enum EditorSheet: Identifiable {
     case resizeImage, resizeCanvas
@@ -24,10 +23,7 @@ final class EditorController: ObservableObject {
         }
     }
     private(set) var savedState: EditState
-    private var undoStack: [UndoStep] = []
-    private var redoStack: [EditState] = []
-    /// Counts committed undo steps, so an interaction knows which steps came after it began.
-    private var stepCount = 0
+    private var history = UndoHistory()
     private var annotationClipboard: [Annotation] = []
 
     @Published private(set) var mode = Mode.select
@@ -55,8 +51,11 @@ final class EditorController: ObservableObject {
     func notify() { objectWillChange.send() }
 
     var isDirty: Bool { state != savedState }
-    var canUndo: Bool { !undoStack.isEmpty }
-    var canRedo: Bool { !redoStack.isEmpty }
+    var canUndo: Bool { history.canUndo }
+    var canRedo: Bool { history.canRedo }
+
+    /// The document as it is now is what the file holds.
+    func markSaved() { savedState = state }
 
     // MARK: Layout
 
@@ -76,37 +75,21 @@ final class EditorController: ObservableObject {
 
     // MARK: Undo
 
-    /// The document as an interaction found it. A drag, a slider or an inline text edit takes one when it
-    /// starts, changes the document with `update`, and ends with `commit(since:)`.
-    struct Checkpoint {
-        fileprivate let state: EditState
-        fileprivate let stepCount: Int
-    }
+    typealias Checkpoint = UndoHistory.Checkpoint
 
-    private struct UndoStep {
-        let before: EditState
-        let number: Int
-        /// Steps in a row with the same key are one continuous edit (a color panel drag).
-        let coalesce: String?
-    }
-
-    func checkpoint() -> Checkpoint { Checkpoint(state: state, stepCount: stepCount) }
+    /// A drag, a slider or an inline text edit takes a checkpoint when it starts, changes the document
+    /// with `update`, and ends with `commit(since:)`.
+    func checkpoint() -> Checkpoint { history.checkpoint(state) }
 
     /// Changes the document without an undo step of its own: the interaction around it commits.
     func update(_ change: (inout EditState) -> Void) {
         change(&state)
     }
 
-    /// Makes everything since `before` one undo step. Steps committed in the meantime (a weight picked
-    /// while typing) fold into it. A commit with the same `coalesce` key as the step just before it merges
-    /// into that step.
+    /// Makes everything since `before` one undo step (see `UndoHistory.commit`).
     func commit(since before: Checkpoint, coalesce key: String? = nil) {
-        defer { notify() }
-        guard state != before.state else { return }
-        undoStack.removeAll { $0.number > before.stepCount }
-        if let key, let last = undoStack.last, last.coalesce == key, last.number == stepCount { return }
-        push(before.state, coalesce: key)
-        redoStack.removeAll()
+        history.commit(from: before, to: state, coalesce: key)
+        notify()
     }
 
     /// A one-shot edit: one undo step.
@@ -116,24 +99,16 @@ final class EditorController: ObservableObject {
         commit(since: before)
     }
 
-    private func push(_ before: EditState, coalesce key: String?) {
-        stepCount += 1
-        undoStack.append(UndoStep(before: before, number: stepCount, coalesce: key))
-        if undoStack.count > 300 { undoStack.removeFirst() }
-    }
-
     func undo() {
         canvas?.finishTextEditing()
-        guard let step = undoStack.popLast() else { return }
-        redoStack.append(state)
-        state = step.before
+        guard let previous = history.undo(from: state) else { return }
+        state = previous
         pruneSelection()
     }
 
     func redo() {
         canvas?.finishTextEditing()
-        guard let next = redoStack.popLast() else { return }
-        push(state, coalesce: nil)
+        guard let next = history.redo(from: state) else { return }
         state = next
         pruneSelection()
     }
@@ -425,156 +400,4 @@ final class EditorController: ObservableObject {
     func zoomOut() { canvas?.zoomStep(0.8) }
     func zoomFit() { canvas?.zoomToFit() }
     func zoomActual() { canvas?.zoomToActual() }
-
-    // MARK: Output
-
-    /// Pixels for the current document in the file's own format family.
-    private func flatten(for url: URL) -> (CGImage, UTType)? {
-        let jpeg = ImageFormat(of: url) == .jpg
-        guard let image = EditorRenderer.flatten(state: state, source: source, opaque: jpeg) else { return nil }
-        return (image, jpeg ? .jpeg : .png)
-    }
-
-    private func encode(_ image: CGImage, as type: UTType) -> Data? {
-        let data = NSMutableData()
-        guard let destination = CGImageDestinationCreateWithData(data, type.identifier as CFString, 1, nil) else { return nil }
-        let dpi = 72 * unit * state.outputScale
-        var properties: [CFString: Any] = [kCGImagePropertyDPIWidth: dpi, kCGImagePropertyDPIHeight: dpi]
-        if type == .jpeg { properties[kCGImageDestinationLossyCompressionQuality] = Prefs[Pref.jpegQuality] }
-        CGImageDestinationAddImage(destination, image, properties as CFDictionary)
-        return CGImageDestinationFinalize(destination) ? data as Data : nil
-    }
-
-    /// Done: flattens, overwrites the capture file in place, tells the rest of the app, closes.
-    func save() {
-        canvas?.finishTextEditing()
-        if mode.crop != nil { applyCrop() }
-        guard let (image, type) = flatten(for: item.url), let data = encode(image, as: type) else {
-            alert("Screenme could not render the image.")
-            return
-        }
-        do {
-            try data.write(to: item.url, options: .atomic)
-        } catch {
-            alert("Screenme could not save the image: \(error.localizedDescription)")
-            return
-        }
-        savedState = state
-        NotificationCenter.default.post(name: .captureUpdated, object: item.url)
-        if Prefs[Pref.afterShotCopy] { Clipboard.copyImage(at: item.url) }
-        window?.close()
-    }
-
-    /// Copies the flattened image without closing.
-    func copyImage() {
-        canvas?.finishTextEditing()
-        guard let image = EditorRenderer.flatten(state: state, source: source, opaque: false),
-              let data = encode(image, as: .png) else { return }
-        let board = NSPasteboard.general
-        board.clearContents()
-        board.setData(data, forType: .png)
-        CaptureAction.copy.confirm()
-    }
-
-    func saveAs() {
-        canvas?.finishTextEditing()
-        guard let window else { return }
-        let panel = NSSavePanel()
-        panel.directoryURL = Storage.saveDirectory
-        panel.canCreateDirectories = true
-        let stem = item.url.deletingPathExtension().lastPathComponent
-        let startJPEG = ImageFormat(of: item.url) == .jpg
-        panel.allowedContentTypes = [startJPEG ? .jpeg : .png]
-        panel.nameFieldStringValue = "\(stem).\(startJPEG ? "jpg" : "png")"
-
-        let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 120, height: 26), pullsDown: false)
-        popup.addItems(withTitles: ["PNG", "JPEG"])
-        popup.selectItem(at: startJPEG ? 1 : 0)
-        let label = NSTextField(labelWithString: "Format:")
-        let row = NSStackView(views: [label, popup])
-        row.spacing = 8
-        row.edgeInsets = NSEdgeInsets(top: 8, left: 0, bottom: 8, right: 0)
-        panel.accessoryView = row
-        let handler = FormatPopupHandler(panel: panel, stem: stem)
-        popup.target = handler
-        popup.action = #selector(FormatPopupHandler.changed(_:))
-
-        panel.beginSheetModal(for: window) { [weak self] response in
-            withExtendedLifetime(handler) {}
-            guard response == .OK, let url = panel.url, let self else { return }
-            let jpeg = popup.indexOfSelectedItem == 1
-            guard let image = EditorRenderer.flatten(state: self.state, source: self.source, opaque: jpeg),
-                  let data = self.encode(image, as: jpeg ? .jpeg : .png) else { return }
-            do {
-                try data.write(to: url, options: .atomic)
-                CaptureAction.saveAs.confirm(savedTo: url)
-            } catch {
-                self.alert("Screenme could not save the image: \(error.localizedDescription)")
-            }
-        }
-    }
-
-    /// A file holding the flattened image, for dragging out of the toolbar.
-    func dragFile() -> URL? {
-        canvas?.finishTextEditing()
-        guard let (image, type) = flatten(for: item.url), let data = encode(image, as: type) else { return nil }
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("ScreenmeEditorDrag/\(UUID().uuidString)", isDirectory: true)
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let url = folder.appendingPathComponent(item.url.lastPathComponent)
-        guard (try? data.write(to: url)) != nil else { return nil }
-        return url
-    }
-
-    func alert(_ text: String) {
-        let alert = NSAlert()
-        alert.messageText = text
-        alert.runModal()
-    }
-
-    // MARK: Closing
-
-    /// Asks what to do with unsaved edits. Returns true when the window may close right away.
-    func windowShouldClose(_ sender: NSWindow) -> Bool {
-        canvas?.finishTextEditing()
-        guard isDirty else { return true }
-        let alert = NSAlert()
-        alert.messageText = "Do you want to save the changes to this screenshot?"
-        alert.informativeText = "Your annotations will be lost if you don't save."
-        alert.addButton(withTitle: "Save")
-        alert.addButton(withTitle: "Don't Save")
-        alert.addButton(withTitle: "Cancel")
-        alert.beginSheetModal(for: sender) { [weak self] response in
-            guard let self else { return }
-            switch response {
-            case .alertFirstButtonReturn:
-                self.save()
-            case .alertSecondButtonReturn:
-                self.savedState = self.state
-                sender.close()
-            default:
-                break
-            }
-        }
-        return false
-    }
-}
-
-/// Keeps the save panel's file extension in step with the format popup.
-@MainActor
-final class FormatPopupHandler: NSObject {
-    private let panel: NSSavePanel
-    private let stem: String
-
-    init(panel: NSSavePanel, stem: String) {
-        self.panel = panel
-        self.stem = stem
-    }
-
-    @objc func changed(_ sender: NSPopUpButton) {
-        let jpeg = sender.indexOfSelectedItem == 1
-        panel.allowedContentTypes = [jpeg ? .jpeg : .png]
-        let current = panel.nameFieldStringValue as NSString
-        let base = current.deletingPathExtension.isEmpty ? stem : current.deletingPathExtension
-        panel.nameFieldStringValue = "\(base).\(jpeg ? "jpg" : "png")"
-    }
 }

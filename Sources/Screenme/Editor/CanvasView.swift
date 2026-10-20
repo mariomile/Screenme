@@ -1,17 +1,19 @@
 import AppKit
 import Carbon.HIToolbox
 
-/// The editing surface. It owns zoom and pan, turns mouse input into annotation changes, draws the
-/// selection chrome and crop overlay, and hosts the inline text editor.
+/// The editing surface. It turns mouse and plain-key input into document changes, draws the document,
+/// the selection chrome and the crop overlay, and hosts the inline text editor.
 @MainActor
-final class CanvasView: NSView, NSTextViewDelegate {
+final class CanvasView: NSView {
     /// Strong: the controller only holds the canvas weakly, and AppKit may call into the view while the window tears down.
     private let controller: EditorController
 
-    private(set) var zoom: CGFloat = 1
-    private var pan = CGPoint.zero
-    private var fitMode = true
-    private var lastCanvasSize = CGSize.zero
+    private var viewport: Viewport {
+        didSet {
+            textEditor?.place(viewport)
+            needsDisplay = true
+        }
+    }
 
     var spaceDown = false {
         didSet { if spaceDown != oldValue { refreshCursor() } }
@@ -20,29 +22,20 @@ final class CanvasView: NSView, NSTextViewDelegate {
     private enum Gesture {
         case none
         case pan(startPan: CGPoint, start: CGPoint)
-        case create(EditorController.Checkpoint, id: UUID, start: CGPoint)
-        case move(EditorController.Checkpoint, last: CGPoint)
-        case resize(EditorController.Checkpoint, id: UUID, handle: Handle, original: Annotation)
-        case marquee(start: CGPoint, additive: Bool, base: Set<UUID>)
+        case edit(AnnotationInteraction)
         case crop(CropInteraction)
     }
     private var gesture = Gesture.none
-    private var marquee: CGRect?
 
-    private var textView: InlineTextView?
-    private var editingID: UUID?
-    /// The document before the inline edit began, including before a new label was added.
-    private var textCheckpoint: EditorController.Checkpoint?
+    private var textEditor: InlineTextEditor?
 
     private var unit: CGFloat { controller.unit }
-    private var minZoom: CGFloat { 0.04 / unit }
-    private var maxZoom: CGFloat { 8 / unit }
 
     init(controller: EditorController) {
         self.controller = controller
+        viewport = Viewport(layout: controller.layout, unit: controller.unit)
         super.init(frame: .zero)
         controller.canvas = self
-        lastCanvasSize = controller.layout.canvasSize
     }
 
     required init?(coder: NSCoder) { fatalError("not used") }
@@ -91,127 +84,76 @@ final class CanvasView: NSView, NSTextViewDelegate {
         if Int(event.keyCode) == kVK_Space { spaceDown = false }
     }
 
-    // MARK: Geometry
-
-    private var canvasOrigin: CGPoint {
-        let size = lastCanvasSize
-        return CGPoint(x: bounds.midX - size.width * zoom / 2 + pan.x, y: bounds.midY - size.height * zoom / 2 + pan.y)
-    }
-
-    private func toCanvas(_ p: CGPoint) -> CGPoint {
-        let o = canvasOrigin
-        return CGPoint(x: (p.x - o.x) / zoom, y: (p.y - o.y) / zoom)
-    }
-
-    private func toDoc(_ p: CGPoint) -> CGPoint { controller.layout.canvasToDoc(toCanvas(p)) }
-
-    private func toView(_ doc: CGPoint) -> CGPoint {
-        let c = controller.layout.docToCanvas(doc)
-        let o = canvasOrigin
-        return CGPoint(x: o.x + c.x * zoom, y: o.y + c.y * zoom)
-    }
-
-    private func toView(_ rect: CGRect) -> CGRect {
-        let a = toView(rect.origin), b = toView(CGPoint(x: rect.maxX, y: rect.maxY))
-        return CGRect(x: a.x, y: a.y, width: b.x - a.x, height: b.y - a.y)
-    }
-
-    private var tolerance: CGFloat { 6 / zoom }
-
     // MARK: Zoom and pan
 
+    private func toDoc(_ p: CGPoint) -> CGPoint { viewport.toDoc(p) }
+    private func toView(_ doc: CGPoint) -> CGPoint { viewport.toView(doc) }
+
+    /// Hit tolerance: 6 view points, in document pixels.
+    private var tolerance: CGFloat { 6 / viewport.zoom }
+
+    /// The document or the mode changed. `refit` fits the canvas again (entering or leaving crop).
     func documentChanged(refit: Bool = false) {
-        let size = controller.layout.canvasSize
-        if refit { fitMode = true }
-        if size != lastCanvasSize || refit {
-            lastCanvasSize = size
-            if fitMode { applyFit() } else { clampPan() }
-        }
-        updateTextViewFrame()
-        needsDisplay = true
+        let layout = controller.layout
+        let resized = layout.canvasSize != viewport.layout.canvasSize
+        viewport.layout = layout
+        if refit || resized { refitOrClamp(force: refit) }
     }
 
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
-        if fitMode { applyFit() } else { clampPan() }
-        updateTextViewFrame()
+        viewport.viewSize = newSize
+        refitOrClamp(force: false)
     }
 
-    private func fitZoomValue() -> CGFloat {
-        let size = lastCanvasSize
-        guard size.width > 0, size.height > 0, bounds.width > 0, bounds.height > 0 else { return 1 / unit }
-        let margin: CGFloat = 32
-        let z = min((bounds.width - 2 * margin) / size.width, (bounds.height - 2 * margin) / size.height)
-        return max(minZoom, min(z, 1 / unit))
-    }
-
-    private func applyFit() {
-        zoom = fitZoomValue()
-        pan = .zero
-        publishZoom()
-        needsDisplay = true
+    private func refitOrClamp(force: Bool) {
+        if force || viewport.fits {
+            viewport.fit()
+            publishZoom()
+        } else {
+            viewport.clampPan()
+        }
     }
 
     private func publishZoom() {
-        let percent = Int((zoom * unit * 100).rounded())
+        let percent = viewport.percent
         DispatchQueue.main.async { [weak self] in
             guard let self, self.controller.zoomPercent != percent else { return }
             self.controller.zoomPercent = percent
         }
     }
 
-    private func clampPan() {
-        let w = lastCanvasSize.width * zoom, h = lastCanvasSize.height * zoom
-        let limitX = max(0, (w - bounds.width) / 2 + 80)
-        let limitY = max(0, (h - bounds.height) / 2 + 80)
-        pan.x = min(max(pan.x, -limitX), limitX)
-        pan.y = min(max(pan.y, -limitY), limitY)
-    }
-
     private func setZoom(_ value: CGFloat, anchor: CGPoint) {
-        let target = min(max(value, minZoom), maxZoom)
-        let canvasPoint = toCanvas(anchor)
-        fitMode = false
-        zoom = target
-        let size = lastCanvasSize
-        pan = CGPoint(x: anchor.x - canvasPoint.x * zoom - (bounds.midX - size.width * zoom / 2),
-                      y: anchor.y - canvasPoint.y * zoom - (bounds.midY - size.height * zoom / 2))
-        clampPan()
+        viewport.zoom(to: value, anchor: anchor)
         publishZoom()
-        updateTextViewFrame()
-        needsDisplay = true
     }
 
-    func zoomStep(_ factor: CGFloat) { setZoom(zoom * factor, anchor: CGPoint(x: bounds.midX, y: bounds.midY)) }
+    func zoomStep(_ factor: CGFloat) { setZoom(viewport.zoom * factor, anchor: viewport.viewCenter) }
 
-    func zoomToFit() {
-        fitMode = true
-        applyFit()
-        updateTextViewFrame()
-    }
+    func zoomToFit() { refitOrClamp(force: true) }
 
-    func zoomToActual() { setZoom(1 / unit, anchor: CGPoint(x: bounds.midX, y: bounds.midY)) }
+    func zoomToActual() { setZoom(viewport.actualSize, anchor: viewport.viewCenter) }
 
     override func magnify(with event: NSEvent) {
-        setZoom(zoom * (1 + event.magnification), anchor: convert(event.locationInWindow, from: nil))
+        setZoom(viewport.zoom * (1 + event.magnification), anchor: convert(event.locationInWindow, from: nil))
     }
 
     override func smartMagnify(with event: NSEvent) {
-        if abs(zoom - 1 / unit) < 0.001 { zoomToFit() } else { setZoom(1 / unit, anchor: convert(event.locationInWindow, from: nil)) }
+        if abs(viewport.zoom - viewport.actualSize) < 0.001 {
+            zoomToFit()
+        } else {
+            setZoom(viewport.actualSize, anchor: convert(event.locationInWindow, from: nil))
+        }
     }
 
     override func scrollWheel(with event: NSEvent) {
         if event.modifierFlags.contains(.command) || event.modifierFlags.contains(.control) {
             let amount = event.hasPreciseScrollingDeltas ? event.scrollingDeltaY * 0.01 : event.scrollingDeltaY * 0.05
-            setZoom(zoom * exp(amount), anchor: convert(event.locationInWindow, from: nil))
+            setZoom(viewport.zoom * exp(amount), anchor: convert(event.locationInWindow, from: nil))
             return
         }
         let k: CGFloat = event.hasPreciseScrollingDeltas ? 1 : 8
-        pan.x += event.scrollingDeltaX * k
-        pan.y += event.scrollingDeltaY * k
-        clampPan()
-        updateTextViewFrame()
-        needsDisplay = true
+        viewport.setPan(CGPoint(x: viewport.pan.x + event.scrollingDeltaX * k, y: viewport.pan.y + event.scrollingDeltaY * k))
     }
 
     // MARK: Drawing
@@ -222,9 +164,8 @@ final class CanvasView: NSView, NSTextViewDelegate {
         (dark ? NSColor(white: 0.125, alpha: 1) : NSColor(white: 0.87, alpha: 1)).setFill()
         bounds.fill()
 
-        let layout = controller.layout
-        let origin = canvasOrigin
-        let canvasRect = CGRect(origin: origin, size: CGSize(width: layout.canvasSize.width * zoom, height: layout.canvasSize.height * zoom))
+        let origin = viewport.canvasOrigin
+        let canvasRect = viewport.canvasRect
 
         ctx.saveGState()
         ctx.setShadow(offset: .zero, blur: 22, color: CGColor(gray: 0, alpha: dark ? 0.7 : 0.28))
@@ -235,75 +176,23 @@ final class CanvasView: NSView, NSTextViewDelegate {
         ctx.saveGState()
         ctx.clip(to: canvasRect)
         ctx.translateBy(x: origin.x, y: origin.y)
-        ctx.scaleBy(x: zoom, y: zoom)
-        EditorRenderer.render(state: controller.state, layout: layout, source: controller.source, unit: unit, ctx: ctx,
-                              baseScale: window?.backingScaleFactor ?? 2, hideTextOf: editingID)
+        ctx.scaleBy(x: viewport.zoom, y: viewport.zoom)
+        EditorRenderer.render(state: controller.state, layout: viewport.layout, source: controller.source, unit: unit, ctx: ctx,
+                              baseScale: window?.backingScaleFactor ?? 2, hideTextOf: textEditor?.id)
         ctx.restoreGState()
 
         if let session = controller.mode.crop {
-            CropInteraction.drawOverlay(ctx, session: session, canvasRect: canvasRect, viewBounds: bounds, toView: toView)
+            CropInteraction.drawOverlay(ctx, session: session, viewport: viewport, viewBounds: bounds)
         } else {
-            drawSelection(ctx)
+            AnnotationInteraction.drawSelection(ctx, controller: controller, viewport: viewport)
         }
-        if let marquee {
-            let r = toView(marquee)
-            ctx.setFillColor(NSColor.controlAccentColor.withAlphaComponent(0.12).cgColor)
-            ctx.fill(r)
-            ctx.setStrokeColor(NSColor.controlAccentColor.cgColor)
-            ctx.setLineWidth(1)
-            ctx.stroke(r.insetBy(dx: 0.5, dy: 0.5))
-        }
-    }
-
-    private func drawSelection(_ ctx: CGContext) {
-        let accent = NSColor.controlAccentColor
-        let single = controller.selection.count == 1
-        for a in controller.selectedAnnotations {
-            if case .segment = a.shape {
-                // A thin highlight along the line shows what is selected.
-                let pts = a.centerline().map { toView($0) }
-                if let first = pts.first {
-                    ctx.setStrokeColor(accent.withAlphaComponent(0.55).cgColor)
-                    ctx.setLineWidth(1)
-                    ctx.setLineDash(phase: 0, lengths: [4, 3])
-                    ctx.move(to: first)
-                    for p in pts.dropFirst() { ctx.addLine(to: p) }
-                    ctx.strokePath()
-                    ctx.setLineDash(phase: 0, lengths: [])
-                }
-            } else {
-                let r = toView(a.bounds(unit: unit)).insetBy(dx: -2, dy: -2)
-                ctx.setStrokeColor(accent.cgColor)
-                ctx.setLineWidth(1.25)
-                if case .stroke = a.shape { ctx.setLineDash(phase: 0, lengths: [4, 3]) }
-                ctx.stroke(r)
-                ctx.setLineDash(phase: 0, lengths: [])
-            }
-            if single {
-                for (_, p) in a.handlePoints(unit: unit) { drawHandle(ctx, at: toView(p), accent: accent) }
-            }
-        }
-    }
-
-    private func drawHandle(_ ctx: CGContext, at p: CGPoint, accent: NSColor) {
-        let r = CGRect(x: p.x - 5, y: p.y - 5, width: 10, height: 10)
-        ctx.setFillColor(CGColor(gray: 0, alpha: 0.22))
-        ctx.fillEllipse(in: r.insetBy(dx: -1.5, dy: -1.5))
-        ctx.setFillColor(CGColor(gray: 1, alpha: 1))
-        ctx.fillEllipse(in: r)
-        ctx.setStrokeColor(accent.cgColor)
-        ctx.setLineWidth(1.75)
-        ctx.strokeEllipse(in: r.insetBy(dx: 0.9, dy: 0.9))
+        if case .edit(let drag) = gesture { drag.drawMarquee(ctx, viewport: viewport) }
     }
 
     // MARK: Hit testing
 
     private func annotation(withID id: UUID) -> Annotation? {
         controller.state.annotations.first { $0.id == id }
-    }
-
-    private func index(of id: UUID) -> Int? {
-        controller.state.annotations.firstIndex { $0.id == id }
     }
 
     private func topmostAnnotation(at doc: CGPoint) -> Annotation? {
@@ -323,7 +212,7 @@ final class CanvasView: NSView, NSTextViewDelegate {
         window?.makeFirstResponder(self)
         let vp = convert(event.locationInWindow, from: nil)
         if spaceDown {
-            gesture = .pan(startPan: pan, start: vp)
+            gesture = .pan(startPan: viewport.pan, start: vp)
             NSCursor.closedHand.set()
             return
         }
@@ -331,12 +220,12 @@ final class CanvasView: NSView, NSTextViewDelegate {
         let shift = event.modifierFlags.contains(.shift)
 
         if controller.mode.crop != nil {
-            gesture = .crop(CropInteraction(mouseDownAt: dp, view: vp, controller: controller, toView: toView))
+            gesture = .crop(CropInteraction(mouseDownAt: dp, view: vp, controller: controller, viewport: viewport))
             return
         }
 
         if let (a, handle) = handleHit(at: vp) {
-            gesture = .resize(controller.checkpoint(), id: a.id, handle: handle, original: a)
+            gesture = .edit(.resize(a, handle: handle, controller: controller))
             return
         }
 
@@ -357,10 +246,10 @@ final class CanvasView: NSView, NSTextViewDelegate {
                 } else if !controller.selection.contains(hit.id) {
                     controller.select([hit.id])
                 }
-                gesture = .move(controller.checkpoint(), last: dp)
+                gesture = .edit(.move(from: dp, controller: controller))
             } else {
                 if !shift { controller.select([]) }
-                gesture = .marquee(start: dp, additive: shift, base: controller.selection)
+                gesture = .edit(.marquee(from: dp, additive: shift, controller: controller))
             }
         case .draw(.text):
             if let hit, case .label = hit.shape {
@@ -371,9 +260,9 @@ final class CanvasView: NSView, NSTextViewDelegate {
             }
         case .draw(let kind):
             if let hit, controller.selection.contains(hit.id) {
-                gesture = .move(controller.checkpoint(), last: dp)
+                gesture = .edit(.move(from: dp, controller: controller))
             } else {
-                startCreate(kind, at: dp)
+                gesture = .edit(.create(kind, at: dp, controller: controller))
             }
         case .crop:
             break
@@ -390,35 +279,11 @@ final class CanvasView: NSView, NSTextViewDelegate {
             break
 
         case .pan(let startPan, let start):
-            pan = CGPoint(x: startPan.x + vp.x - start.x, y: startPan.y + vp.y - start.y)
-            clampPan()
-            updateTextViewFrame()
-            needsDisplay = true
+            viewport.setPan(CGPoint(x: startPan.x + vp.x - start.x, y: startPan.y + vp.y - start.y))
 
-        case .create(_, let id, let start):
-            let minStep = 1.5 / zoom
-            modify(id) { $0.dragOut(from: start, to: dp, constrain: shift, minStep: minStep) }
-
-        case .move(let before, let last):
-            let dx = dp.x - last.x, dy = dp.y - last.y
-            let ids = controller.selection
-            controller.update { s in
-                for i in s.annotations.indices where ids.contains(s.annotations[i].id) {
-                    s.annotations[i].translate(dx: dx, dy: dy)
-                }
-            }
-            gesture = .move(before, last: dp)
-
-        case .resize(_, let id, let handle, let original):
-            let unit = unit
-            modify(id) { $0.apply(handle: handle, to: dp, original: original, unit: unit, constrain: shift) }
-
-        case .marquee(let start, let additive, let base):
-            let r = CGRect(x: min(start.x, dp.x), y: min(start.y, dp.y), width: abs(dp.x - start.x), height: abs(dp.y - start.y))
-            marquee = r
-            var ids = additive ? base : []
-            for a in controller.state.annotations where a.bounds(unit: unit).intersects(r) { ids.insert(a.id) }
-            controller.select(ids)
+        case .edit(var drag):
+            drag.dragged(to: dp, constrain: shift, zoom: viewport.zoom, controller: controller)
+            gesture = .edit(drag)
 
         case .crop(let crop):
             crop.dragged(to: dp, controller: controller)
@@ -429,42 +294,15 @@ final class CanvasView: NSView, NSTextViewDelegate {
         let finished = gesture
         gesture = .none
         switch finished {
-        case .create(let before, let id, _):
-            finishCreate(id: id, since: before)
-        case .move(let before, _), .resize(let before, _, _, _):
-            controller.commit(since: before)
-        case .marquee:
-            marquee = nil
-            needsDisplay = true
+        case .edit(let drag):
+            drag.ended(zoom: viewport.zoom, controller: controller)
+            if drag.marquee != nil { needsDisplay = true }
         case .pan:
             refreshCursor()
         case .crop(let crop):
             crop.ended(controller: controller)
         default:
             break
-        }
-    }
-
-    private func startCreate(_ kind: ToolKind, at p: CGPoint) {
-        let a = Annotation(kind: kind, style: controller.styles[kind] ?? kind.traits.style, at: p)
-        let before = controller.checkpoint()
-        controller.update { $0.annotations.append(a) }
-        gesture = .create(before, id: a.id, start: p)
-    }
-
-    private func finishCreate(id: UUID, since before: EditorController.Checkpoint) {
-        if let a = annotation(withID: id), a.isTooSmall(minLength: 5 / zoom) {
-            controller.update { $0.annotations.removeAll { $0.id == id } }
-        } else if annotation(withID: id) != nil {
-            controller.select([id])
-        }
-        controller.commit(since: before)
-    }
-
-    /// Changes one annotation through the controller, if it still exists.
-    private func modify(_ id: UUID, _ change: (inout Annotation) -> Void) {
-        controller.update { s in
-            if let i = s.annotations.firstIndex(where: { $0.id == id }) { change(&s.annotations[i]) }
         }
     }
 
@@ -493,7 +331,7 @@ final class CanvasView: NSView, NSTextViewDelegate {
         let dp = toDoc(vp)
 
         if let session = controller.mode.crop {
-            CropInteraction.cursor(at: vp, doc: dp, session: session, toView: toView).set()
+            CropInteraction.cursor(at: vp, doc: dp, session: session, viewport: viewport).set()
             return
         }
         if let (_, handle) = handleHit(at: vp) {
@@ -555,90 +393,18 @@ final class CanvasView: NSView, NSTextViewDelegate {
     func beginTextEditing(_ id: UUID, since before: EditorController.Checkpoint? = nil) {
         finishTextEditing()
         guard let a = annotation(withID: id), case .label(_, let text) = a.shape else { return }
-        textCheckpoint = before ?? controller.checkpoint()
-        let tv = InlineTextView(frame: .zero)
-        tv.onFinish = { [weak self] in self?.finishTextEditing() }
-        tv.drawsBackground = false
-        tv.isRichText = false
-        tv.allowsUndo = true
-        tv.textContainerInset = .zero
-        tv.textContainer?.lineFragmentPadding = 0
-        tv.isHorizontallyResizable = true
-        tv.isVerticallyResizable = true
-        tv.textContainer?.widthTracksTextView = false
-        tv.textContainer?.containerSize = CGSize(width: 1_000_000, height: 1_000_000)
-        tv.isAutomaticQuoteSubstitutionEnabled = false
-        tv.isAutomaticDashSubstitutionEnabled = false
-        tv.isAutomaticSpellingCorrectionEnabled = false
-        tv.isAutomaticTextReplacementEnabled = false
-        tv.string = text
-        tv.delegate = self
-        textView = tv
-        editingID = id
-        addSubview(tv)
-        updateTextViewFrame()
-        window?.makeFirstResponder(tv)
-        tv.setSelectedRange(NSRange(location: (tv.string as NSString).length, length: 0))
+        let editor = InlineTextEditor(id: id, text: text, since: before ?? controller.checkpoint(), controller: controller) { [weak self] in
+            self?.finishTextEditing()
+        }
+        textEditor = editor
+        editor.attach(to: self, viewport: viewport)
         needsDisplay = true
     }
 
     func finishTextEditing() {
-        guard let tv = textView, let id = editingID, let before = textCheckpoint else { return }
-        textView = nil
-        editingID = nil
-        textCheckpoint = nil
-        tv.delegate = nil
-        let text = tv.string
-        let wasFirstResponder = window?.firstResponder === tv
-        tv.removeFromSuperview()
-        setText(text, of: id)
-        if let a = annotation(withID: id), a.isTooSmall(minLength: 0) {
-            controller.update { $0.annotations.removeAll { $0.id == id } }
-            controller.select(controller.selection.subtracting([id]))
-        }
-        controller.commit(since: before)
-        if wasFirstResponder { window?.makeFirstResponder(self) }
+        guard let editor = textEditor else { return }
+        textEditor = nil
+        if editor.end() { window?.makeFirstResponder(self) }
         needsDisplay = true
-    }
-
-    private func updateTextViewFrame() {
-        guard let tv = textView, let id = editingID, let a = annotation(withID: id), case .label(let labelOrigin, let text) = a.shape else { return }
-        let layout = TextLayout.layout(text: text, at: labelOrigin, style: a.style, unit: unit)
-        let origin = toView(layout.textOrigin)
-        tv.font = NSFont.systemFont(ofSize: a.style.fontSize * unit * zoom, weight: a.style.weight.weight)
-        let color = TextLayout.textColor(a.style).nsColor
-        tv.textColor = color
-        tv.insertionPointColor = color
-        tv.frame = CGRect(x: origin.x, y: origin.y, width: layout.textSize.width * zoom + 14, height: layout.textSize.height * zoom + 2)
-    }
-
-    func textDidChange(_ notification: Notification) {
-        guard let tv = textView, let id = editingID else { return }
-        setText(tv.string, of: id)
-    }
-
-    private func setText(_ text: String, of id: UUID) {
-        modify(id) { a in
-            if case .label(let origin, _) = a.shape { a.shape = .label(origin: origin, text: text) }
-        }
-    }
-
-    func textDidEndEditing(_ notification: Notification) {
-        finishTextEditing()
-    }
-}
-
-/// The inline label editor. Escape or Cmd-Return finishes the edit.
-private final class InlineTextView: NSTextView {
-    var onFinish: () -> Void = {}
-
-    override func keyDown(with event: NSEvent) {
-        let mods = event.modifierFlags.intersection([.command, .shift, .option, .control])
-        let code = Int(event.keyCode)
-        if code == kVK_Escape || (mods == .command && (code == kVK_Return || code == kVK_ANSI_KeypadEnter)) {
-            onFinish()
-            return
-        }
-        super.keyDown(with: event)
     }
 }
