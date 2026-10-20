@@ -115,6 +115,14 @@ final class SystemShortcuts: ObservableObject {
 
     private func setScreenshotShortcuts(enabled: Bool) {
         guard !isWorking else { return }
+        // The whole dictionary is written back. If it exists but cannot be read as one, writing would
+        // replace every other macOS shortcut with just these five: do nothing instead.
+        CFPreferencesAppSynchronize(Self.domain)
+        let stored = CFPreferencesCopyAppValue(Self.hotKeysKey, Self.domain)
+        guard stored == nil || stored is [String: Any] else {
+            NSLog("Screenme: AppleSymbolicHotKeys has an unexpected format; leaving it untouched")
+            return
+        }
         isWorking = true
         var hotKeys = Self.readHotKeys()
         for item in Self.screenshotDefaults {
@@ -131,7 +139,8 @@ final class SystemShortcuts: ObservableObject {
             await Self.runActivateSettings()
             isWorking = false
             refresh()
-            HotKeyCenter.shared.registerAll()
+            // A recorder that started meanwhile has released the shortcuts on purpose; it re-registers when done.
+            if !ShortcutRecorderModel.isAnyRecording { HotKeyCenter.shared.registerAll() }
         }
     }
 
@@ -160,7 +169,7 @@ final class SystemShortcuts: ObservableObject {
         Task {
             try? await Task.sleep(for: .milliseconds(900))
             refresh()
-            HotKeyCenter.shared.registerAll()
+            if !ShortcutRecorderModel.isAnyRecording { HotKeyCenter.shared.registerAll() }
         }
     }
 
