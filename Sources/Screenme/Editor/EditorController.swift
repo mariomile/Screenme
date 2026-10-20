@@ -407,7 +407,7 @@ final class EditorController: ObservableObject {
 
     /// Pixels for the current document in the file's own format family.
     private func flatten(for url: URL) -> (CGImage, UTType)? {
-        let jpeg = ["jpg", "jpeg"].contains(url.pathExtension.lowercased())
+        let jpeg = ImageFormat(of: url) == .jpg
         guard let image = EditorRenderer.flatten(state: state, source: source, opaque: jpeg) else { return nil }
         return (image, jpeg ? .jpeg : .png)
     }
@@ -460,7 +460,7 @@ final class EditorController: ObservableObject {
         panel.directoryURL = Storage.saveDirectory
         panel.canCreateDirectories = true
         let stem = item.url.deletingPathExtension().lastPathComponent
-        let startJPEG = ["jpg", "jpeg"].contains(item.url.pathExtension.lowercased())
+        let startJPEG = ImageFormat(of: item.url) == .jpg
         panel.allowedContentTypes = [startJPEG ? .jpeg : .png]
         panel.nameFieldStringValue = "\(stem).\(startJPEG ? "jpg" : "png")"
 

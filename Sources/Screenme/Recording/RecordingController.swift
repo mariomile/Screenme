@@ -23,7 +23,6 @@ final class RecordingController {
         guard active == nil, !preparing else { return }
         preparing = true
         defer { preparing = false }
-        _ = RecordingPrefs.registered
 
         // The pre-record bar activates Screenme to receive Return and Esc; the user's app gets focus back after.
         let previousApp = FocusKeeper.frontmostExternal()

@@ -26,7 +26,7 @@ Swift 5 language mode on the Swift 6 compiler. All UI types are `@MainActor`. Ap
 ## Rules
 
 - A module edits only its own folder. Public signatures in the table above do not change: other modules call them.
-- Need a new preference: `extension Pref { static let x = PrefKey(name: "x", defaultValue: …) }` in your own folder, and register the default in your module (call `Prefs.store.register(defaults:)` from a static initializer you trigger on first use).
+- Need a new preference: `extension Pref { static let x = PrefKey(name: "x", defaultValue: …) }` in your own folder. Nothing is registered: `Prefs[Pref.x]` falls back to `defaultValue`, and every `@AppStorage(Pref.x.name)` must be initialized with `Pref.x.defaultValue`. A fixed set of choices is an enum with a `String` raw value, used as the pref's type.
 - Need something from Core that is missing: do not edit Core. Say so in your report.
 - After a capture or an edit that produces a new file, call `CaptureCoordinator.shared.afterCapture(item)`.
 - New captures go to `Storage.directory` via `Storage.write(_:)` or `Storage.newURL(extension:)`.

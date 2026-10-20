@@ -136,8 +136,6 @@ struct KeyCombo: Codable, Hashable {
 /// User-chosen shortcuts, persisted. A missing entry means "use the default";
 /// an explicit `nil` (stored as empty) means "no shortcut".
 enum ShortcutStore {
-    private static let key = "shortcuts"
-
     static func combo(for action: ShortcutAction) -> KeyCombo? {
         let saved = load()
         guard let entry = saved[action.rawValue] else { return action.defaultCombo }
@@ -147,12 +145,12 @@ enum ShortcutStore {
     static func set(_ combo: KeyCombo?, for action: ShortcutAction) {
         var saved = load()
         saved[action.rawValue] = .some(combo)
-        if let data = try? JSONEncoder().encode(saved) { Prefs.store.set(data, forKey: key) }
+        if let data = try? JSONEncoder().encode(saved) { Prefs[Pref.shortcuts] = data }
         NotificationCenter.default.post(name: .shortcutsChanged, object: nil)
     }
 
     static func resetAll() {
-        Prefs.store.removeObject(forKey: key)
+        Prefs.remove(Pref.shortcuts)
         NotificationCenter.default.post(name: .shortcutsChanged, object: nil)
     }
 
@@ -162,9 +160,7 @@ enum ShortcutStore {
     }
 
     private static func load() -> [String: KeyCombo?] {
-        guard let data = Prefs.store.data(forKey: key),
-              let saved = try? JSONDecoder().decode([String: KeyCombo?].self, from: data) else { return [:] }
-        return saved
+        (try? JSONDecoder().decode([String: KeyCombo?].self, from: Prefs[Pref.shortcuts])) ?? [:]
     }
 }
 

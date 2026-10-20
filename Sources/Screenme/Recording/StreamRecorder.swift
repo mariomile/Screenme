@@ -147,12 +147,12 @@ final class StreamRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
                   systemAudio: setup.configuration.capturesAudio, microphone: setup.configuration.captureMicrophone)
     }
 
-    init(url: URL, width: Int, height: Int, fps: Int, quality: String, systemAudio: Bool, microphone: Bool) {
+    init(url: URL, width: Int, height: Int, fps: Int, quality: VideoQuality, systemAudio: Bool, microphone: Bool) {
         self.url = url
         self.width = width
         self.height = height
         self.fps = fps
-        let rate = Double(width * height) * Double(fps) * RecordingSettings.bitsPerPixel(quality: quality)
+        let rate = Double(width * height) * Double(fps) * quality.bitsPerPixel
         bitsPerSecond = Int(min(max(rate, 1_000_000), 80_000_000))
         wantsSystemAudio = systemAudio
         wantsMicrophone = microphone

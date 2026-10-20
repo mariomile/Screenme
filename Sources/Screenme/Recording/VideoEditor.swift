@@ -33,21 +33,6 @@ enum ExportFormat: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
-enum ExportQuality: String, CaseIterable, Identifiable {
-    case high, medium, low
-
-    var id: String { rawValue }
-    var title: String { rawValue.capitalized }
-    var gifColors: Int {
-        switch self {
-        case .high: 255
-        case .medium: 128
-        case .low: 64
-        }
-    }
-    var gifDither: Bool { self == .high }
-}
-
 // MARK: - Model
 
 @MainActor
@@ -78,7 +63,7 @@ final class VideoEditorModel: ObservableObject {
         }
     }
     @Published var resolution = ExportResolution.original
-    @Published var quality = ExportQuality.high
+    @Published var quality = VideoQuality.high
     @Published var gifFPS = 15
     @Published var mute = false {
         didSet { player.isMuted = mute }
@@ -314,7 +299,7 @@ final class VideoEditorModel: ObservableObject {
         switch format {
         case .mp4:
             let url = try await VideoTranscoder.export(item.url, settings: VideoExportSettings(range: range, size: outputSize,
-                                                                                               quality: quality.rawValue, mute: mute),
+                                                                                               quality: quality, mute: mute),
                                                        progress: progress)
             return CaptureItem(url: url, kind: .video)
         case .gif:
@@ -440,7 +425,7 @@ private struct VideoEditorView: View {
             }
             labeled("Quality") {
                 Picker("Quality", selection: $model.quality) {
-                    ForEach(ExportQuality.allCases) { Text($0.title).tag($0) }
+                    ForEach(VideoQuality.allCases) { Text($0.title).tag($0) }
                 }
                 .labelsHidden()
                 .frame(width: 90)

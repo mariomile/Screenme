@@ -47,7 +47,7 @@ final class WebcamBubble {
 
     func setSize(_ size: WebcamSize) {
         self.size = size
-        Prefs[Pref.recordingWebcamSize] = size.rawValue
+        Prefs[Pref.recordingWebcamSize] = size
         let diameter = size.diameter
         let center = CGPoint(x: panel.frame.midX, y: panel.frame.midY)
         let frame = CGRect(x: center.x - diameter / 2, y: center.y - diameter / 2, width: diameter, height: diameter)

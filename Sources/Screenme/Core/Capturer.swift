@@ -37,13 +37,12 @@ enum Storage {
 
     /// Writes in the user's chosen format (PNG or JPEG).
     static func write(_ image: CGImage) throws -> URL {
-        let jpeg = Prefs[Pref.imageFormat] == "jpg"
-        let url = newURL(extension: jpeg ? "jpg" : "png")
-        let type = jpeg ? UTType.jpeg : UTType.png
-        guard let destination = CGImageDestinationCreateWithURL(url as CFURL, type.identifier as CFString, 1, nil) else {
+        let format = Prefs[Pref.imageFormat]
+        let url = newURL(extension: format.fileExtension)
+        guard let destination = CGImageDestinationCreateWithURL(url as CFURL, format.type.identifier as CFString, 1, nil) else {
             throw CocoaError(.fileWriteUnknown)
         }
-        let options = jpeg ? [kCGImageDestinationLossyCompressionQuality: Prefs[Pref.jpegQuality]] as CFDictionary : nil
+        let options = format == .jpg ? [kCGImageDestinationLossyCompressionQuality: Prefs[Pref.jpegQuality]] as CFDictionary : nil
         CGImageDestinationAddImage(destination, image, options)
         guard CGImageDestinationFinalize(destination) else { throw CocoaError(.fileWriteUnknown) }
         return url
@@ -71,8 +70,7 @@ enum Clipboard {
         guard let data = try? Data(contentsOf: url) else { return }
         let board = NSPasteboard.general
         board.clearContents()
-        let type: NSPasteboard.PasteboardType = url.pathExtension == "jpg" ? NSPasteboard.PasteboardType(UTType.jpeg.identifier) : .png
-        board.setData(data, forType: type)
+        board.setData(data, forType: NSPasteboard.PasteboardType(ImageFormat(of: url).type.identifier))
         board.writeObjects([url as NSURL])
     }
 

@@ -61,7 +61,7 @@ final class QuickAccess {
 
     /// Stacks the cards of each screen in its corner, newest at the bottom.
     private func layout() {
-        let rightSide = Prefs[Pref.quickAccessPosition] == "bottomRight"
+        let rightSide = Prefs[Pref.quickAccessPosition] == .bottomRight
         var offsets: [CGDirectDisplayID: CGFloat] = [:]
         for card in cards.reversed() where !card.isDismissing {
             let area = card.screen.visibleFrame

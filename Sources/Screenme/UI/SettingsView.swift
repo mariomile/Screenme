@@ -7,8 +7,6 @@ import SwiftUI
 
 @MainActor
 enum SettingsWindow {
-    static let tabKey = "settingsSelectedTab"
-
     static func show() {
         let window = WindowPresenter.shared.show("settings", title: "Screenme Settings", size: CGSize(width: 800, height: 580),
                                                  style: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]) {
@@ -18,7 +16,7 @@ enum SettingsWindow {
     }
 
     static func show(tab: SettingsTab) {
-        Prefs.store.set(tab.rawValue, forKey: tabKey)
+        Prefs[Pref.settingsTab] = tab
         show()
     }
 }
@@ -72,9 +70,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
 }
 
 struct SettingsView: View {
-    @AppStorage(SettingsWindow.tabKey) private var tabName = SettingsTab.general.rawValue
-
-    private var tab: SettingsTab { SettingsTab(rawValue: tabName) ?? .general }
+    @AppStorage(Pref.settingsTab.name) private var tab = Pref.settingsTab.defaultValue
 
     var body: some View {
         HStack(spacing: 0) {
@@ -102,7 +98,7 @@ struct SettingsView: View {
     private var sidebar: some View {
         VStack(spacing: 2) {
             ForEach(SettingsTab.allCases) { item in
-                Button { tabName = item.rawValue } label: {
+                Button { tab = item } label: {
                     HStack(spacing: 9) {
                         SymbolTile(symbol: item.symbol, color: item.color, size: 22)
                         Text(item.title).font(.system(size: 13.5)).lineLimit(1)
@@ -127,8 +123,8 @@ struct SettingsView: View {
             let all = SettingsTab.allCases
             guard let index = all.firstIndex(of: tab) else { return }
             switch direction {
-            case .up: tabName = all[max(index - 1, 0)].rawValue
-            case .down: tabName = all[min(index + 1, all.count - 1)].rawValue
+            case .up: tab = all[max(index - 1, 0)]
+            case .down: tab = all[min(index + 1, all.count - 1)]
             default: break
             }
         }
@@ -189,36 +185,6 @@ struct PrefIntPicker: View {
     var body: some View {
         Picker(title, selection: $value) {
             ForEach(options, id: \.value) { Text($0.label).tag($0.value) }
-        }
-    }
-}
-
-/// A pop-up bound to a String preference.
-struct PrefStringPicker: View {
-    let title: String
-    let options: [(label: String, value: String)]
-    var style: Style = .menu
-    @AppStorage private var value: String
-
-    enum Style { case menu, segmented }
-
-    init(_ title: String, _ key: PrefKey<String>, options: [(label: String, value: String)], style: Style = .menu) {
-        self.title = title
-        self.options = options
-        self.style = style
-        _value = AppStorage(wrappedValue: key.defaultValue, key.name)
-    }
-
-    var body: some View {
-        if style == .segmented {
-            Picker(title, selection: $value) {
-                ForEach(options, id: \.value) { Text($0.label).tag($0.value) }
-            }
-            .pickerStyle(.segmented)
-        } else {
-            Picker(title, selection: $value) {
-                ForEach(options, id: \.value) { Text($0.label).tag($0.value) }
-            }
         }
     }
 }
@@ -290,7 +256,7 @@ private struct ScreenshotsPane: View {
 
     private var exampleName: String {
         let name = prefix.isEmpty ? "Screenme" : prefix
-        return "\(name) 2026-10-20 at 10.41.00.\(format == "jpg" ? "jpg" : "png")"
+        return "\(name) 2026-10-20 at 10.41.00.\(format.fileExtension)"
     }
 
     var body: some View {
@@ -308,11 +274,10 @@ private struct ScreenshotsPane: View {
 
             Section("File") {
                 Picker("Format", selection: $format) {
-                    Text("PNG").tag("png")
-                    Text("JPEG").tag("jpg")
+                    ForEach(ImageFormat.allCases) { Text($0.title).tag($0) }
                 }
                 .pickerStyle(.segmented)
-                if format == "jpg" {
+                if format == .jpg {
                     LabeledContent("Quality") {
                         HStack {
                             Slider(value: $quality, in: 0.5...1, step: 0.05).frame(width: 180)
@@ -359,8 +324,8 @@ private struct QuickAccessPane: View {
             Section {
                 HStack(spacing: 20) {
                     Spacer()
-                    positionChoice("Bottom left", value: "bottomLeft")
-                    positionChoice("Bottom right", value: "bottomRight")
+                    positionChoice("Bottom left", value: .bottomLeft)
+                    positionChoice("Bottom right", value: .bottomRight)
                     Spacer()
                 }
                 .padding(.vertical, 6)
@@ -382,9 +347,9 @@ private struct QuickAccessPane: View {
         .formStyle(.grouped)
     }
 
-    private func positionChoice(_ title: String, value: String) -> some View {
+    private func positionChoice(_ title: String, value: QuickAccessPosition) -> some View {
         let selected = position == value
-        let right = value == "bottomRight"
+        let right = value == .bottomRight
         return Button {
             withAnimation(.easeOut(duration: 0.15)) { position = value }
         } label: {
@@ -427,6 +392,7 @@ private struct RecordingPane: View {
     @AppStorage(Pref.recordingMicrophoneID.name) private var microphoneID = Pref.recordingMicrophoneID.defaultValue
     @AppStorage(Pref.recordingShowKeystrokes.name) private var keystrokes = Pref.recordingShowKeystrokes.defaultValue
     @AppStorage(Pref.recordingWebcam.name) private var webcam = Pref.recordingWebcam.defaultValue
+    @AppStorage(Pref.recordingQuality.name) private var quality = Pref.recordingQuality.defaultValue
     @ObservedObject private var permissions = PermissionsModel.shared
     @State private var devices: [MicrophoneDevice] = []
 
@@ -442,7 +408,9 @@ private struct RecordingPane: View {
 
             Section("Video") {
                 PrefIntPicker("Frame rate", Pref.recordingFPS, options: [("30 fps", 30), ("60 fps", 60)])
-                PrefStringPicker("Quality", Pref.recordingQuality, options: [("High", "high"), ("Medium", "medium"), ("Low", "low")])
+                Picker("Quality", selection: $quality) {
+                    ForEach(VideoQuality.allCases) { Text($0.title).tag($0) }
+                }
                 PrefToggle("Show cursor", Pref.recordingShowCursor)
                 PrefToggle("Highlight clicks", Pref.recordingHighlightClicks)
                 Toggle("Show keystrokes", isOn: $keystrokes)

@@ -210,7 +210,7 @@ enum GIFExporter {
 struct VideoExportSettings {
     var range: CMTimeRange
     var size: CGSize
-    var quality: String
+    var quality: VideoQuality
     var mute: Bool
 }
 
@@ -262,7 +262,7 @@ private final class TranscodeJob: @unchecked Sendable {
         reader.add(videoOutput)
 
         writer = try AVAssetWriter(outputURL: outputURL, fileType: .mp4)
-        let bitrate = settings.size.width * settings.size.height * fps * RecordingSettings.bitsPerPixel(quality: settings.quality)
+        let bitrate = settings.size.width * settings.size.height * fps * settings.quality.bitsPerPixel
         videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: [
             AVVideoCodecKey: AVVideoCodecType.h264,
             AVVideoWidthKey: Int(settings.size.width),

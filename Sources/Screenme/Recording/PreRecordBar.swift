@@ -6,8 +6,8 @@ import SwiftUI
 /// What the user can change before pressing Record. Every change is written to the preferences.
 @MainActor
 final class RecorderOptions: ObservableObject {
-    @Published var format = RecordingFormat(rawValue: Prefs[Pref.recordingFormat]) ?? .video {
-        didSet { Prefs[Pref.recordingFormat] = format.rawValue }
+    @Published var format = Prefs[Pref.recordingFormat] {
+        didSet { Prefs[Pref.recordingFormat] = format }
     }
     @Published var microphone = Prefs[Pref.recordingMicrophone] {
         didSet { Prefs[Pref.recordingMicrophone] = microphone }
@@ -21,8 +21,8 @@ final class RecorderOptions: ObservableObject {
     @Published var webcam = Prefs[Pref.recordingWebcam] {
         didSet { Prefs[Pref.recordingWebcam] = webcam }
     }
-    @Published var webcamSize = WebcamSize(rawValue: Prefs[Pref.recordingWebcamSize]) ?? .medium {
-        didSet { Prefs[Pref.recordingWebcamSize] = webcamSize.rawValue }
+    @Published var webcamSize = Prefs[Pref.recordingWebcamSize] {
+        didSet { Prefs[Pref.recordingWebcamSize] = webcamSize }
     }
     @Published var webcamID = Prefs[Pref.recordingWebcamID] {
         didSet { Prefs[Pref.recordingWebcamID] = webcamID }

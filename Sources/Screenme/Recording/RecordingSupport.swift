@@ -6,20 +6,9 @@ import SwiftUI
 // MARK: - Preferences owned by the recording module
 
 extension Pref {
-    static let recordingFormat = PrefKey(name: "recordingFormat", defaultValue: "video") // "video" | "gif"
-    static let recordingWebcamSize = PrefKey(name: "recordingWebcamSize", defaultValue: "medium") // "small" | "medium" | "large"
+    static let recordingFormat = PrefKey(name: "recordingFormat", defaultValue: RecordingFormat.video)
+    static let recordingWebcamSize = PrefKey(name: "recordingWebcamSize", defaultValue: WebcamSize.medium)
     static let recordingWebcamID = PrefKey(name: "recordingWebcamID", defaultValue: "") // "" = default camera
-}
-
-enum RecordingPrefs {
-    /// Registers this module's defaults. Touched on first use of the recorder.
-    static let registered: Void = {
-        Prefs.store.register(defaults: [
-            Pref.recordingFormat.name: Pref.recordingFormat.defaultValue,
-            Pref.recordingWebcamSize.name: Pref.recordingWebcamSize.defaultValue,
-            Pref.recordingWebcamID.name: Pref.recordingWebcamID.defaultValue,
-        ])
-    }()
 }
 
 enum RecordingFormat: String {
@@ -44,7 +33,7 @@ enum WebcamSize: String, CaseIterable, Identifiable {
 struct RecordingSettings {
     var format: RecordingFormat
     var fps: Int
-    var quality: String
+    var quality: VideoQuality
     var showCursor: Bool
     var highlightClicks: Bool
     var showKeystrokes: Bool
@@ -57,7 +46,7 @@ struct RecordingSettings {
 
     static func current() -> RecordingSettings {
         RecordingSettings(
-            format: RecordingFormat(rawValue: Prefs[Pref.recordingFormat]) ?? .video,
+            format: Prefs[Pref.recordingFormat],
             fps: Prefs[Pref.recordingFPS] >= 60 ? 60 : 30,
             quality: Prefs[Pref.recordingQuality],
             showCursor: Prefs[Pref.recordingShowCursor],
@@ -69,15 +58,6 @@ struct RecordingSettings {
             webcam: Prefs[Pref.recordingWebcam],
             countdown: max(0, Prefs[Pref.recordingCountdown]),
             hideDesktopIcons: Prefs[Pref.recordingHideDesktopIcons])
-    }
-
-    /// Bits per pixel per frame for the H.264 encoder.
-    static func bitsPerPixel(quality: String) -> Double {
-        switch quality {
-        case "low": 0.035
-        case "medium": 0.07
-        default: 0.14
-        }
     }
 }
 
