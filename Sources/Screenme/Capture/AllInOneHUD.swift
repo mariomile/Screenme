@@ -164,24 +164,31 @@ private final class HUDController {
         return true
     }
 
+    // `close` drops the last strong reference to this controller (`released`), so the completions
+    // capture what they need by value instead of reaching back through a weak self.
     private func choose(_ index: Int) {
         guard !closing else { return }
         let action = model.items[index].action
-        close { [weak self] in
-            guard let self else { return }
+        let previousApp = previousApp
+        let perform = perform
+        close {
             Task { @MainActor in
                 // Hand focus back first so the capture sees the app the user was in.
-                await FocusKeeper.restore(self.previousApp)
-                self.perform(action)
+                await FocusKeeper.restore(previousApp)
+                perform(action)
             }
         }
     }
 
     func dismiss() {
         guard !closing else { return }
-        close { [weak self] in
-            guard let self else { return }
-            Task { @MainActor in await FocusKeeper.restore(self.previousApp) }
+        let previousApp = previousApp
+        let panel = panel
+        close {
+            // Only when Screenme still holds focus because of this bar: not after a click into another app,
+            // and not when a picker opened by a shortcut has taken the keyboard.
+            guard NSApp.isActive, NSApp.keyWindow == nil || NSApp.keyWindow === panel else { return }
+            Task { @MainActor in await FocusKeeper.restore(previousApp) }
         }
     }
 
