@@ -1,0 +1,31 @@
+name: Screenme
+options:
+  bundleIdPrefix: dev.mariomiletta
+  deploymentTarget:
+    macOS: "15.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MACOSX_DEPLOYMENT_TARGET: "15.0"
+targets:
+  Screenme:
+    type: application
+    platform: macOS
+    sources: [Sources/Screenme]
+    info:
+      path: Sources/Screenme/Info.plist
+      properties:
+        CFBundleName: Screenme
+        CFBundleDisplayName: Screenme
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        LSUIElement: true
+        LSMinimumSystemVersion: "15.0"
+        NSHumanReadableCopyright: "MIT License"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.mariomiletta.Screenme
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_STYLE: Manual
+        ENABLE_HARDENED_RUNTIME: NO
+        GENERATE_INFOPLIST_FILE: NO

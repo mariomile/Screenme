@@ -1,0 +1,30 @@
+# Screenme
+
+A lightweight, native macOS capture tool. Capture, drop it where it goes, move on.
+
+- **Capture area or window** (`⌘⇧1`): drag to select an area, or click to grab the highlighted window. The capture is copied to the clipboard right away.
+- **Quick Access overlay**: every capture shows up bottom-left. Drag it into any app, or hover for Copy and Save.
+- **Record area or window** (`⌘⇧2`, press again or click the red menu bar icon to stop): MP4 at 30 fps, with a native trim bar and GIF export from Quick Access.
+- **Capture screen**: from the menu bar.
+
+About 0.5 MB on disk, no dependencies, system frameworks only (ScreenCaptureKit, AVFoundation, AVKit, SwiftUI).
+
+## Build
+
+Requires macOS 15+, Xcode 16+ and [XcodeGen](https://github.com/yonaskolb/XcodeGen).
+
+```bash
+xcodegen generate
+xcodebuild -project Screenme.xcodeproj -scheme Screenme -configuration Release -derivedDataPath build/DerivedData build
+open build/DerivedData/Build/Products/Release/Screenme.app
+```
+
+On first launch, allow Screenme in System Settings > Privacy & Security > Screen & System Audio Recording, then relaunch.
+
+## Where files go
+
+Captures are kept in `~/Library/Caches/Screenme` until you save them. Save copies to the Desktop.
+
+## License
+
+MIT

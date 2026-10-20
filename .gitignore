@@ -1,0 +1,5 @@
+.builderos/local.json
+.DS_Store
+build/
+DerivedData/
+*.xcodeproj/
