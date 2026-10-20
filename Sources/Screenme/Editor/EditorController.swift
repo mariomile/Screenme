@@ -450,7 +450,7 @@ final class EditorController: ObservableObject {
         let board = NSPasteboard.general
         board.clearContents()
         board.setData(data, forType: .png)
-        Toast.show("Copied to clipboard", symbol: "doc.on.doc")
+        CaptureAction.copy.confirm()
     }
 
     func saveAs() {
@@ -484,7 +484,7 @@ final class EditorController: ObservableObject {
                   let data = self.encode(image, as: jpeg ? .jpeg : .png) else { return }
             do {
                 try data.write(to: url, options: .atomic)
-                Toast.show("Saved", symbol: "square.and.arrow.down")
+                CaptureAction.saveAs.confirm(savedTo: url)
             } catch {
                 self.alert("Screenme could not save the image: \(error.localizedDescription)")
             }

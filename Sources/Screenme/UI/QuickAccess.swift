@@ -2,7 +2,6 @@ import AppKit
 import AVFoundation
 import ImageIO
 import SwiftUI
-import UniformTypeIdentifiers
 
 // MARK: - Controller
 
@@ -164,67 +163,12 @@ final class QuickAccess {
 
     // MARK: Actions
 
-    fileprivate func copy(_ card: QuickAccessCard) {
-        Clipboard.copy(card.model.item)
-        Toast.show("Copied to clipboard", symbol: "doc.on.doc.fill")
-        dismiss(card)
-    }
-
-    fileprivate func save(_ card: QuickAccessCard) {
-        do {
-            let saved = try Storage.save(card.model.item.url)
-            let folder = saved.deletingLastPathComponent().lastPathComponent
-            Toast.show("Saved to \(folder)", symbol: "square.and.arrow.down.fill")
+    /// Runs `action` on the card's capture. The card goes away once it did something, except Show in Finder.
+    fileprivate func perform(_ action: CaptureAction, on card: QuickAccessCard) {
+        Task {
+            guard await action.perform(card.model.item), action != .reveal else { return }
             dismiss(card)
-        } catch {
-            Toast.show("Could not save", symbol: "exclamationmark.triangle.fill")
         }
-    }
-
-    fileprivate func saveAs(_ card: QuickAccessCard) {
-        let item = card.model.item
-        let panel = NSSavePanel()
-        panel.nameFieldStringValue = item.url.lastPathComponent
-        panel.directoryURL = Storage.saveDirectory
-        panel.canCreateDirectories = true
-        if let type = UTType(filenameExtension: item.url.pathExtension) { panel.allowedContentTypes = [type] }
-        // The save panel needs the app active; hand focus back to where it was afterwards.
-        let previous = FocusKeeper.frontmostExternal()
-        FocusKeeper.activateSelf()
-        let response = panel.runModal()
-        Task { await FocusKeeper.restore(previous) }
-        guard response == .OK, let destination = panel.url else { return }
-        do {
-            if FileManager.default.fileExists(atPath: destination.path) { try FileManager.default.removeItem(at: destination) }
-            try FileManager.default.copyItem(at: item.url, to: destination)
-            Toast.show("Saved to \(destination.deletingLastPathComponent().lastPathComponent)", symbol: "square.and.arrow.down.fill")
-            dismiss(card)
-        } catch {
-            Toast.show("Could not save", symbol: "exclamationmark.triangle.fill")
-        }
-    }
-
-    fileprivate func reveal(_ card: QuickAccessCard) {
-        NSWorkspace.shared.activateFileViewerSelecting([card.model.item.url])
-    }
-
-    fileprivate func edit(_ card: QuickAccessCard) {
-        let item = card.model.item
-        guard item.kind != .gif else { return } // neither editor opens GIFs
-        dismiss(card)
-        item.kind == .image ? AnnotationEditor.open(item) : VideoEditor.open(item)
-    }
-
-    fileprivate func pin(_ card: QuickAccessCard) {
-        guard card.model.item.kind != .video else { return }
-        PinWindow.pin(card.model.item)
-        dismiss(card)
-    }
-
-    fileprivate func trash(_ card: QuickAccessCard) {
-        try? FileManager.default.trashItem(at: card.model.item.url, resultingItemURL: nil)
-        Toast.show("Moved to Trash", symbol: "trash.fill")
-        dismiss(card)
     }
 }
 
@@ -271,15 +215,11 @@ final class QuickAccessCard {
         panel.contentView = root
 
         model.actions = CardActions(
-            copy: bind { $0.copy($1) },
-            save: bind { $0.save($1) },
-            saveAs: bind { $0.saveAs($1) },
-            reveal: bind { $0.reveal($1) },
-            edit: bind { $0.edit($1) },
-            pin: bind { $0.pin($1) },
-            trash: bind { $0.trash($1) },
+            perform: { [weak self] action in
+                guard let self else { return }
+                self.owner.perform(action, on: self)
+            },
             close: bind { $0.dismiss($1) },
-            open: bind { $0.edit($1) },
             swipeChanged: { [weak self] dx in
                 guard let self else { return }
                 self.owner.swipeChanged(self, dx: dx)
@@ -405,15 +345,8 @@ private final class FirstMouseHostingView<Content: View>: NSHostingView<Content>
 
 @MainActor
 struct CardActions {
-    var copy: () -> Void = {}
-    var save: () -> Void = {}
-    var saveAs: () -> Void = {}
-    var reveal: () -> Void = {}
-    var edit: () -> Void = {}
-    var pin: () -> Void = {}
-    var trash: () -> Void = {}
+    var perform: (CaptureAction) -> Void = { _ in }
     var close: () -> Void = {}
-    var open: () -> Void = {}
     var swipeChanged: (CGFloat) -> Void = { _ in }
     var swipeEnded: (CGFloat, CGFloat) -> Void = { _, _ in }
     var dragStarted: () -> Void = {}
@@ -497,30 +430,36 @@ private struct QuickAccessCardView: View {
                 .allowsHitTesting(false)
 
             VStack(spacing: 8) {
-                HUDPill(title: "Copy", symbol: "doc.on.doc", action: model.actions.copy)
-                HUDPill(title: "Save", symbol: "square.and.arrow.down", action: model.actions.save)
+                pill(.copy)
+                pill(.save)
             }
 
             VStack {
                 HStack {
                     HUDCircle(symbol: "xmark", label: "Close", action: model.actions.close)
                     Spacer()
-                    if model.item.kind != .video {
-                        HUDCircle(symbol: "pin.fill", label: "Pin to screen", action: model.actions.pin)
-                    }
+                    circle(.pin)
                 }
                 Spacer()
                 HStack {
-                    if model.item.kind != .gif {
-                        HUDCircle(symbol: model.item.kind == .image ? "pencil.and.scribble" : "scissors",
-                                  label: model.item.kind == .image ? "Annotate" : "Edit", action: model.actions.edit)
-                    }
+                    circle(.edit)
                     Spacer()
                 }
             }
             .padding(8)
         }
         .transition(.opacity)
+    }
+
+    private func pill(_ action: CaptureAction) -> some View {
+        HUDPill(title: action.title(for: model.item.kind), symbol: action.symbol(for: model.item.kind)) { model.actions.perform(action) }
+    }
+
+    @ViewBuilder
+    private func circle(_ action: CaptureAction) -> some View {
+        if action.isAvailable(for: model.item.kind) {
+            HUDCircle(symbol: action.symbol(for: model.item.kind), label: action.title(for: model.item.kind)) { model.actions.perform(action) }
+        }
     }
 }
 
@@ -616,7 +555,7 @@ private final class CardDragView: NSView, NSDraggingSource {
         mode = .undecided
         velocityX = 0
         lastSample = (downLocation.x, event.timestamp)
-        if event.clickCount == 2 { model.actions.open() }
+        if event.clickCount == 2 { model.actions.perform(.edit) }
     }
 
     override func mouseDragged(with event: NSEvent) {
@@ -671,26 +610,18 @@ private final class CardDragView: NSView, NSDraggingSource {
     // MARK: Context menu
 
     override func menu(for event: NSEvent) -> NSMenu? {
-        let actions = model.actions
-        let isImage = model.item.kind == .image
+        let perform = model.actions.perform
+        let kind = model.item.kind
         let menu = NSMenu()
-        func add(_ title: String, _ symbol: String, _ run: @escaping () -> Void) {
-            let action = MenuAction(run)
-            let item = NSMenuItem(title: title, action: #selector(MenuAction.fire), keyEquivalent: "")
-            item.target = action
-            item.representedObject = action // keeps the handler alive as long as the menu
-            item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+        for action in CaptureAction.allCases where action.isAvailable(for: kind) {
+            if action == .edit || action == .trash { menu.addItem(.separator()) }
+            let handler = MenuAction { perform(action) }
+            let item = NSMenuItem(title: action.title(for: kind), action: #selector(MenuAction.fire), keyEquivalent: "")
+            item.target = handler
+            item.representedObject = handler // keeps the handler alive as long as the menu
+            item.image = NSImage(systemSymbolName: action.symbol(for: kind), accessibilityDescription: nil)
             menu.addItem(item)
         }
-        add("Copy", "doc.on.doc", actions.copy)
-        add("Save", "square.and.arrow.down", actions.save)
-        add("Save As…", "square.and.arrow.down.on.square", actions.saveAs)
-        add("Show in Finder", "folder", actions.reveal)
-        menu.addItem(.separator())
-        if model.item.kind != .gif { add(isImage ? "Annotate" : "Edit", isImage ? "pencil.and.scribble" : "scissors", actions.edit) }
-        if model.item.kind != .video { add("Pin to Screen", "pin", actions.pin) }
-        menu.addItem(.separator())
-        add("Delete", "trash", actions.trash)
         return menu
     }
 

@@ -2,7 +2,6 @@ import AppKit
 import AVFoundation
 import AVKit
 import SwiftUI
-import UniformTypeIdentifiers
 
 /// Opens a recording in the editor: player, trim timeline and export options.
 @MainActor
@@ -252,21 +251,20 @@ final class VideoEditorModel: ObservableObject {
                 switch action {
                 case .copy:
                     let output = try await renderOutput(title: "Preparing")
-                    Clipboard.copy(output)
-                    Toast.show("Copied", symbol: "doc.on.doc.fill")
+                    await CaptureAction.copy.perform(output)
 
                 case .save:
                     let output = try await renderOutput(title: "Saving")
                     let saved = try Storage.save(output.url)
                     if output.url != item.url { CaptureCoordinator.shared.afterCapture(output) }
-                    Toast.show("Saved to \(saved.deletingLastPathComponent().lastPathComponent)", symbol: "square.and.arrow.down.fill")
+                    CaptureAction.save.confirm(savedTo: saved)
 
                 case .saveAs:
-                    guard let destination = chooseDestination() else { return }
                     let output = try await renderOutput(title: "Saving")
-                    if FileManager.default.fileExists(atPath: destination.path) { try FileManager.default.removeItem(at: destination) }
-                    try FileManager.default.copyItem(at: output.url, to: destination)
-                    NSWorkspace.shared.activateFileViewerSelecting([destination])
+                    exportProgress = nil // the export is done; the save panel comes next
+                    let name = item.url.deletingPathExtension().lastPathComponent + (format == .gif ? ".gif" : ".mp4")
+                    guard let saved = try await Storage.saveAs(output.url, suggestedName: name) else { return }
+                    CaptureAction.saveAs.confirm(savedTo: saved)
 
                 case .done:
                     if !isUnmodified {
@@ -307,15 +305,6 @@ final class VideoEditorModel: ObservableObject {
                                                    colors: quality.gifColors, dither: quality.gifDither, progress: progress)
             return CaptureItem(url: url, kind: .gif)
         }
-    }
-
-    private func chooseDestination() -> URL? {
-        let panel = NSSavePanel()
-        panel.directoryURL = Storage.saveDirectory
-        panel.allowedContentTypes = [format == .gif ? .gif : .mpeg4Movie]
-        panel.nameFieldStringValue = item.url.deletingPathExtension().lastPathComponent + (format == .gif ? ".gif" : ".mp4")
-        panel.canCreateDirectories = true
-        return panel.runModal() == .OK ? panel.url : nil
     }
 }
 

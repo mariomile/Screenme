@@ -140,6 +140,11 @@ final class CaptureCoordinator {
         }
     }
 
+    /// A capture that no longer exists (moved to the Trash) is no longer the one to pin.
+    func forget(_ item: CaptureItem) {
+        if lastCapture?.url == item.url { lastCapture = nil }
+    }
+
     // MARK: Helpers
 
     func report(_ error: Error) {

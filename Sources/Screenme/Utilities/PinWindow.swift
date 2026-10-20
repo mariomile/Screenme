@@ -177,8 +177,8 @@ private final class PinWindowController: NSObject {
         case "=", "+": zoom(by: 1.15, animated: true)
         case "-": zoom(by: 1 / 1.15, animated: true)
         case "0": setZoom(1, animated: true)
-        case "c": copyToClipboard()
-        case "s": save()
+        case "c": perform(.copy)
+        case "s": perform(.save)
         case "w": close()
         default: return false
         }
@@ -190,9 +190,11 @@ private final class PinWindowController: NSObject {
     func makeMenu() -> NSMenu {
         let menu = NSMenu()
         menu.autoenablesItems = false
-        menu.addItem(entry("Copy", #selector(copyAction), key: "c"))
-        menu.addItem(entry("Save", #selector(saveAction), key: "s"))
-        if item.kind == .image { menu.addItem(entry("Annotate", #selector(annotateAction))) }
+        for (action, key) in [(CaptureAction.copy, "c"), (.save, "s"), (.edit, "")] where action.isAvailable(for: item.kind) {
+            let entry = entry(action.title(for: item.kind), #selector(captureAction(_:)), key: key)
+            entry.representedObject = CaptureAction.allCases.firstIndex(of: action)
+            menu.addItem(entry)
+        }
         menu.addItem(.separator())
 
         let opacity = NSMenu()
@@ -242,22 +244,15 @@ private final class PinWindowController: NSObject {
         PinWindow.updateLockTimer()
     }
 
-    private func copyToClipboard() {
-        Clipboard.copy(item)
-        Toast.show("Copied", symbol: "doc.on.doc")
+    private func perform(_ action: CaptureAction) {
+        let item = item
+        Task { await action.perform(item) }
     }
 
-    private func save() {
-        if let saved = try? Storage.save(item.url) {
-            Toast.show("Saved to \(saved.deletingLastPathComponent().lastPathComponent)", symbol: "square.and.arrow.down")
-        } else {
-            Toast.show("Could not save", symbol: "exclamationmark.triangle")
-        }
+    @objc private func captureAction(_ sender: NSMenuItem) {
+        guard let index = sender.representedObject as? Int else { return }
+        perform(CaptureAction.allCases[index])
     }
-
-    @objc private func copyAction() { copyToClipboard() }
-    @objc private func saveAction() { save() }
-    @objc private func annotateAction() { AnnotationEditor.open(item) }
     @objc private func opacityAction(_ sender: NSMenuItem) { panel.animator().alphaValue = CGFloat(sender.tag) / 100 }
     @objc private func zoomInAction() { zoom(by: 1.15, animated: true) }
     @objc private func zoomOutAction() { zoom(by: 1 / 1.15, animated: true) }

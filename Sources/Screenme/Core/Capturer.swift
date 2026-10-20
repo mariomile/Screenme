@@ -63,6 +63,25 @@ enum Storage {
         try FileManager.default.copyItem(at: url, to: destination)
         return destination
     }
+
+    /// Asks where to save a copy of `url`, replacing a file the user chose to overwrite.
+    /// Returns nil when cancelled. The panel needs Screenme active; focus goes back afterwards.
+    @MainActor
+    static func saveAs(_ url: URL, suggestedName: String) async throws -> URL? {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = suggestedName
+        panel.directoryURL = saveDirectory
+        panel.canCreateDirectories = true
+        if let type = UTType(filenameExtension: (suggestedName as NSString).pathExtension) { panel.allowedContentTypes = [type] }
+        let previous = FocusKeeper.frontmostExternal()
+        FocusKeeper.activateSelf()
+        let response = panel.runModal()
+        await FocusKeeper.restore(previous)
+        guard response == .OK, let destination = panel.url else { return nil }
+        if FileManager.default.fileExists(atPath: destination.path) { try FileManager.default.removeItem(at: destination) }
+        try FileManager.default.copyItem(at: url, to: destination)
+        return destination
+    }
 }
 
 enum Clipboard {

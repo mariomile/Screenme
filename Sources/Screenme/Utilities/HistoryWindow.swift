@@ -17,45 +17,6 @@ enum HistoryWindow {
     }
 }
 
-// MARK: - Actions
-
-@MainActor
-private enum HistoryActions {
-    static func copy(_ item: CaptureItem) {
-        Clipboard.copy(item)
-        Toast.show(item.kind == .video ? "File copied" : "Image copied", symbol: "doc.on.doc")
-    }
-
-    static func save(_ item: CaptureItem) {
-        do {
-            let saved = try Storage.save(item.url)
-            Toast.show("Saved to \(saved.deletingLastPathComponent().lastPathComponent)", symbol: "square.and.arrow.down")
-        } catch {
-            Toast.show("Could not save", symbol: "exclamationmark.triangle")
-        }
-    }
-
-    static func edit(_ item: CaptureItem) {
-        switch item.kind {
-        case .image: AnnotationEditor.open(item)
-        case .video: VideoEditor.open(item)
-        case .gif: break
-        }
-    }
-
-    static func pin(_ item: CaptureItem) {
-        PinWindow.pin(item)
-    }
-
-    static func reveal(_ item: CaptureItem) {
-        NSWorkspace.shared.activateFileViewerSelecting([item.url])
-    }
-
-    static func delete(_ item: CaptureItem) {
-        withAnimation(.snappy) { CaptureHistory.shared.trash(item) }
-    }
-}
-
 // MARK: - Model
 
 private enum HistoryFilter: String, CaseIterable, Identifiable {
@@ -271,7 +232,7 @@ private struct HistoryGridCell: View {
         .onHover { inside in
             withAnimation(.easeOut(duration: 0.12)) { hovering = inside }
         }
-        .onTapGesture(count: 2) { HistoryActions.edit(item) }
+        .onTapGesture(count: 2) { perform(.edit) }
         .onTapGesture { select() }
         .onDrag { NSItemProvider(contentsOf: item.url) ?? NSItemProvider() }
         .contextMenu { menu }
@@ -318,16 +279,9 @@ private struct HistoryGridCell: View {
         ZStack(alignment: .bottom) {
             LinearGradient(colors: [.clear, .black.opacity(0.55)], startPoint: .center, endPoint: .bottom)
             HStack(spacing: 7) {
-                HistoryActionButton(symbol: "doc.on.doc", help: "Copy") { HistoryActions.copy(item) }
-                HistoryActionButton(symbol: "square.and.arrow.down", help: "Save") { HistoryActions.save(item) }
-                if item.kind != .video {
-                    HistoryActionButton(symbol: "pin", help: "Pin") { HistoryActions.pin(item) }
+                ForEach([CaptureAction.copy, .save, .pin, .edit, .trash].filter { $0.isAvailable(for: item.kind) }, id: \.self) { action in
+                    HistoryActionButton(symbol: action.symbol(for: item.kind), help: action.title(for: item.kind)) { perform(action) }
                 }
-                if item.kind != .gif {
-                    HistoryActionButton(symbol: item.kind == .image ? "pencil.tip.crop.circle" : "scissors",
-                                 help: item.kind == .image ? "Annotate" : "Edit video") { HistoryActions.edit(item) }
-                }
-                HistoryActionButton(symbol: "trash", help: "Move to Trash") { HistoryActions.delete(item) }
             }
             .padding(.bottom, 9)
         }
@@ -336,17 +290,15 @@ private struct HistoryGridCell: View {
 
     @ViewBuilder
     private var menu: some View {
-        Button("Copy") { HistoryActions.copy(item) }
-        Button("Save") { HistoryActions.save(item) }
-        if item.kind != .gif {
-            Button(item.kind == .image ? "Annotate" : "Edit Video") { HistoryActions.edit(item) }
+        ForEach(CaptureAction.allCases.filter { $0.isAvailable(for: item.kind) }, id: \.self) { action in
+            if action == .edit || action == .trash { Divider() }
+            Button(action.title(for: item.kind), systemImage: action.symbol(for: item.kind),
+                   role: action == .trash ? .destructive : nil) { perform(action) }
         }
-        if item.kind != .video {
-            Button("Pin") { HistoryActions.pin(item) }
-        }
-        Button("Show in Finder") { HistoryActions.reveal(item) }
-        Divider()
-        Button("Delete", role: .destructive) { HistoryActions.delete(item) }
+    }
+
+    private func perform(_ action: CaptureAction) {
+        Task { await action.perform(item) }
     }
 
     private static func format(_ seconds: TimeInterval) -> String {
