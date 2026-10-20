@@ -25,13 +25,9 @@ final class EditorController: ObservableObject {
     private var pendingSnapshot: EditState?
     private var annotationClipboard: [Annotation] = []
 
-    @Published var tool: ToolKind = .select {
-        didSet { toolChanged(from: oldValue) }
-    }
+    @Published private(set) var mode = Mode.select
     @Published var selection: Set<UUID> = []
     @Published var styles: [ToolKind: ToolStyle]
-    @Published var cropPending: CGRect?
-    @Published var cropAspect = CropAspect.free
     @Published var zoomPercent = 100
     @Published var sheet: EditorSheet?
     @Published var presets: [BackgroundPreset]
@@ -48,7 +44,7 @@ final class EditorController: ObservableObject {
         initial.spotlightDim = Prefs[Pref.editorSpotlightDim]
         state = initial
         savedState = initial
-        styles = Dictionary(uniqueKeysWithValues: ToolKind.allCases.filter(\.isAnnotation).map { ($0, EditorStore.style(for: $0)) })
+        styles = Dictionary(uniqueKeysWithValues: ToolKind.allCases.map { ($0, EditorStore.style(for: $0)) })
         presets = EditorStore.presets()
     }
 
@@ -60,13 +56,12 @@ final class EditorController: ObservableObject {
 
     // MARK: Layout
 
+    /// How far a crop can reach: the image, plus any canvas added around it.
     var cropLimit: CGRect { source.bounds.union(state.cropRect) }
-
-    var isCropping: Bool { tool == .crop && cropPending != nil }
 
     /// What the canvas shows. While cropping, the whole image is shown without the background wrap.
     var layout: Layout {
-        isCropping ? Layout.make(crop: cropLimit, background: nil) : state.exportLayout
+        mode.crop != nil ? Layout.make(crop: cropLimit, background: nil) : state.exportLayout
     }
 
     /// Size of the exported picture in pixels.
@@ -126,18 +121,22 @@ final class EditorController: ObservableObject {
 
     // MARK: Tools
 
-    private func toolChanged(from old: ToolKind) {
-        guard tool != old else { return }
+    /// Switches tool. Picking the current one again does nothing, so a crop in progress survives.
+    func choose(_ choice: ToolChoice) {
+        guard choice != mode.choice else { return }
+        let wasCropping = mode.crop != nil
         canvas?.finishTextEditing()
-        if old == .crop { cropPending = nil }
-        if tool == .crop {
+        switch choice {
+        case .select:
+            mode = .select
+        case .draw(let kind):
             selection = []
-            cropAspect = .free
-            cropPending = state.cropRect
-        } else if tool != .select {
+            mode = .draw(kind)
+        case .crop:
             selection = []
+            mode = .crop(CropSession(rect: state.cropRect))
         }
-        canvas?.documentChanged(refit: old == .crop || tool == .crop)
+        canvas?.documentChanged(refit: wasCropping || mode.crop != nil)
         canvas?.refreshCursor()
     }
 
@@ -150,7 +149,7 @@ final class EditorController: ObservableObject {
         let kinds = Set(selectedAnnotations.map(\.kind))
         if kinds.count == 1 { return kinds.first }
         if kinds.count > 1 { return nil }
-        return tool.isAnnotation ? tool : nil
+        return mode.drawKind
     }
 
     var contextStyle: ToolStyle? {
@@ -195,7 +194,7 @@ final class EditorController: ObservableObject {
     }
 
     func selectAll() {
-        tool = .select
+        choose(.select)
         selection = Set(state.annotations.map(\.id))
         canvas?.needsDisplay = true
     }
@@ -287,33 +286,37 @@ final class EditorController: ObservableObject {
 
     // MARK: Crop
 
+    /// Changes the crop being set up. Does nothing outside the crop tool.
+    func updateCrop(_ change: (inout CropSession) -> Void) {
+        guard case .crop(var session) = mode else { return }
+        change(&session)
+        mode = .crop(session)
+        canvas?.needsDisplay = true
+    }
+
     func setCropAspect(_ aspect: CropAspect) {
-        cropAspect = aspect
-        if let ratio = aspect.ratio, let pending = cropPending {
-            cropPending = CropMath.fit(pending, ratio: ratio)
-            canvas?.needsDisplay = true
+        updateCrop { session in
+            session.aspect = aspect
+            if let ratio = aspect.ratio { session.rect = CropMath.fit(session.rect, ratio: ratio) }
         }
     }
 
     func resetCropSelection() {
-        cropPending = cropLimit
-        cropAspect = .free
-        canvas?.needsDisplay = true
+        let limit = cropLimit
+        updateCrop { $0 = CropSession(rect: limit) }
     }
 
     func applyCrop() {
-        guard let pending = cropPending else { return }
-        let rect = pending.integral.intersection(cropLimit)
-        cropPending = nil
+        guard let session = mode.crop else { return }
+        let rect = session.rect.integral.intersection(cropLimit)
+        choose(.select)
         if rect.width >= 4, rect.height >= 4, rect != state.cropRect {
             perform { $0.cropRect = rect }
         }
-        tool = .select
     }
 
     func cancelCrop() {
-        cropPending = nil
-        tool = .select
+        choose(.select)
     }
 
     /// Back to the full image.
@@ -344,7 +347,7 @@ final class EditorController: ObservableObject {
     // MARK: Background
 
     func toggleBackground() {
-        if tool == .crop { cancelCrop() }
+        if mode.crop != nil { cancelCrop() }
         updateBackground { $0.enabled.toggle() }
     }
 
@@ -427,7 +430,7 @@ final class EditorController: ObservableObject {
     /// Done: flattens, overwrites the capture file in place, tells the rest of the app, closes.
     func save() {
         canvas?.finishTextEditing()
-        if isCropping { applyCrop() }
+        if mode.crop != nil { applyCrop() }
         guard let (image, type) = flatten(for: item.url), let data = encode(image, as: type) else {
             alert("Screenme could not render the image.")
             return
@@ -584,10 +587,10 @@ final class EditorController: ObservableObject {
 
         switch event.keyCode {
         case 36, 76: // Return, Enter
-            if isCropping { applyCrop() } else { save() }
+            if mode.crop != nil { applyCrop() } else { save() }
             return true
         case 53: // Escape
-            if isCropping { cancelCrop() } else if !selection.isEmpty { select([]) }
+            if mode.crop != nil { cancelCrop() } else if !selection.isEmpty { select([]) }
             return true
         case 51, 117: // Delete, Forward Delete
             deleteSelection()
@@ -599,8 +602,8 @@ final class EditorController: ObservableObject {
         default: break
         }
 
-        if mods.isEmpty || mods == .shift, let match = ToolKind.allCases.first(where: { $0.key == key }) {
-            tool = match
+        if mods.isEmpty || mods == .shift, let match = ToolChoice.all.first(where: { $0.key == key }) {
+            choose(match)
             return true
         }
         return false

@@ -47,6 +47,20 @@ enum Handle: Hashable {
     case start, end, bend
 
     var isCorner: Bool { self == .tl || self == .tr || self == .br || self == .bl }
+
+    var resizeCursor: NSCursor {
+        switch self {
+        case .tl: NSCursor.frameResize(position: .topLeft, directions: .all)
+        case .tr: NSCursor.frameResize(position: .topRight, directions: .all)
+        case .bl: NSCursor.frameResize(position: .bottomLeft, directions: .all)
+        case .br: NSCursor.frameResize(position: .bottomRight, directions: .all)
+        case .t: NSCursor.frameResize(position: .top, directions: .all)
+        case .b: NSCursor.frameResize(position: .bottom, directions: .all)
+        case .l: NSCursor.frameResize(position: .left, directions: .all)
+        case .r: NSCursor.frameResize(position: .right, directions: .all)
+        default: NSCursor.crosshair
+        }
+    }
 }
 
 // MARK: - Annotation geometry
@@ -168,8 +182,6 @@ extension Annotation {
             return rx - reach <= 0 || ry - reach <= 0 || ix * ix + iy * iy >= 1
         case .pixelate, .blur, .spotlight:
             return rect.insetBy(dx: -tol * 0.5, dy: -tol * 0.5).contains(p)
-        default:
-            return false
         }
     }
 
@@ -274,78 +286,3 @@ extension Annotation {
     }
 }
 
-// MARK: - Crop math
-
-enum CropMath {
-    static func handlePoints(_ r: CGRect) -> [(Handle, CGPoint)] {
-        [(.tl, CGPoint(x: r.minX, y: r.minY)), (.t, CGPoint(x: r.midX, y: r.minY)),
-         (.tr, CGPoint(x: r.maxX, y: r.minY)), (.r, CGPoint(x: r.maxX, y: r.midY)),
-         (.br, CGPoint(x: r.maxX, y: r.maxY)), (.b, CGPoint(x: r.midX, y: r.maxY)),
-         (.bl, CGPoint(x: r.minX, y: r.maxY)), (.l, CGPoint(x: r.minX, y: r.midY))]
-    }
-
-    /// Resizes `rect` by dragging `handle` to `p`, inside `limit`, optionally locked to `ratio` (width / height).
-    static func resize(_ rect: CGRect, handle: Handle, to point: CGPoint, ratio: CGFloat?, limit: CGRect, minSize: CGFloat) -> CGRect {
-        let p = CGPoint(x: min(max(point.x, limit.minX), limit.maxX), y: min(max(point.y, limit.minY), limit.maxY))
-        var l = rect.minX, r = rect.maxX, t = rect.minY, b = rect.maxY
-        switch handle {
-        case .tl: l = p.x; t = p.y
-        case .t: t = p.y
-        case .tr: r = p.x; t = p.y
-        case .r: r = p.x
-        case .br: r = p.x; b = p.y
-        case .b: b = p.y
-        case .bl: l = p.x; b = p.y
-        case .l: l = p.x
-        default: break
-        }
-        guard let ratio else {
-            var out = CGRect(x: min(l, r), y: min(t, b), width: abs(r - l), height: abs(b - t))
-            if out.width < minSize { out.size.width = minSize; if l > r { out.origin.x = r } }
-            if out.height < minSize { out.size.height = minSize; if t > b { out.origin.y = b } }
-            return out.intersection(limit).isNull ? rect : out
-        }
-
-        if handle.isCorner {
-            let anchor = CGPoint(x: (handle == .tl || handle == .bl) ? rect.maxX : rect.minX,
-                                 y: (handle == .tl || handle == .tr) ? rect.maxY : rect.minY)
-            let sx: CGFloat = p.x >= anchor.x ? 1 : -1
-            let sy: CGFloat = p.y >= anchor.y ? 1 : -1
-            let availW = sx > 0 ? limit.maxX - anchor.x : anchor.x - limit.minX
-            let availH = sy > 0 ? limit.maxY - anchor.y : anchor.y - limit.minY
-            var w = max(abs(p.x - anchor.x), minSize)
-            var h = w / ratio
-            if h < abs(p.y - anchor.y) { h = abs(p.y - anchor.y); w = h * ratio }
-            let scale = min(1, availW / max(w, 1), availH / max(h, 1))
-            w *= scale; h *= scale
-            return CGRect(x: sx > 0 ? anchor.x : anchor.x - w, y: sy > 0 ? anchor.y : anchor.y - h, width: w, height: h)
-        }
-
-        // Edge handle: the dragged edge sets one dimension, the other follows around the center.
-        let horizontal = handle == .l || handle == .r
-        if horizontal {
-            let fixedX = handle == .r ? rect.minX : rect.maxX
-            var w = max(abs(p.x - fixedX), minSize)
-            var h = w / ratio
-            let maxH = 2 * min(rect.midY - limit.minY, limit.maxY - rect.midY)
-            if h > maxH { h = maxH; w = h * ratio }
-            let x = handle == .r ? fixedX : fixedX - w
-            return CGRect(x: x, y: rect.midY - h / 2, width: w, height: h)
-        } else {
-            let fixedY = handle == .b ? rect.minY : rect.maxY
-            var h = max(abs(p.y - fixedY), minSize)
-            var w = h * ratio
-            let maxW = 2 * min(rect.midX - limit.minX, limit.maxX - rect.midX)
-            if w > maxW { w = maxW; h = w / ratio }
-            let y = handle == .b ? fixedY : fixedY - h
-            return CGRect(x: rect.midX - w / 2, y: y, width: w, height: h)
-        }
-    }
-
-    /// The biggest rect of `ratio` that fits inside `rect`, centered.
-    static func fit(_ rect: CGRect, ratio: CGFloat) -> CGRect {
-        var w = rect.width, h = rect.width / ratio
-        if h > rect.height { h = rect.height; w = h * ratio }
-        return CGRect(x: rect.midX - w / 2, y: rect.midY - h / 2, width: w, height: h)
-    }
-}

@@ -51,14 +51,14 @@ enum Palette {
 
 // MARK: - Tools
 
+/// The kinds of annotation.
 enum ToolKind: String, Codable, CaseIterable, Identifiable {
-    case select, arrow, line, rectangle, ellipse, text, pen, highlighter, counter, pixelate, blur, spotlight, crop
+    case arrow, line, rectangle, ellipse, text, pen, highlighter, counter, pixelate, blur, spotlight
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .select: "Select"
         case .arrow: "Arrow"
         case .line: "Line"
         case .rectangle: "Rectangle"
@@ -70,14 +70,12 @@ enum ToolKind: String, Codable, CaseIterable, Identifiable {
         case .pixelate: "Pixelate"
         case .blur: "Blur"
         case .spotlight: "Spotlight"
-        case .crop: "Crop"
         }
     }
 
     /// Single-letter shortcut.
     var key: String {
         switch self {
-        case .select: "v"
         case .arrow: "a"
         case .line: "l"
         case .rectangle: "r"
@@ -89,15 +87,11 @@ enum ToolKind: String, Codable, CaseIterable, Identifiable {
         case .pixelate: "x"
         case .blur: "b"
         case .spotlight: "s"
-        case .crop: "c"
         }
     }
 
-    var tooltip: String { "\(title) (\(key.uppercased()))" }
-
     var symbol: String {
         switch self {
-        case .select: "cursorarrow"
         case .arrow: "arrow.up.right"
         case .line: "line.diagonal"
         case .rectangle: "rectangle"
@@ -109,7 +103,6 @@ enum ToolKind: String, Codable, CaseIterable, Identifiable {
         case .pixelate: "squareshape.split.3x3"
         case .blur: "drop"
         case .spotlight: "flashlight.on.fill"
-        case .crop: "crop"
         }
     }
 
@@ -118,7 +111,64 @@ enum ToolKind: String, Codable, CaseIterable, Identifiable {
     var isRedaction: Bool { self == .pixelate || self == .blur }
     /// Kinds that are dragged out as a rectangle.
     var isBox: Bool { self == .rectangle || self == .ellipse || isRedaction || self == .spotlight }
-    var isAnnotation: Bool { self != .select && self != .crop }
+}
+
+/// What a mouse drag on the canvas does.
+enum Mode: Equatable {
+    case select
+    case draw(ToolKind)
+    case crop(CropSession)
+
+    var choice: ToolChoice {
+        switch self {
+        case .select: .select
+        case .draw(let kind): .draw(kind)
+        case .crop: .crop
+        }
+    }
+
+    var drawKind: ToolKind? {
+        if case .draw(let kind) = self { kind } else { nil }
+    }
+
+    var crop: CropSession? {
+        if case .crop(let session) = self { session } else { nil }
+    }
+}
+
+/// A toolbar button and its single-letter key: Select, an annotation kind, or Crop.
+enum ToolChoice: Hashable, Identifiable {
+    case select, draw(ToolKind), crop
+
+    static let all: [ToolChoice] = [.select] + ToolKind.allCases.map { .draw($0) } + [.crop]
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .select: "Select"
+        case .draw(let kind): kind.title
+        case .crop: "Crop"
+        }
+    }
+
+    var key: String {
+        switch self {
+        case .select: "v"
+        case .draw(let kind): kind.key
+        case .crop: "c"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .select: "cursorarrow"
+        case .draw(let kind): kind.symbol
+        case .crop: "crop"
+        }
+    }
+
+    var tooltip: String { "\(title) (\(key.uppercased()))" }
 }
 
 enum TextBackdrop: String, Codable, CaseIterable, Identifiable {
@@ -346,27 +396,6 @@ enum SolidSwatches {
 }
 
 // MARK: - Document state
-
-enum CropAspect: String, CaseIterable, Identifiable {
-    case free, square, fourThree, sixteenNine
-    var id: String { rawValue }
-    var title: String {
-        switch self {
-        case .free: "Free"
-        case .square: "1:1"
-        case .fourThree: "4:3"
-        case .sixteenNine: "16:9"
-        }
-    }
-    var ratio: CGFloat? {
-        switch self {
-        case .free: nil
-        case .square: 1
-        case .fourThree: 4.0 / 3.0
-        case .sixteenNine: 16.0 / 9.0
-        }
-    }
-}
 
 /// Everything that is undoable. The image itself is never modified: crop, resize and
 /// background are all applied only when the picture is flattened.

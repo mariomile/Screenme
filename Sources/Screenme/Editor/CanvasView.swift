@@ -23,9 +23,7 @@ final class CanvasView: NSView, NSTextViewDelegate {
         case move(last: CGPoint)
         case resize(id: UUID, handle: Handle, original: Annotation)
         case marquee(start: CGPoint, additive: Bool, base: Set<UUID>)
-        case cropResize(handle: Handle, original: CGRect)
-        case cropMove(start: CGPoint, original: CGRect)
-        case cropNew(start: CGPoint)
+        case crop(CropInteraction)
     }
     private var gesture = Gesture.none
     private var marquee: CGRect?
@@ -201,8 +199,8 @@ final class CanvasView: NSView, NSTextViewDelegate {
                               baseScale: window?.backingScaleFactor ?? 2, hideTextOf: editingID)
         ctx.restoreGState()
 
-        if controller.isCropping, let pending = controller.cropPending {
-            drawCropOverlay(ctx, pending: pending, canvasRect: canvasRect)
+        if let session = controller.mode.crop {
+            CropInteraction.drawOverlay(ctx, session: session, canvasRect: canvasRect, viewBounds: bounds, toView: toView)
         } else {
             drawSelection(ctx)
         }
@@ -257,61 +255,6 @@ final class CanvasView: NSView, NSTextViewDelegate {
         ctx.strokeEllipse(in: r.insetBy(dx: 0.9, dy: 0.9))
     }
 
-    private func drawCropOverlay(_ ctx: CGContext, pending: CGRect, canvasRect: CGRect) {
-        let r = toView(pending)
-        let dim = CGMutablePath()
-        dim.addRect(canvasRect)
-        dim.addRect(r)
-        ctx.saveGState()
-        ctx.addPath(dim)
-        ctx.setFillColor(CGColor(gray: 0, alpha: 0.55))
-        ctx.fillPath(using: .evenOdd)
-        ctx.restoreGState()
-
-        ctx.setStrokeColor(CGColor(gray: 1, alpha: 0.95))
-        ctx.setLineWidth(1)
-        ctx.stroke(r.insetBy(dx: 0.5, dy: 0.5))
-
-        // Rule of thirds.
-        ctx.setStrokeColor(CGColor(gray: 1, alpha: 0.3))
-        for i in 1...2 {
-            let f = CGFloat(i) / 3
-            ctx.move(to: CGPoint(x: r.minX + r.width * f, y: r.minY)); ctx.addLine(to: CGPoint(x: r.minX + r.width * f, y: r.maxY))
-            ctx.move(to: CGPoint(x: r.minX, y: r.minY + r.height * f)); ctx.addLine(to: CGPoint(x: r.maxX, y: r.minY + r.height * f))
-        }
-        ctx.strokePath()
-
-        // Corner brackets and edge bars.
-        ctx.setStrokeColor(CGColor(gray: 1, alpha: 1))
-        ctx.setLineWidth(3.5)
-        ctx.setLineCap(.round)
-        let arm: CGFloat = min(18, min(r.width, r.height) / 3)
-        for (h, p) in CropMath.handlePoints(pending).map({ ($0.0, toView($0.1)) }) {
-            switch h {
-            case .tl: ctx.move(to: CGPoint(x: p.x, y: p.y + arm)); ctx.addLine(to: p); ctx.addLine(to: CGPoint(x: p.x + arm, y: p.y))
-            case .tr: ctx.move(to: CGPoint(x: p.x - arm, y: p.y)); ctx.addLine(to: p); ctx.addLine(to: CGPoint(x: p.x, y: p.y + arm))
-            case .br: ctx.move(to: CGPoint(x: p.x, y: p.y - arm)); ctx.addLine(to: p); ctx.addLine(to: CGPoint(x: p.x - arm, y: p.y))
-            case .bl: ctx.move(to: CGPoint(x: p.x + arm, y: p.y)); ctx.addLine(to: p); ctx.addLine(to: CGPoint(x: p.x, y: p.y - arm))
-            case .t, .b: ctx.move(to: CGPoint(x: p.x - arm / 2, y: p.y)); ctx.addLine(to: CGPoint(x: p.x + arm / 2, y: p.y))
-            case .l, .r: ctx.move(to: CGPoint(x: p.x, y: p.y - arm / 2)); ctx.addLine(to: CGPoint(x: p.x, y: p.y + arm / 2))
-            default: break
-            }
-        }
-        ctx.strokePath()
-        ctx.setLineCap(.butt)
-
-        // Size label.
-        let label = "\(Int(pending.width.rounded())) × \(Int(pending.height.rounded()))" as NSString
-        let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium), .foregroundColor: NSColor.white]
-        let size = label.size(withAttributes: attrs)
-        let pill = CGRect(x: r.midX - size.width / 2 - 8, y: r.maxY + 8, width: size.width + 16, height: size.height + 6)
-        let pillRect = pill.maxY > bounds.maxY - 4 ? pill.offsetBy(dx: 0, dy: -(pill.height + 16)) : pill
-        ctx.setFillColor(CGColor(gray: 0, alpha: 0.72))
-        ctx.addPath(CGPath(roundedRect: pillRect, cornerWidth: pillRect.height / 2, cornerHeight: pillRect.height / 2, transform: nil))
-        ctx.fillPath()
-        label.draw(at: CGPoint(x: pillRect.minX + 8, y: pillRect.minY + 3), withAttributes: attrs)
-    }
-
     // MARK: Hit testing
 
     private func annotation(withID id: UUID) -> Annotation? {
@@ -349,8 +292,8 @@ final class CanvasView: NSView, NSTextViewDelegate {
         let dp = toDoc(vp)
         let shift = event.modifierFlags.contains(.shift)
 
-        if controller.tool == .crop {
-            cropMouseDown(vp, dp)
+        if controller.mode.crop != nil {
+            gesture = .crop(CropInteraction(mouseDownAt: dp, view: vp, controller: controller, toView: toView))
             return
         }
 
@@ -367,7 +310,7 @@ final class CanvasView: NSView, NSTextViewDelegate {
             return
         }
 
-        switch controller.tool {
+        switch controller.mode {
         case .select:
             if let hit {
                 if shift {
@@ -383,22 +326,22 @@ final class CanvasView: NSView, NSTextViewDelegate {
                 if !shift { controller.select([]) }
                 gesture = .marquee(start: dp, additive: shift, base: controller.selection)
             }
-        case .text:
+        case .draw(.text):
             if let hit, hit.kind == .text {
                 controller.select([hit.id])
                 beginTextEditing(hit.id)
             } else {
                 createText(at: dp)
             }
-        case .crop:
-            break
-        default:
+        case .draw(let kind):
             if let hit, controller.selection.contains(hit.id) {
                 controller.beginChange()
                 gesture = .move(last: dp)
             } else {
-                startCreate(controller.tool, at: dp)
+                startCreate(kind, at: dp)
             }
+        case .crop:
+            break
         }
     }
 
@@ -464,22 +407,8 @@ final class CanvasView: NSView, NSTextViewDelegate {
             for a in controller.state.annotations where a.bounds(unit: unit).intersects(r) { ids.insert(a.id) }
             controller.select(ids)
 
-        case .cropResize(let handle, let original):
-            controller.cropPending = CropMath.resize(original, handle: handle, to: dp, ratio: controller.cropAspect.ratio,
-                                                     limit: controller.cropLimit, minSize: 8)
-            needsDisplay = true
-
-        case .cropMove(let start, let original):
-            let limit = controller.cropLimit
-            var r = original.offsetBy(dx: dp.x - start.x, dy: dp.y - start.y)
-            r.origin.x = min(max(r.minX, limit.minX), limit.maxX - r.width)
-            r.origin.y = min(max(r.minY, limit.minY), limit.maxY - r.height)
-            controller.cropPending = r
-            needsDisplay = true
-
-        case .cropNew(let start):
-            controller.cropPending = newCropRect(from: start, to: dp)
-            needsDisplay = true
+        case .crop(let crop):
+            crop.dragged(to: dp, controller: controller)
         }
     }
 
@@ -496,8 +425,8 @@ final class CanvasView: NSView, NSTextViewDelegate {
             needsDisplay = true
         case .pan:
             refreshCursor()
-        case .cropNew:
-            if let r = controller.cropPending, r.width < 8 || r.height < 8 { controller.resetCropSelection() }
+        case .crop(let crop):
+            crop.ended(controller: controller)
         default:
             break
         }
@@ -532,41 +461,6 @@ final class CanvasView: NSView, NSTextViewDelegate {
         controller.endChange()
     }
 
-    // MARK: Crop
-
-    private func cropMouseDown(_ vp: CGPoint, _ dp: CGPoint) {
-        guard let r = controller.cropPending else { return }
-        for (handle, p) in CropMath.handlePoints(r) {
-            let v = toView(p)
-            if hypot(v.x - vp.x, v.y - vp.y) <= 12 {
-                gesture = .cropResize(handle: handle, original: r)
-                return
-            }
-        }
-        if r.contains(dp) {
-            gesture = .cropMove(start: dp, original: r)
-        } else {
-            gesture = .cropNew(start: dp)
-            controller.cropPending = newCropRect(from: dp, to: dp)
-        }
-    }
-
-    private func newCropRect(from start: CGPoint, to point: CGPoint) -> CGRect {
-        let limit = controller.cropLimit
-        let p = CGPoint(x: min(max(point.x, limit.minX), limit.maxX), y: min(max(point.y, limit.minY), limit.maxY))
-        let sx: CGFloat = p.x >= start.x ? 1 : -1
-        let sy: CGFloat = p.y >= start.y ? 1 : -1
-        var w = abs(p.x - start.x), h = abs(p.y - start.y)
-        if let ratio = controller.cropAspect.ratio, w > 0 || h > 0 {
-            if w / max(h, 0.001) > ratio { h = w / ratio } else { w = h * ratio }
-            let availW = sx > 0 ? limit.maxX - start.x : start.x - limit.minX
-            let availH = sy > 0 ? limit.maxY - start.y : start.y - limit.minY
-            let k = min(1, availW / max(w, 0.001), availH / max(h, 0.001))
-            w *= k; h *= k
-        }
-        return CGRect(x: sx > 0 ? start.x : start.x - w, y: sy > 0 ? start.y : start.y - h, width: w, height: h)
-    }
-
     // MARK: Cursor
 
     override func updateTrackingAreas() {
@@ -591,39 +485,21 @@ final class CanvasView: NSView, NSTextViewDelegate {
         if spaceDown { NSCursor.openHand.set(); return }
         let dp = toDoc(vp)
 
-        if controller.tool == .crop, let r = controller.cropPending {
-            for (handle, p) in CropMath.handlePoints(r) {
-                let v = toView(p)
-                if hypot(v.x - vp.x, v.y - vp.y) <= 12 { resizeCursor(for: handle).set(); return }
-            }
-            (r.contains(dp) ? NSCursor.openHand : NSCursor.crosshair).set()
+        if let session = controller.mode.crop {
+            CropInteraction.cursor(at: vp, doc: dp, session: session, toView: toView).set()
             return
         }
         if let (_, handle) = handleHit(at: vp) {
-            resizeCursor(for: handle).set()
+            handle.resizeCursor.set()
             return
         }
-        switch controller.tool {
+        switch controller.mode {
         case .select:
             (topmostAnnotation(at: dp) != nil ? NSCursor.openHand : NSCursor.arrow).set()
-        case .text:
+        case .draw(.text):
             NSCursor.iBeam.set()
-        default:
+        case .draw, .crop:
             if let hit = topmostAnnotation(at: dp), controller.selection.contains(hit.id) { NSCursor.openHand.set() } else { NSCursor.crosshair.set() }
-        }
-    }
-
-    private func resizeCursor(for handle: Handle) -> NSCursor {
-        switch handle {
-        case .tl: NSCursor.frameResize(position: .topLeft, directions: .all)
-        case .tr: NSCursor.frameResize(position: .topRight, directions: .all)
-        case .bl: NSCursor.frameResize(position: .bottomLeft, directions: .all)
-        case .br: NSCursor.frameResize(position: .bottomRight, directions: .all)
-        case .t: NSCursor.frameResize(position: .top, directions: .all)
-        case .b: NSCursor.frameResize(position: .bottom, directions: .all)
-        case .l: NSCursor.frameResize(position: .left, directions: .all)
-        case .r: NSCursor.frameResize(position: .right, directions: .all)
-        default: NSCursor.crosshair
         }
     }
 
@@ -631,7 +507,7 @@ final class CanvasView: NSView, NSTextViewDelegate {
 
     override func menu(for event: NSEvent) -> NSMenu? {
         let vp = convert(event.locationInWindow, from: nil)
-        guard controller.tool != .crop, let hit = topmostAnnotation(at: toDoc(vp)) else { return nil }
+        guard controller.mode.crop == nil, let hit = topmostAnnotation(at: toDoc(vp)) else { return nil }
         if !controller.selection.contains(hit.id) { controller.select([hit.id]) }
         let menu = NSMenu()
         if hit.kind == .text {

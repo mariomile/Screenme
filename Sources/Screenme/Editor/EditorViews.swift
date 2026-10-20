@@ -62,9 +62,10 @@ struct ToolbarLeading: View {
 struct ToolPalette: View {
     @ObservedObject var c: EditorController
 
-    private static let groups: [[ToolKind]] = [
-        [.select], [.arrow, .line, .rectangle, .ellipse], [.text, .pen, .highlighter, .counter],
-        [.pixelate, .blur, .spotlight], [.crop],
+    private static let groups: [[ToolChoice]] = [
+        [.select], [.draw(.arrow), .draw(.line), .draw(.rectangle), .draw(.ellipse)],
+        [.draw(.text), .draw(.pen), .draw(.highlighter), .draw(.counter)],
+        [.draw(.pixelate), .draw(.blur), .draw(.spotlight)], [.crop],
     ]
 
     var body: some View {
@@ -73,7 +74,7 @@ struct ToolPalette: View {
                 if index > 0 { Divider().frame(height: 18) }
                 HStack(spacing: 1) {
                     ForEach(group) { tool in
-                        ToolButton(tool: tool, selected: c.tool == tool) { c.tool = tool }
+                        ToolButton(tool: tool, selected: c.mode.choice == tool) { c.choose(tool) }
                     }
                 }
             }
@@ -83,7 +84,7 @@ struct ToolPalette: View {
 }
 
 private struct ToolButton: View {
-    let tool: ToolKind
+    let tool: ToolChoice
     let selected: Bool
     let action: () -> Void
     @State private var hovering = false
@@ -279,8 +280,8 @@ struct InspectorBar: View {
     var body: some View {
         HStack(spacing: 0) {
             Group {
-                if c.tool == .crop {
-                    CropControls(c: c)
+                if let session = c.mode.crop {
+                    CropControls(c: c, session: session)
                 } else if let kind = c.contextKind, let style = c.contextStyle {
                     ScrollView(.horizontal, showsIndicators: false) {
                         StyleControls(c: c, kind: kind, style: style)
@@ -297,7 +298,7 @@ struct InspectorBar: View {
                 }
             }
             Spacer(minLength: 12)
-            if !c.selection.isEmpty && c.tool != .crop { SelectionActions(c: c) }
+            if !c.selection.isEmpty && c.mode.crop == nil { SelectionActions(c: c) }
         }
         .padding(.horizontal, 14)
         .frame(height: 52)
@@ -320,13 +321,14 @@ private struct SelectionActions: View {
 
 private struct CropControls: View {
     @ObservedObject var c: EditorController
+    let session: CropSession
 
     var body: some View {
         HStack(spacing: 14) {
             Text("Aspect")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
-            Picker("Aspect", selection: Binding(get: { c.cropAspect }, set: { c.setCropAspect($0) })) {
+            Picker("Aspect", selection: Binding(get: { session.aspect }, set: { c.setCropAspect($0) })) {
                 ForEach(CropAspect.allCases) { Text($0.title).tag($0) }
             }
             .pickerStyle(.segmented)
