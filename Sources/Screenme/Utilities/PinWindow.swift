@@ -250,6 +250,8 @@ private final class PinWindowController: NSObject {
 
 // MARK: - Panel
 
+/// Handles a pin's keys once: ⌘ shortcuts in `performKeyEquivalent`, Esc when it reaches the window's `keyDown`
+/// (the content view passes keys up the responder chain untouched).
 private final class PinFloatingPanel: FloatingPanel {
     var keyHandler: ((NSEvent) -> Bool)?
 
@@ -364,11 +366,6 @@ private final class PinContentView: NSView {
 
     override func magnify(with event: NSEvent) {
         controller?.zoom(by: 1 + event.magnification, anchor: NSEvent.mouseLocation)
-    }
-
-    override func keyDown(with event: NSEvent) {
-        if let window = window as? PinFloatingPanel, window.keyHandler?(event) == true { return }
-        super.keyDown(with: event)
     }
 
     // MARK: Zoom label
