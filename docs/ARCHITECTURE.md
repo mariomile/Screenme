@@ -15,21 +15,40 @@ Swift 5 language mode on the Swift 6 compiler. All UI types are `@MainActor`. Ap
 
 | Folder | Owns | Public API other modules call |
 |--------|------|-------------------------------|
-| `Core/` | App delegate and menu bar, `CaptureCoordinator`, `Prefs`/`Pref`, `ShortcutAction`/`KeyCombo`/`ShortcutStore`, `HotKeyCenter`, `AppState`, `CaptureTarget`, `Capturer`, `Storage`, `Clipboard`, `Sounds`, `Toast`, `WindowPresenter`, `CaptureItem` | see files |
-| `Capture/` | Selection overlay (crosshair, magnifier, window picking, freeze), All-in-One bar | `SelectionOverlay.select(_ mode: SelectionMode) async -> SelectionResult?`, `AllInOneHUD.show(perform:)` |
+| `Core/` | App delegate and menu bar, `CaptureCoordinator`, `Prefs`/`Pref`, `ShortcutAction`/`KeyCombo`/`ShortcutStore`, `HotKeyCenter`, `AppState`, `CaptureTarget`, `Capturer`, `Storage`, `Clipboard`, `Sounds`, `CaptureItem`, and the shared kit below | see files |
+| `Capture/` | Selection overlay (crosshair, magnifier, window picking, freeze), All-in-One bar | `SelectionOverlay.select(_ mode: SelectionMode) async -> SelectionResult?`, `AllInOneHUD.show(perform:)`, `.isOpen` |
 | `Editor/` | Annotation editor + background tool | `AnnotationEditor.open(_ item: CaptureItem)` |
 | `Recording/` | Screen recording, recording controls, video editor | `RecordingController.shared.start(_:) async throws`, `.stop() async -> CaptureItem?`, `.isRecording`, `VideoEditor.open(_ item:)` |
-| `Utilities/` | OCR + QR, scrolling capture, pin, history, desktop icons, self-timer | `TextRecognizer.recognize(_:)`, `ScrollingCapture.run(_:)`, `PinWindow.pin(_:)`, `CaptureHistory.shared`, `HistoryWindow.show()`, `DesktopIcons.toggle()/.isHidden`, `SelfTimer.countdown(seconds:around:)` |
+| `Utilities/` | OCR + QR, scrolling capture, pin, history, desktop icons | `TextRecognizer.recognize(_:)`, `ScrollingCapture.run(_:)`, `PinWindow.pin(_:)`, `CaptureHistory.shared`, `HistoryWindow.show()`, `DesktopIcons.toggle()/.isHidden/.coverWindowIDs` |
 | `UI/` | Quick Access overlay, Settings window, onboarding, shortcut recorder, macOS shortcut takeover | `QuickAccess.shared.show(_:)`, `SettingsWindow.show()`, `OnboardingWindow.show()` |
 | `Resources/` | Asset catalog, app icon, menu bar icon | `NSImage(named: "MenuBarIcon")` |
 
+## Shared kit in Core
+
+Use these instead of writing your own. If one does not fit, extend it in Core rather than copying it.
+
+| Concept | Where | What it gives you |
+|---------|-------|-------------------|
+| A capture | `Core/CaptureItem.swift` | `CaptureItem` with `Kind` `.image`, `.video`, `.gif`. Switch on the kind; never test the file extension. `Notification.Name.captureUpdated` (object: the file URL) when a file changes on disk. |
+| Capture actions | `Core/CaptureActions.swift` | `CaptureAction` (copy, save, saveAs, reveal, edit, pin, trash): `title(for:)`, `symbol(for:)`, `isAvailable(for:)`, `perform(_:) async`, and `confirm(savedTo:)`, the one toast per action. Every menu and button row over a capture is built from it. |
+| Files | `Core/Capturer.swift` | `Storage.write(_:)`, `newURL(extension:)`, `save(_:)`, `saveAs(_:suggestedName:) async throws -> URL?`; `Clipboard.copy(_ item:)` (image data, GIF data plus file, or file). |
+| Capture filter | `Core/CaptureTarget.swift` | `CaptureTarget.streamSetup(showsCursor:retina:including:)`, the only place that builds an `SCContentFilter` for Screenme's own content. `NSScreen.at(_:)`, `NSScreen.underMouse`, `CGRect.cocoaFlipped`. |
+| Overlays | `Core/Overlay/` | `FloatingPanel` (borderless, never activates on show, `present(makeKey:from:)` and `dismiss(completion:)` fades), `VisualEffectBackground`, `Placement`, `FocusKeeper` (`frontmostExternal`, `activateSelf`, `restore`), `Countdown.run(seconds:around:)`. |
+| Feedback | `Core/Toast.swift` | `Toast.show(_:symbol:duration:)`, `Toast.progress(_:) -> ToastHandle`. |
+| Keys | `Core/HotKeyCenter.swift` | Global shortcuts, plus `registerTemporary(keyCode:modifiers:handler:)` / `unregisterTemporary(_:)` for a key held only for a moment (Esc during a countdown or the pre-record bar). |
+| Permissions | `Core/Permissions.swift` | `Permission` (screen recording, microphone, camera, accessibility): `status`, `isGranted`, `request()`, `ensure() async`, `openSettings()`. `Permissions.shared` for SwiftUI; `PermissionRow(permission:)` in UI. |
+| Preferences | `Core/Prefs.swift` | `PrefKey`, `Prefs[...]` for plain and `RawRepresentable` values, and the value enums `ImageFormat`, `QuickAccessPosition`, `VideoQuality`. |
+| Windows | `Core/WindowPresenter.swift` | `show(_:title:size:style:content:)`, `focus(_:) -> Bool`, `close(_:)`. |
+| Previews and small helpers | `Core/Thumbnails.swift`, `Core/Duration.swift`, `Core/WallpaperLoader.swift`, `Core/InputDevices.swift` | `Thumbnails.make(for:maxPixelSize:)` / `cached` / `decodeImage(at:maxPixelSize:)` / `aspectRatio(of:)`, `Duration.format(_:tenths:)`, `WallpaperLoader.pictureURL(for:)` / `snapshot`, `InputDevices.microphones()` / `cameras()`. |
+
 ## Rules
 
-- A module edits only its own folder. Public signatures in the table above do not change: other modules call them.
+- A module edits only its own folder, plus Core when it extends the shared kit. Public signatures in the tables above change only together with every caller and this file.
 - Need a new preference: `extension Pref { static let x = PrefKey(name: "x", defaultValue: …) }` in your own folder. Nothing is registered: `Prefs[Pref.x]` falls back to `defaultValue`, and every `@AppStorage(Pref.x.name)` must be initialized with `Pref.x.defaultValue`. A fixed set of choices is an enum with a `String` raw value, used as the pref's type.
-- Need something from Core that is missing: do not edit Core. Say so in your report.
-- After a capture or an edit that produces a new file, call `CaptureCoordinator.shared.afterCapture(item)`.
+- Every user action goes through `CaptureCoordinator.perform(_:)`. It runs one capture at a time (`busy` lasts until the file is delivered, GIF conversion included), never starts one while the All-in-One bar is open, and handles instant actions (All-in-One, Pin Last Capture, History, Hide Desktop Icons) before that gate. The picker, scrolling capture and recording start rely on this and have no guards of their own.
+- After a capture or an edit that produces a new file, call `CaptureCoordinator.shared.afterCapture(item)`. A file changed in place posts `.captureUpdated`.
 - New captures go to `Storage.directory` via `Storage.write(_:)` or `Storage.newURL(extension:)`.
-- Coordinates: `CaptureTarget.area` rects and `cocoaFrame` are global Cocoa coordinates (bottom-left origin). ScreenCaptureKit wants display-local, top-left.
-- Screenme's own windows are excluded from every capture by the content filter in `CaptureTarget.streamSetup`.
+- Coordinates: `CaptureTarget.area` rects and `cocoaFrame` are global Cocoa coordinates (bottom-left origin). ScreenCaptureKit wants display-local, top-left. Convert global rects with `cocoaFlipped`.
+- Screenme's own windows are excluded from every capture by `CaptureTarget.streamSetup`; pass windows that must be filmed (recording overlays) as `including:`.
+- Overlay windows are `FloatingPanel`s; subclass only for a real override (key handling, `constrainFrameRect`). Taking focus goes through `FocusKeeper`, never a bare `NSApp.activate`.
 - No em-dashes in UI copy.
