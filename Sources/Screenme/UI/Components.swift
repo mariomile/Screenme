@@ -1,4 +1,5 @@
 import AppKit
+import ServiceManagement
 import SwiftUI
 
 // MARK: - Small views
@@ -51,32 +52,57 @@ struct SymbolTile: View {
     }
 }
 
-/// "Granted", "Not allowed", etc. as a colored label.
+/// "Allowed", "macOS uses it", "Ready" and the like, as a colored label with the tone's symbol.
 struct StatusLabel: View {
-    enum Tone { case good, warning, neutral }
-    let text: String
-    let tone: Tone
+    enum Tone {
+        case good, warning, neutral
 
-    var body: some View {
-        Label(text, systemImage: symbol)
-            .font(.callout)
-            .foregroundStyle(color)
-            .labelStyle(.titleAndIcon)
-    }
+        var symbol: String {
+            switch self {
+            case .good: "checkmark.circle.fill"
+            case .warning: "exclamationmark.triangle.fill"
+            case .neutral: "circle.dashed"
+            }
+        }
 
-    private var symbol: String {
-        switch tone {
-        case .good: "checkmark.circle.fill"
-        case .warning: "exclamationmark.triangle.fill"
-        case .neutral: "circle.dashed"
+        var color: Color {
+            switch self {
+            case .good: .green
+            case .warning: .orange
+            case .neutral: .secondary
+            }
         }
     }
 
-    private var color: Color {
-        switch tone {
-        case .good: .green
-        case .warning: .orange
-        case .neutral: .secondary
+    let text: String
+    let tone: Tone
+    var font: Font = .callout
+
+    var body: some View {
+        Label(text, systemImage: tone.symbol)
+            .font(font)
+            .foregroundStyle(tone.color)
+            .labelStyle(.titleAndIcon)
+    }
+}
+
+extension ShortcutStatus {
+    var tone: StatusLabel.Tone {
+        switch self {
+        case .ok: .good
+        case .unassigned: .neutral
+        case .usedByMacOS, .usedByApp: .warning
+        }
+    }
+
+    var symbol: String { tone.symbol }
+
+    /// For tight rows: "Ready", "No shortcut", "macOS uses it", "Another app uses it".
+    var shortText: String {
+        switch self {
+        case .usedByMacOS: "macOS uses it"
+        case .usedByApp: "Another app uses it"
+        default: text
         }
     }
 }
@@ -106,6 +132,119 @@ struct PermissionRow: View {
         .padding(.vertical, 2)
     }
 }
+
+// MARK: - Bound controls
+
+/// A switch bound to a Bool preference.
+struct PrefToggle: View {
+    let title: String
+    var detail: String?
+    @AppStorage private var value: Bool
+
+    init(_ title: String, _ key: PrefKey<Bool>, detail: String? = nil) {
+        self.title = title
+        self.detail = detail
+        _value = AppStorage(wrappedValue: key.defaultValue, key.name)
+    }
+
+    var body: some View {
+        Toggle(isOn: $value) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                if let detail { Text(detail).font(.caption).foregroundStyle(.secondary) }
+            }
+        }
+    }
+}
+
+/// A pop-up bound to an Int preference.
+struct PrefIntPicker: View {
+    let title: String
+    let options: [(label: String, value: Int)]
+    @AppStorage private var value: Int
+
+    init(_ title: String, _ key: PrefKey<Int>, options: [(label: String, value: Int)]) {
+        self.title = title
+        self.options = options
+        _value = AppStorage(wrappedValue: key.defaultValue, key.name)
+    }
+
+    var body: some View {
+        Picker(title, selection: $value) {
+            ForEach(options, id: \.value) { Text($0.label).tag($0.value) }
+        }
+    }
+}
+
+// MARK: - Rows shared by Settings and onboarding
+
+/// What happens after a screenshot, for a grouped form.
+struct AfterCaptureSection: View {
+    var title = "After capture"
+    /// Onboarding has no room for the explanation.
+    var showsFooter = true
+
+    var body: some View {
+        Section {
+            PrefToggle("Show Quick Access", Pref.afterShotQuickAccess)
+            PrefToggle("Copy to clipboard", Pref.afterShotCopy)
+            PrefToggle("Save to folder", Pref.afterShotSave)
+            PrefToggle("Open in editor", Pref.afterShotOpenEditor)
+        } header: {
+            Text(title)
+        } footer: {
+            if showsFooter {
+                Text("Pick any combination. With Open in editor on, the editor opens instead of Quick Access.")
+            }
+        }
+    }
+}
+
+/// The folder Save copies captures to, with a button to choose another.
+struct SaveFolderRow: View {
+    @AppStorage(Pref.saveDirectory.name) private var saveDirectory = Pref.saveDirectory.defaultValue
+
+    var body: some View {
+        LabeledContent("Save folder") {
+            HStack {
+                Text((saveDirectory as NSString).abbreviatingWithTildeInPath)
+                    .foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                Button("Choose…") { AppState.shared.chooseSaveDirectory() }
+            }
+        }
+    }
+}
+
+/// The login item switch, plus the hint macOS needs when the login item waits for approval.
+struct LaunchAtLoginToggle: View {
+    @ObservedObject private var state = AppState.shared
+    @State private var status = SMAppService.mainApp.status
+
+    /// Two rows in a form: the switch, and the approval hint when needed.
+    var body: some View {
+        Toggle("Launch Screenme at login", isOn: Binding(
+            get: { state.launchAtLogin },
+            set: {
+                state.setLaunchAtLogin($0)
+                status = SMAppService.mainApp.status
+            }
+        ))
+        .polling(every: 2) {
+            state.refresh()
+            status = SMAppService.mainApp.status
+        }
+        if status == .requiresApproval {
+            HStack {
+                Label("Approve Screenme in Login Items to finish.", systemImage: "exclamationmark.triangle.fill")
+                    .font(.callout).foregroundStyle(.orange)
+                Spacer()
+                Button("Open Login Items") { SMAppService.openSystemSettingsLoginItems() }
+            }
+        }
+    }
+}
+
+// MARK: - Polling
 
 /// Live polling while a view is on screen.
 struct PollingModifier: ViewModifier {

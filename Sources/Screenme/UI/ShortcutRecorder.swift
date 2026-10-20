@@ -208,12 +208,8 @@ struct ShortcutRow: View {
                 Text(action.title).font(.body)
                 if let error = recorder.error {
                     Label(error, systemImage: "xmark.octagon.fill").font(.caption).foregroundStyle(.red)
-                } else if status.isWarning {
-                    Label(status.text, systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange)
-                } else if status == .ok {
-                    Label("Ready", systemImage: "checkmark.circle.fill").font(.caption).foregroundStyle(.green)
                 } else {
-                    Text(status.text).font(.caption).foregroundStyle(.secondary)
+                    StatusLabel(text: status.text, tone: status.tone, font: .caption)
                 }
             }
             Spacer(minLength: 8)
@@ -236,22 +232,30 @@ struct ShortcutRow: View {
 // MARK: - macOS takeover
 
 /// The state of the macOS screenshot shortcuts and the buttons to take them over or give them back.
+/// Settings lists each shortcut; onboarding, short on room, shows one summary line instead.
 struct MacOSShortcutsBlock: View {
+    var listsEach = true
     @ObservedObject private var shortcuts = ShortcutsModel.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            ForEach(shortcuts.system.screenshotEntries) { entry in
-                HStack(spacing: 10) {
-                    if let combo = entry.combo { KeyCaps(combo: combo, size: 11) }
-                    Text(entry.name).font(.callout).foregroundStyle(.secondary).lineLimit(1)
-                    Spacer(minLength: 8)
-                    if entry.enabled {
-                        StatusLabel(text: "macOS uses it", tone: .warning)
-                    } else {
-                        StatusLabel(text: "Free for Screenme", tone: .good)
+            if listsEach {
+                ForEach(shortcuts.system.screenshotEntries) { entry in
+                    HStack(spacing: 10) {
+                        if let combo = entry.combo { KeyCaps(combo: combo, size: 11) }
+                        Text(entry.name).font(.callout).foregroundStyle(.secondary).lineLimit(1)
+                        Spacer(minLength: 8)
+                        if entry.enabled {
+                            StatusLabel(text: "macOS uses it", tone: .warning)
+                        } else {
+                            StatusLabel(text: "Free for Screenme", tone: .good)
+                        }
                     }
                 }
+            } else if shortcuts.system.macOSOwnsScreenshotShortcuts {
+                StatusLabel(text: "macOS still uses ⇧⌘3, ⇧⌘4 and ⇧⌘5", tone: .warning)
+            } else {
+                StatusLabel(text: "The macOS screenshot shortcuts are off", tone: .good)
             }
             HStack(spacing: 10) {
                 if shortcuts.system.macOSOwnsScreenshotShortcuts {
@@ -283,43 +287,5 @@ struct RivalAppsBlock: View {
                 Button("Quit \(app.name)") { shortcuts.quit(app) }
             }
         }
-    }
-}
-
-// MARK: - Settings pane
-
-struct ShortcutsPane: View {
-    @ObservedObject private var shortcuts = ShortcutsModel.shared
-
-    var body: some View {
-        Form {
-            Section {
-                MacOSShortcutsBlock()
-            } header: {
-                Text("macOS screenshot shortcuts")
-            } footer: {
-                Text("Screenme replaces the built-in screenshot shortcuts by turning them off in System Settings > Keyboard > Keyboard Shortcuts > Screenshots. Restore puts them back.")
-            }
-
-            if !shortcuts.system.rivals.isEmpty {
-                Section("Other screenshot apps") { RivalAppsBlock() }
-            }
-
-            Section {
-                ForEach(ShortcutAction.allCases) { action in
-                    ShortcutRow(action: action)
-                }
-            } header: {
-                Text("Screenme shortcuts")
-            } footer: {
-                HStack {
-                    Text("Click a shortcut, then press the new keys. Esc cancels, Delete clears.")
-                    Spacer()
-                    Button("Reset to defaults") { ShortcutStore.resetAll() }
-                }
-            }
-        }
-        .formStyle(.grouped)
-        .onAppear { shortcuts.refresh() }
     }
 }
