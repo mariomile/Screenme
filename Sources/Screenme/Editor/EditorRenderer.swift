@@ -5,20 +5,21 @@ import AppKit
 @MainActor
 enum EditorRenderer {
     /// - Parameters:
+    ///   - layout: where the image sits, and the background around it if any. `state.background` is not read.
     ///   - baseScale: device pixels per context unit before any transform (the window's backing scale on screen, 1 for bitmaps). Needed because CoreGraphics shadows ignore the CTM.
     ///   - hideTextOf: the text annotation being edited inline: its backdrop is drawn, its glyphs are not.
     static func render(state: EditState, layout: Layout, source: ImageSource, unit: CGFloat, ctx: CGContext,
                        baseScale: CGFloat, hideTextOf: UUID? = nil) {
-        let bg = state.background
         let canvas = CGRect(origin: .zero, size: layout.canvasSize)
         let content = layout.contentRect
-        let radius = bg.enabled ? min(CGFloat(bg.cornerRadius) * unit, min(content.width, content.height) / 2) : 0
 
         ctx.saveGState()
         ctx.clip(to: canvas)
         ctx.interpolationQuality = .high
 
-        if bg.enabled {
+        var radius: CGFloat = 0
+        if let bg = layout.background {
+            radius = min(CGFloat(bg.cornerRadius) * unit, min(content.width, content.height) / 2)
             drawBackground(bg.fill, in: canvas, ctx: ctx)
             if bg.shadow > 0.001 {
                 drawShadow(of: content, radius: radius, strength: bg.shadow, unit: unit, ctx: ctx, baseScale: baseScale)
@@ -39,17 +40,13 @@ enum EditorRenderer {
         drawBase(source, ctx: ctx)
         for a in state.annotations where a.kind.isRedaction { drawRedaction(a, source: source, unit: unit, ctx: ctx) }
         drawSpotlights(state.annotations, crop: layout.cropRect, ctx: ctx)
-        if !bg.enabled {
-            drawAnnotations(state.annotations, unit: unit, ctx: ctx, baseScale: baseScale, hideTextOf: hideTextOf)
-        }
         ctx.restoreGState()
 
-        if bg.enabled {
-            ctx.saveGState()
-            ctx.translateBy(x: layout.docOffset.x, y: layout.docOffset.y)
-            drawAnnotations(state.annotations, unit: unit, ctx: ctx, baseScale: baseScale, hideTextOf: hideTextOf)
-            ctx.restoreGState()
-        }
+        // Annotations may spill past the image onto the background. Without one the image fills the canvas.
+        ctx.saveGState()
+        ctx.translateBy(x: layout.docOffset.x, y: layout.docOffset.y)
+        drawAnnotations(state.annotations, unit: unit, ctx: ctx, baseScale: baseScale, hideTextOf: hideTextOf)
+        ctx.restoreGState()
         ctx.restoreGState()
     }
 
@@ -57,7 +54,7 @@ enum EditorRenderer {
 
     /// Flattens the document to pixels. `opaque` fills transparency with white (for JPEG).
     static func flatten(state: EditState, source: ImageSource, opaque: Bool) -> CGImage? {
-        let layout = Layout.make(crop: state.cropRect, background: state.background)
+        let layout = state.exportLayout
         let scale = state.outputScale
         let w = Int((layout.canvasSize.width * scale).rounded())
         let h = Int((layout.canvasSize.height * scale).rounded())

@@ -65,17 +65,12 @@ final class EditorController: ObservableObject {
 
     /// What the canvas shows. While cropping, the whole image is shown without the background wrap.
     var layout: Layout {
-        if isCropping {
-            var plain = state.background
-            plain.enabled = false
-            return Layout.make(crop: cropLimit, background: plain)
-        }
-        return Layout.make(crop: state.cropRect, background: state.background)
+        isCropping ? Layout.make(crop: cropLimit, background: nil) : state.exportLayout
     }
 
     /// Size of the exported picture in pixels.
     var outputSize: CGSize {
-        let size = Layout.make(crop: state.cropRect, background: state.background).canvasSize
+        let size = state.exportLayout.canvasSize
         return CGSize(width: (size.width * state.outputScale).rounded(), height: (size.height * state.outputScale).rounded())
     }
 
@@ -323,7 +318,7 @@ final class EditorController: ObservableObject {
     // MARK: Resize
 
     func resizeImage(toWidth width: CGFloat) {
-        let base = Layout.make(crop: state.cropRect, background: state.background).canvasSize.width
+        let base = state.exportLayout.canvasSize.width
         guard base > 0, width >= 1 else { return }
         perform { $0.outputScale = width / base }
     }

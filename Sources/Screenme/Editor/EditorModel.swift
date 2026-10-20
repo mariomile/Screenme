@@ -382,12 +382,19 @@ struct EditState: Equatable {
     var background = BackgroundSettings()
 }
 
+extension EditState {
+    /// Where everything lands in the exported picture.
+    var exportLayout: Layout { Layout.make(crop: cropRect, background: background) }
+}
+
 /// Where the cropped image lands on the final canvas.
 struct Layout: Equatable {
     var canvasSize: CGSize
     /// The crop rect placed on the canvas.
     var contentRect: CGRect
     var cropRect: CGRect
+    /// The wrap around the image. Nil when the image fills the canvas: no background, or the crop preview.
+    var background: BackgroundSettings?
 
     /// Translation from image pixels to canvas pixels.
     var docOffset: CGPoint { CGPoint(x: contentRect.minX - cropRect.minX, y: contentRect.minY - cropRect.minY) }
@@ -395,9 +402,9 @@ struct Layout: Equatable {
     func canvasToDoc(_ p: CGPoint) -> CGPoint { CGPoint(x: p.x - docOffset.x, y: p.y - docOffset.y) }
     func docToCanvas(_ p: CGPoint) -> CGPoint { CGPoint(x: p.x + docOffset.x, y: p.y + docOffset.y) }
 
-    static func make(crop: CGRect, background bg: BackgroundSettings) -> Layout {
+    static func make(crop: CGRect, background bg: BackgroundSettings?) -> Layout {
         let cw = crop.width, ch = crop.height
-        guard bg.enabled else {
+        guard let bg, bg.enabled else {
             return Layout(canvasSize: crop.size, contentRect: CGRect(origin: .zero, size: crop.size), cropRect: crop)
         }
         let pad = (bg.padding / 100) * min(cw, ch)
@@ -411,6 +418,6 @@ struct Layout: Equatable {
         let y = pad + (h - 2 * pad - ch) * bg.alignment.fy
         return Layout(canvasSize: CGSize(width: w, height: h),
                       contentRect: CGRect(x: x.rounded(), y: y.rounded(), width: cw, height: ch),
-                      cropRect: crop)
+                      cropRect: crop, background: bg)
     }
 }
