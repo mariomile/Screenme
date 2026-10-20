@@ -89,7 +89,8 @@ enum Clipboard {
     }
 
     static func copy(_ item: CaptureItem) {
-        item.kind == .image ? copyImage(at: item.url) : copyFile(at: item.url)
+        // GIFs paste as files so apps keep the animation.
+        item.kind == .image && !item.isGIF ? copyImage(at: item.url) : copyFile(at: item.url)
     }
 }
 

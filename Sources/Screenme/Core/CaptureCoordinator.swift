@@ -10,6 +10,8 @@ struct CaptureItem: Identifiable, Hashable {
     let kind: Kind
     let date: Date
 
+    var isGIF: Bool { url.pathExtension.lowercased() == "gif" }
+
     init(url: URL, kind: Kind, id: UUID = UUID(), date: Date = Date()) {
         self.id = id
         self.url = url
@@ -141,7 +143,8 @@ final class CaptureCoordinator {
     func afterCapture(_ item: CaptureItem) {
         lastCapture = item
         CaptureHistory.shared.add(item)
-        let image = item.kind == .image
+        // GIFs come from recordings, so they follow the recording preferences.
+        let image = item.kind == .image && !item.isGIF
         if image ? Prefs[Pref.afterShotCopy] : Prefs[Pref.afterRecordingCopy] { Clipboard.copy(item) }
         if image ? Prefs[Pref.afterShotSave] : Prefs[Pref.afterRecordingSave] { _ = try? Storage.save(item.url) }
         if image && Prefs[Pref.afterShotOpenEditor] {
