@@ -142,8 +142,13 @@ final class PreRecordUI: ObservableObject {
     /// Return records while the bar has focus. Esc cancels from anywhere, even after a click into another app.
     private func installKeyMonitors() {
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self, event.keyCode == 36 || event.keyCode == 76 else { return event }
-            finish(record: true)
+            guard let self else { return event }
+            switch Int(event.keyCode) {
+            case kVK_Return, kVK_ANSI_KeypadEnter: finish(record: true)
+            // Reaches here only when the Esc hot key could not be registered (another app holds Esc).
+            case kVK_Escape: finish(record: false)
+            default: return event
+            }
             return nil
         }
         escape = HotKeyCenter.shared.registerTemporary(keyCode: UInt32(kVK_Escape)) { [weak self] in self?.finish(record: false) }
