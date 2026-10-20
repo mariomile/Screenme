@@ -52,6 +52,14 @@ enum ShortcutAction: String, CaseIterable, Codable, Identifiable {
         }
     }
 
+    /// False for actions that only show what Screenme already has.
+    var requiresScreenRecording: Bool {
+        switch self {
+        case .pinLastCapture, .openHistory, .toggleDesktopIcons: false
+        default: true
+        }
+    }
+
     /// CleanShot-style defaults: Screenme takes over the macOS screenshot shortcuts.
     var defaultCombo: KeyCombo? {
         let cmdShift = UInt32(cmdKey | shiftKey)

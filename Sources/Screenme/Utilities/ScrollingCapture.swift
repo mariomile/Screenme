@@ -7,18 +7,13 @@ import SwiftUI
 
 /// Scrolling capture: while the content under `target` scrolls, frames are stitched into one tall image.
 /// A floating panel next to the area has Start, Auto-scroll, Done and Cancel, plus a live preview.
+/// One at a time: only `CaptureCoordinator` calls it, inside its busy window.
 @MainActor
 enum ScrollingCapture {
-    private static var active: ScrollSession?
-
     /// Returns the stitched image, or nil when cancelled.
     static func run(_ target: CaptureTarget) async throws -> CGImage? {
-        guard active == nil else { return nil }
         let (filter, configuration) = try await target.streamSetup(showsCursor: false, retina: Prefs[Pref.retinaResolution])
-        let session = ScrollSession(frame: target.cocoaFrame, filter: filter, configuration: configuration)
-        active = session
-        defer { active = nil }
-        return await session.run()
+        return await ScrollSession(frame: target.cocoaFrame, filter: filter, configuration: configuration).run()
     }
 }
 

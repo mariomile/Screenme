@@ -6,6 +6,8 @@ import SwiftUI
 enum AllInOneHUD {
     private static var controller: HUDController?
 
+    static var isOpen: Bool { controller != nil }
+
     /// Shows the bar. Showing it again while it is open closes it, so the shortcut toggles.
     static func show(perform: @escaping (ShortcutAction) -> Void) {
         if let controller {

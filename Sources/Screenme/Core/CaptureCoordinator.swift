@@ -7,7 +7,8 @@ import ScreenCaptureKit
 final class CaptureCoordinator {
     static let shared = CaptureCoordinator()
 
-    private let state = AppState.shared
+    /// True from the moment a capture starts until its file is delivered, including the GIF conversion
+    /// after a recording stops. Only one capture runs at a time.
     private var busy = false
     /// Last area captured, for "Capture Previous Area".
     private var previousArea: CaptureTarget?
@@ -18,28 +19,47 @@ final class CaptureCoordinator {
             Task { await stopRecording() }
             return
         }
-        guard !busy, !RecordingController.shared.isRecording else { return }
-        let needsScreen: Set<ShortcutAction> = [.openHistory, .toggleDesktopIcons, .pinLastCapture]
-        if !needsScreen.contains(action), !Permission.screenRecording.isGranted {
+        guard !RecordingController.shared.isRecording else { return }
+        if action.requiresScreenRecording, !Permission.screenRecording.isGranted {
             OnboardingWindow.show()
             return
         }
+
+        // Instant actions open or toggle something and return: they never wait for a capture.
+        switch action {
+        case .allInOne:
+            AllInOneHUD.show { [weak self] choice in self?.perform(choice) }
+            return
+        case .pinLastCapture:
+            if let lastCapture { PinWindow.pin(lastCapture) }
+            return
+        case .openHistory:
+            HistoryWindow.show()
+            return
+        case .toggleDesktopIcons:
+            DesktopIcons.toggle()
+            return
+        default:
+            break
+        }
+
+        // While the All-in-One bar is open, only the bar starts a capture, once it has closed.
+        guard !busy, !AllInOneHUD.isOpen else { return }
         busy = true
         Task {
             defer { busy = false }
             do {
-                try await run(action)
+                try await capture(action)
             } catch {
                 report(error)
             }
         }
     }
 
-    private func run(_ action: ShortcutAction) async throws {
+    private func capture(_ action: ShortcutAction) async throws {
         switch action {
-        case .allInOne:
-            busy = false
-            AllInOneHUD.show { [weak self] choice in self?.perform(choice) }
+        case .allInOne, .pinLastCapture, .openHistory, .toggleDesktopIcons:
+            return // handled in `perform`
 
         case .captureArea:
             guard let result = await SelectionOverlay.select(.screenshot) else { return }
@@ -80,15 +100,6 @@ final class CaptureCoordinator {
         case .recordScreen:
             guard let result = await SelectionOverlay.select(.recording) else { return }
             try await RecordingController.shared.start(result.target)
-
-        case .pinLastCapture:
-            if let lastCapture { PinWindow.pin(lastCapture) }
-
-        case .openHistory:
-            HistoryWindow.show()
-
-        case .toggleDesktopIcons:
-            DesktopIcons.toggle()
         }
     }
 
@@ -113,7 +124,12 @@ final class CaptureCoordinator {
 
     // MARK: Recordings
 
+    /// Stops the recording and delivers it. Busy until then, so a new capture cannot start
+    /// while a recording is still turning into a GIF.
     func stopRecording() async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
         guard let item = await RecordingController.shared.stop() else { return }
         afterCapture(item)
     }

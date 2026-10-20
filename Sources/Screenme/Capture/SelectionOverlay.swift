@@ -12,18 +12,12 @@ struct SelectionResult {
 }
 
 /// Full-screen picker: drag for an area, Space for a window, Esc to cancel.
+/// One at a time: only `CaptureCoordinator` calls it, inside its busy window.
 @MainActor
 enum SelectionOverlay {
-    private static var active: SelectionSession?
-
     /// Shows the picker and returns the user's choice, or nil when cancelled.
     static func select(_ mode: SelectionMode) async -> SelectionResult? {
-        guard active == nil else { return nil }
-        let session = SelectionSession(mode: mode)
-        active = session
-        let result = await session.run()
-        active = nil
-        return result
+        await SelectionSession(mode: mode).run()
     }
 }
 

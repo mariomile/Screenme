@@ -11,7 +11,6 @@ final class RecordingController {
     static let shared = RecordingController()
 
     private var active: ActiveRecording?
-    private var preparing = false
 
     var isRecording: Bool { active != nil }
 
@@ -19,10 +18,8 @@ final class RecordingController {
 
     // MARK: Start
 
+    /// Only `CaptureCoordinator` calls this, inside its busy window, so there is never a second start.
     func start(_ target: CaptureTarget) async throws {
-        guard active == nil, !preparing else { return }
-        preparing = true
-        defer { preparing = false }
 
         // The pre-record bar activates Screenme to receive Return and Esc; the user's app gets focus back after.
         let previousApp = FocusKeeper.frontmostExternal()
