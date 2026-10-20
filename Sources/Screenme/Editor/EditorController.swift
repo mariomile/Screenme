@@ -138,6 +138,15 @@ final class EditorController: ObservableObject {
         }
         canvas?.documentChanged(refit: wasCropping || mode.crop != nil)
         canvas?.refreshCursor()
+        focusCanvas()
+    }
+
+    /// Gives the keyboard back to the canvas after a toolbar or inspector control, so Delete, Esc, Return,
+    /// arrows and tool letters keep working. A text field being typed in keeps it.
+    func focusCanvas() {
+        guard let canvas, let window = canvas.window, !(window.firstResponder is NSText),
+              window.firstResponder !== canvas else { return }
+        window.makeFirstResponder(canvas)
     }
 
     // MARK: Selection and arrangement

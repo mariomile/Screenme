@@ -180,6 +180,7 @@ struct EditSlider: View {
             } else if let before {
                 self.before = nil
                 c.commit(since: before)
+                c.focusCanvas()
             }
         }
     }
