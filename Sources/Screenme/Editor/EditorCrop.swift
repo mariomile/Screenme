@@ -33,48 +33,35 @@ struct CropSession: Equatable {
 // MARK: - Math
 
 enum CropMath {
-    static func handlePoints(_ r: CGRect) -> [(Handle, CGPoint)] {
-        [(.tl, CGPoint(x: r.minX, y: r.minY)), (.t, CGPoint(x: r.midX, y: r.minY)),
-         (.tr, CGPoint(x: r.maxX, y: r.minY)), (.r, CGPoint(x: r.maxX, y: r.midY)),
-         (.br, CGPoint(x: r.maxX, y: r.maxY)), (.b, CGPoint(x: r.midX, y: r.maxY)),
-         (.bl, CGPoint(x: r.minX, y: r.maxY)), (.l, CGPoint(x: r.minX, y: r.midY))]
+    private static func clamp(_ p: CGPoint, to limit: CGRect) -> CGPoint {
+        CGPoint(x: min(max(p.x, limit.minX), limit.maxX), y: min(max(p.y, limit.minY), limit.maxY))
+    }
+
+    /// `CGRect.dragRect` locked to `ratio`, then scaled toward `anchor` until it fits inside `limit`.
+    private static func ratioRect(anchor: CGPoint, to p: CGPoint, ratio: CGFloat, limit: CGRect) -> CGRect {
+        let r = CGRect.dragRect(anchor: anchor, to: p, ratio: ratio)
+        let availW = p.x >= anchor.x ? limit.maxX - anchor.x : anchor.x - limit.minX
+        let availH = p.y >= anchor.y ? limit.maxY - anchor.y : anchor.y - limit.minY
+        let k = min(1, availW / max(r.width, 0.001), availH / max(r.height, 0.001))
+        let w = r.width * k, h = r.height * k
+        return CGRect(x: p.x >= anchor.x ? anchor.x : anchor.x - w, y: p.y >= anchor.y ? anchor.y : anchor.y - h, width: w, height: h)
     }
 
     /// Resizes `rect` by dragging `handle` to `p`, inside `limit`, optionally locked to `ratio` (width / height).
     static func resize(_ rect: CGRect, handle: Handle, to point: CGPoint, ratio: CGFloat?, limit: CGRect, minSize: CGFloat) -> CGRect {
-        let p = CGPoint(x: min(max(point.x, limit.minX), limit.maxX), y: min(max(point.y, limit.minY), limit.maxY))
-        var l = rect.minX, r = rect.maxX, t = rect.minY, b = rect.maxY
-        switch handle {
-        case .tl: l = p.x; t = p.y
-        case .t: t = p.y
-        case .tr: r = p.x; t = p.y
-        case .r: r = p.x
-        case .br: r = p.x; b = p.y
-        case .b: b = p.y
-        case .bl: l = p.x; b = p.y
-        case .l: l = p.x
-        default: break
-        }
+        let p = clamp(point, to: limit)
         guard let ratio else {
-            var out = CGRect(x: min(l, r), y: min(t, b), width: abs(r - l), height: abs(b - t))
-            if out.width < minSize { out.size.width = minSize; if l > r { out.origin.x = r } }
-            if out.height < minSize { out.size.height = minSize; if t > b { out.origin.y = b } }
+            var out = handle.drag(rect, to: p, ratio: nil)
+            out.size.width = max(out.width, minSize)
+            out.size.height = max(out.height, minSize)
             return out.intersection(limit).isNull ? rect : out
         }
 
         if handle.isCorner {
-            let anchor = CGPoint(x: (handle == .tl || handle == .bl) ? rect.maxX : rect.minX,
-                                 y: (handle == .tl || handle == .tr) ? rect.maxY : rect.minY)
-            let sx: CGFloat = p.x >= anchor.x ? 1 : -1
-            let sy: CGFloat = p.y >= anchor.y ? 1 : -1
-            let availW = sx > 0 ? limit.maxX - anchor.x : anchor.x - limit.minX
-            let availH = sy > 0 ? limit.maxY - anchor.y : anchor.y - limit.minY
-            var w = max(abs(p.x - anchor.x), minSize)
-            var h = w / ratio
-            if h < abs(p.y - anchor.y) { h = abs(p.y - anchor.y); w = h * ratio }
-            let scale = min(1, availW / max(w, 1), availH / max(h, 1))
-            w *= scale; h *= scale
-            return CGRect(x: sx > 0 ? anchor.x : anchor.x - w, y: sy > 0 ? anchor.y : anchor.y - h, width: w, height: h)
+            let anchor = handle.opposite.point(in: rect)
+            var q = p
+            if abs(q.x - anchor.x) < minSize { q.x = anchor.x + (p.x >= anchor.x ? minSize : -minSize) }
+            return ratioRect(anchor: anchor, to: q, ratio: ratio, limit: limit)
         }
 
         // Edge handle: the dragged edge sets one dimension, the other follows around the center.
@@ -100,18 +87,9 @@ enum CropMath {
 
     /// A new rect dragged out from `start` to `point`, inside `limit`, optionally locked to `ratio`.
     static func newRect(from start: CGPoint, to point: CGPoint, ratio: CGFloat?, limit: CGRect) -> CGRect {
-        let p = CGPoint(x: min(max(point.x, limit.minX), limit.maxX), y: min(max(point.y, limit.minY), limit.maxY))
-        let sx: CGFloat = p.x >= start.x ? 1 : -1
-        let sy: CGFloat = p.y >= start.y ? 1 : -1
-        var w = abs(p.x - start.x), h = abs(p.y - start.y)
-        if let ratio, w > 0 || h > 0 {
-            if w / max(h, 0.001) > ratio { h = w / ratio } else { w = h * ratio }
-            let availW = sx > 0 ? limit.maxX - start.x : start.x - limit.minX
-            let availH = sy > 0 ? limit.maxY - start.y : start.y - limit.minY
-            let k = min(1, availW / max(w, 0.001), availH / max(h, 0.001))
-            w *= k; h *= k
-        }
-        return CGRect(x: sx > 0 ? start.x : start.x - w, y: sy > 0 ? start.y : start.y - h, width: w, height: h)
+        let p = clamp(point, to: limit)
+        guard let ratio else { return .dragRect(anchor: start, to: p, ratio: nil) }
+        return ratioRect(anchor: start, to: p, ratio: ratio, limit: limit)
     }
 
     /// The biggest rect of `ratio` that fits inside `rect`, centered.
@@ -142,11 +120,7 @@ struct CropInteraction {
     private let drag: Drag
 
     private static func handle(at view: CGPoint, of rect: CGRect, toView: (CGPoint) -> CGPoint) -> Handle? {
-        for (handle, p) in CropMath.handlePoints(rect) {
-            let v = toView(p)
-            if hypot(v.x - view.x, v.y - view.y) <= handleReach { return handle }
-        }
-        return nil
+        Handle.hitHandle(Handle.points(for: rect).map { ($0.0, toView($0.1)) }, at: view, radius: handleReach)
     }
 
     /// A mouse-down at `doc` (`view` in canvas points): grabs a handle, moves the rect, or starts a new one.
@@ -223,7 +197,7 @@ struct CropInteraction {
         ctx.setLineWidth(3.5)
         ctx.setLineCap(.round)
         let arm: CGFloat = min(18, min(r.width, r.height) / 3)
-        for (h, p) in CropMath.handlePoints(pending).map({ ($0.0, toView($0.1)) }) {
+        for (h, p) in Handle.points(for: pending).map({ ($0.0, toView($0.1)) }) {
             switch h {
             case .tl: ctx.move(to: CGPoint(x: p.x, y: p.y + arm)); ctx.addLine(to: p); ctx.addLine(to: CGPoint(x: p.x + arm, y: p.y))
             case .tr: ctx.move(to: CGPoint(x: p.x - arm, y: p.y)); ctx.addLine(to: p); ctx.addLine(to: CGPoint(x: p.x, y: p.y + arm))

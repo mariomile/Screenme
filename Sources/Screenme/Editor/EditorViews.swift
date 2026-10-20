@@ -365,95 +365,92 @@ private struct StyleControls: View {
         Text(text).font(.system(size: 11)).foregroundStyle(.secondary)
     }
 
-    private var hasColor: Bool { !(kind.isRedaction || kind == .spotlight) }
-    private var hasSize: Bool {
-        switch kind {
-        case .arrow, .line, .pen, .highlighter, .counter: true
-        case .rectangle, .ellipse: !style.filled
-        default: false
-        }
-    }
-    private var hasShadow: Bool { [.arrow, .line, .rectangle, .ellipse, .text, .pen, .counter].contains(kind) }
+    private var traits: ToolKind.Traits { kind.traits }
+    /// Outlined shapes pick a stroke size; filled ones have none.
+    private var showsSize: Bool { !traits.sizes.isEmpty && !style.filled }
 
     var body: some View {
         HStack(spacing: 14) {
-            if hasColor {
+            if traits.hasColor {
                 ColorSwatches(c: c, selected: style.color)
             }
-            if hasSize {
+            if showsSize {
                 divider
                 SizePicker(selection: bind(\.sizeIndex))
             }
-
-            switch kind {
-            case .arrow:
-                divider
-                Picker("Style", selection: bind(\.curved)) {
-                    Text("Straight").tag(false)
-                    Text("Curved").tag(true)
-                }
-                .pickerStyle(.segmented).labelsHidden().fixedSize()
-                toggle("Outline", symbol: "square.dashed", isOn: bind(\.outline))
-            case .line:
-                divider
-                toggle("Dashed", symbol: "line.3.horizontal", isOn: bind(\.dashed))
-            case .rectangle, .ellipse:
-                divider
-                Picker("Fill", selection: bind(\.filled)) {
-                    Text("Outline").tag(false)
-                    Text("Filled").tag(true)
-                }
-                .pickerStyle(.segmented).labelsHidden().fixedSize()
-                if kind == .rectangle { toggle("Rounded", symbol: "rectangle.roundedtop", isOn: bind(\.rounded)) }
-                HStack(spacing: 6) { caption("Opacity"); slider(\.opacity, in: 0.1...1) }
-            case .text:
-                divider
-                HStack(spacing: 6) {
-                    caption("Size")
-                    Text("\(Int(style.fontSize))")
-                        .font(.system(size: 12).monospacedDigit())
-                        .frame(width: 26, alignment: .trailing)
-                    Stepper("", value: bind(\.fontSize), in: 8...200, step: 2).labelsHidden()
-                }
-                Picker("Weight", selection: bind(\.weight)) {
-                    ForEach(FontWeightChoice.allCases) { Text($0.title).tag($0) }
-                }
-                .pickerStyle(.menu).labelsHidden().fixedSize()
-                Picker("Backdrop", selection: bind(\.backdrop)) {
-                    ForEach(TextBackdrop.allCases) { Text($0.title).tag($0) }
-                }
-                .pickerStyle(.segmented).labelsHidden().fixedSize()
-            case .highlighter:
-                divider
-                HStack(spacing: 6) { caption("Opacity"); slider(\.opacity, in: 0.2...1) }
-            case .pixelate, .blur:
-                HStack(spacing: 8) {
-                    caption(kind == .pixelate ? "Pixel size" : "Blur")
-                    slider(\.intensity, in: 0...1)
-                }
-            case .spotlight:
-                Picker("Shape", selection: bind(\.ellipseSpot)) {
-                    Text("Rectangle").tag(false)
-                    Text("Ellipse").tag(true)
-                }
-                .pickerStyle(.segmented).labelsHidden().fixedSize()
-                HStack(spacing: 6) {
-                    caption("Dim")
-                    Slider(value: Binding(get: { c.state.spotlightDim }, set: { c.setSpotlightDim($0, live: true) }), in: 0.15...0.95) { editing in
-                        if editing { c.beginChange() } else { c.endChange() }
-                    }
-                    .frame(width: 120)
-                }
-            default:
-                EmptyView()
+            if !traits.options.isEmpty {
+                if traits.hasColor { divider }
+                ForEach(traits.options, id: \.self) { option($0) }
             }
-
-            if hasShadow {
+            if traits.hasShadow {
                 divider
                 toggle("Shadow", symbol: "shadow", isOn: bind(\.shadow))
             }
         }
         .padding(.horizontal, 2)
+    }
+
+    @ViewBuilder
+    private func option(_ option: StyleOption) -> some View {
+        switch option {
+        case .curved:
+            Picker("Style", selection: bind(\.curved)) {
+                Text("Straight").tag(false)
+                Text("Curved").tag(true)
+            }
+            .pickerStyle(.segmented).labelsHidden().fixedSize()
+        case .outline:
+            toggle("Outline", symbol: "square.dashed", isOn: bind(\.outline))
+        case .dashed:
+            toggle("Dashed", symbol: "line.3.horizontal", isOn: bind(\.dashed))
+        case .fill:
+            Picker("Fill", selection: bind(\.filled)) {
+                Text("Outline").tag(false)
+                Text("Filled").tag(true)
+            }
+            .pickerStyle(.segmented).labelsHidden().fixedSize()
+        case .rounded:
+            toggle("Rounded", symbol: "rectangle.roundedtop", isOn: bind(\.rounded))
+        case .opacity(let range):
+            HStack(spacing: 6) { caption("Opacity"); slider(\.opacity, in: range) }
+        case .fontSize:
+            HStack(spacing: 6) {
+                caption("Size")
+                Text("\(Int(style.fontSize))")
+                    .font(.system(size: 12).monospacedDigit())
+                    .frame(width: 26, alignment: .trailing)
+                Stepper("", value: bind(\.fontSize), in: 8...200, step: 2).labelsHidden()
+            }
+        case .weight:
+            Picker("Weight", selection: bind(\.weight)) {
+                ForEach(FontWeightChoice.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.menu).labelsHidden().fixedSize()
+        case .backdrop:
+            Picker("Backdrop", selection: bind(\.backdrop)) {
+                ForEach(TextBackdrop.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented).labelsHidden().fixedSize()
+        case .intensity(let title):
+            HStack(spacing: 8) {
+                caption(title)
+                slider(\.intensity, in: 0...1)
+            }
+        case .spotShape:
+            Picker("Shape", selection: bind(\.ellipseSpot)) {
+                Text("Rectangle").tag(false)
+                Text("Ellipse").tag(true)
+            }
+            .pickerStyle(.segmented).labelsHidden().fixedSize()
+        case .dim:
+            HStack(spacing: 6) {
+                caption("Dim")
+                Slider(value: Binding(get: { c.state.spotlightDim }, set: { c.setSpotlightDim($0, live: true) }), in: 0.15...0.95) { editing in
+                    if editing { c.beginChange() } else { c.endChange() }
+                }
+                .frame(width: 120)
+            }
+        }
     }
 
     private var divider: some View { Divider().frame(height: 22) }

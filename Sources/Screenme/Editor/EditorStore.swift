@@ -25,7 +25,7 @@ enum EditorStore {
     }
 
     static func style(for tool: ToolKind) -> ToolStyle {
-        load(Pref.editorStyle(tool), as: ToolStyle.self) ?? .defaults(for: tool)
+        load(Pref.editorStyle(tool), as: ToolStyle.self) ?? tool.traits.style
     }
 
     static func save(style: ToolStyle, for tool: ToolKind) {

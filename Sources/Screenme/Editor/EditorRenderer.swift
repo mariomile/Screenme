@@ -2,6 +2,7 @@ import AppKit
 
 /// Draws a document into a CGContext. The same code paints the live canvas and the exported file,
 /// so what you see is what you save. The context must be y-down with its origin at the canvas top-left.
+/// This is the one place that looks at an annotation's kind to decide how it is drawn.
 @MainActor
 enum EditorRenderer {
     /// - Parameters:
@@ -38,7 +39,7 @@ enum EditorRenderer {
             ctx.fill(layout.cropRect)
         }
         drawBase(source, ctx: ctx)
-        for a in state.annotations where a.kind.isRedaction { drawRedaction(a, source: source, unit: unit, ctx: ctx) }
+        for a in state.annotations { drawRedaction(a, source: source, unit: unit, ctx: ctx) }
         drawSpotlights(state.annotations, dim: state.spotlightDim, crop: layout.cropRect, ctx: ctx)
         ctx.restoreGState()
 
@@ -142,32 +143,39 @@ enum EditorRenderer {
         ctx.restoreGState()
     }
 
+    /// Pixelate and blur replace the image's pixels under them; other kinds draw nothing here.
     private static func drawRedaction(_ a: Annotation, source: ImageSource, unit: CGFloat, ctx: CGContext) {
-        guard a.rect.width >= 1, a.rect.height >= 1 else { return }
-        if a.kind == .pixelate {
+        guard case .box(let rect) = a.shape, rect.width >= 1, rect.height >= 1 else { return }
+        switch a.kind {
+        case .pixelate:
             let block = (5 + 34 * CGFloat(a.style.intensity)) * unit
-            guard let (patch, r) = source.pixelated(a.rect, block: block) else { return }
+            guard let (patch, r) = source.pixelated(rect, block: block) else { return }
             ctx.saveGState()
             ctx.interpolationQuality = .none
             drawImage(patch, in: r, ctx: ctx)
             ctx.restoreGState()
-        } else {
+        case .blur:
             let sigma = (3 + 26 * CGFloat(a.style.intensity)) * unit
-            guard let (patch, r) = source.blurred(a.rect, sigma: sigma) else { return }
+            guard let (patch, r) = source.blurred(rect, sigma: sigma) else { return }
             drawImage(patch, in: r, ctx: ctx)
+        default:
+            break
         }
     }
 
     private static func drawSpotlights(_ annotations: [Annotation], dim: Double, crop: CGRect, ctx: CGContext) {
-        let spots = annotations.filter { $0.kind == .spotlight && $0.rect.width >= 1 && $0.rect.height >= 1 }
+        let spots: [(CGRect, Bool)] = annotations.compactMap { a in
+            guard a.kind == .spotlight, case .box(let r) = a.shape, r.width >= 1, r.height >= 1 else { return nil }
+            return (r, a.style.ellipseSpot)
+        }
         guard !spots.isEmpty else { return }
         ctx.saveGState()
         ctx.beginTransparencyLayer(auxiliaryInfo: nil)
         ctx.setFillColor(CGColor(gray: 0, alpha: CGFloat(dim)))
         ctx.fill(crop.insetBy(dx: -4, dy: -4))
         ctx.setBlendMode(.clear)
-        for s in spots {
-            if s.style.ellipseSpot { ctx.fillEllipse(in: s.rect) } else { ctx.fill(s.rect) }
+        for (rect, ellipse) in spots {
+            if ellipse { ctx.fillEllipse(in: rect) } else { ctx.fill(rect) }
         }
         ctx.endTransparencyLayer()
         ctx.restoreGState()
@@ -177,12 +185,13 @@ enum EditorRenderer {
 
     private static func drawAnnotations(_ annotations: [Annotation], unit: CGFloat, ctx: CGContext, baseScale: CGFloat, hideTextOf: UUID?) {
         var number = 0
-        for a in annotations where !a.kind.isRedaction && a.kind != .spotlight {
+        for a in annotations {
             if a.kind == .counter { number += 1 }
             draw(a, number: number, unit: unit, ctx: ctx, baseScale: baseScale, hideText: a.id == hideTextOf)
         }
     }
 
+    /// One annotation above the image. Redactions and spotlights are part of the image layer and draw nothing here.
     static func draw(_ a: Annotation, number: Int, unit: CGFloat, ctx: CGContext, baseScale: CGFloat, hideText: Bool = false) {
         ctx.saveGState()
         defer { ctx.restoreGState() }
@@ -190,17 +199,22 @@ enum EditorRenderer {
         let w = a.strokeWidth * unit
         let opacity = CGFloat(a.style.opacity)
 
-        if a.kind == .highlighter {
-            guard !a.points.isEmpty else { return }
+        switch (a.kind, a.shape) {
+        case (.pixelate, _), (.blur, _), (.spotlight, _):
+            return
+        case (.highlighter, .stroke(let points)):
+            guard !points.isEmpty else { return }
             ctx.setBlendMode(.multiply)
             ctx.setAlpha(opacity)
             ctx.setStrokeColor(color)
             ctx.setLineWidth(w)
             ctx.setLineCap(.round)
             ctx.setLineJoin(.round)
-            ctx.addPath(smoothPath(a.points))
+            ctx.addPath(smoothPath(points))
             ctx.strokePath()
             return
+        default:
+            break
         }
 
         let k = hypot(ctx.ctm.a, ctx.ctm.b) / baseScale
@@ -214,41 +228,41 @@ enum EditorRenderer {
         }
         defer { if layered { ctx.endTransparencyLayer() } }
 
-        switch a.kind {
-        case .arrow:
-            drawArrow(a, unit: unit, ctx: ctx)
-        case .line:
+        switch (a.kind, a.shape) {
+        case (.arrow, .segment(_, let p1, _)):
+            drawArrow(a, tip: p1, unit: unit, ctx: ctx)
+        case (.line, .segment(let p0, let p1, _)):
             ctx.setStrokeColor(color)
             ctx.setLineWidth(w)
             ctx.setLineCap(.round)
             if a.style.dashed { ctx.setLineDash(phase: 0, lengths: [w * 2, w * 2]) }
-            ctx.move(to: a.p0)
-            ctx.addLine(to: a.p1)
+            ctx.move(to: p0)
+            ctx.addLine(to: p1)
             ctx.strokePath()
-        case .rectangle, .ellipse:
-            drawBoxShape(a, w: w, unit: unit, ctx: ctx)
-        case .pen:
-            guard !a.points.isEmpty else { return }
+        case (.rectangle, .box(let rect)), (.ellipse, .box(let rect)):
+            drawBoxShape(a, rect: rect, w: w, unit: unit, ctx: ctx)
+        case (.pen, .stroke(let points)):
+            guard !points.isEmpty else { return }
             ctx.setStrokeColor(color)
             ctx.setLineWidth(w)
             ctx.setLineCap(.round)
             ctx.setLineJoin(.round)
             if a.style.dashed { ctx.setLineDash(phase: 0, lengths: [w * 2, w * 2.4]) }
-            ctx.addPath(smoothPath(a.points))
+            ctx.addPath(smoothPath(points))
             ctx.strokePath()
-        case .counter:
-            drawCounter(a, number: number, unit: unit, ctx: ctx)
-        case .text:
-            drawText(a, unit: unit, ctx: ctx, hideText: hideText)
+        case (.counter, .marker(let center)):
+            drawCounter(a, center: center, number: number, unit: unit, ctx: ctx)
+        case (.text, .label(let origin, let text)):
+            drawText(a, text: text, at: origin, unit: unit, ctx: ctx, hideText: hideText)
         default:
             break
         }
     }
 
-    private static func drawBoxShape(_ a: Annotation, w: CGFloat, unit: CGFloat, ctx: CGContext) {
+    private static func drawBoxShape(_ a: Annotation, rect: CGRect, w: CGFloat, unit: CGFloat, ctx: CGContext) {
         let color = a.style.color.cgColor
-        guard a.rect.width > 0.5, a.rect.height > 0.5 else { return }
-        let r = a.style.filled ? a.rect : a.rect.insetBy(dx: w / 2, dy: w / 2)
+        guard rect.width > 0.5, rect.height > 0.5 else { return }
+        let r = a.style.filled ? rect : rect.insetBy(dx: w / 2, dy: w / 2)
         guard r.width > 0, r.height > 0 else { return }
         let path: CGPath
         if a.kind == .ellipse {
@@ -270,8 +284,8 @@ enum EditorRenderer {
         }
     }
 
-    private static func drawCounter(_ a: Annotation, number: Int, unit: CGFloat, ctx: CGContext) {
-        let r = a.counterRect(unit: unit)
+    private static func drawCounter(_ a: Annotation, center: CGPoint, number: Int, unit: CGFloat, ctx: CGContext) {
+        let r = a.markerRect(center, unit: unit)
         ctx.setFillColor(a.style.color.cgColor)
         ctx.fillEllipse(in: r)
         let ring = max(1.5 * unit, r.width * 0.06)
@@ -291,8 +305,8 @@ enum EditorRenderer {
         }
     }
 
-    private static func drawText(_ a: Annotation, unit: CGFloat, ctx: CGContext, hideText: Bool) {
-        let layout = TextLayout.layout(a, unit: unit)
+    private static func drawText(_ a: Annotation, text: String, at origin: CGPoint, unit: CGFloat, ctx: CGContext, hideText: Bool) {
+        let layout = TextLayout.layout(text: text, at: origin, style: a.style, unit: unit)
         switch a.style.backdrop {
         case .pill:
             ctx.setFillColor(a.style.color.cgColor)
@@ -308,8 +322,8 @@ enum EditorRenderer {
         case .plain:
             break
         }
-        guard !hideText, !a.text.isEmpty else { return }
-        let string = NSAttributedString(string: a.text, attributes: TextLayout.attributes(a.style, unit: unit))
+        guard !hideText, !text.isEmpty else { return }
+        let string = NSAttributedString(string: text, attributes: TextLayout.attributes(a.style, unit: unit))
         withFlippedGraphics(ctx) {
             string.draw(with: CGRect(origin: layout.textOrigin, size: CGSize(width: layout.textSize.width + 8, height: layout.textSize.height + 4)),
                         options: [.usesLineFragmentOrigin, .usesFontLeading], context: nil)
@@ -347,14 +361,14 @@ enum EditorRenderer {
 
     // MARK: Arrow
 
-    /// A tapered arrow: thin at the tail, full width at the head, with a triangular head.
-    static func arrowPath(_ a: Annotation, unit: CGFloat) -> CGPath {
+    /// A tapered arrow: thin at the tail, full width at the head, with a triangular head at `tip`.
+    static func arrowPath(_ a: Annotation, tip: CGPoint, unit: CGFloat) -> CGPath {
         let w = a.strokeWidth * unit
         let samples = 48
         let raw = a.centerline(samples: samples)
         let line: [CGPoint] = raw.count > 2 ? raw : (0...samples).map { i in
             let t = CGFloat(i) / CGFloat(samples)
-            return CGPoint(x: a.p0.x + (a.p1.x - a.p0.x) * t, y: a.p0.y + (a.p1.y - a.p0.y) * t)
+            return CGPoint(x: raw[0].x + (raw[1].x - raw[0].x) * t, y: raw[0].y + (raw[1].y - raw[0].y) * t)
         }
         var cumulative: [CGFloat] = [0]
         for i in 1..<line.count { cumulative.append(cumulative[i - 1] + hypot(line[i].x - line[i - 1].x, line[i].y - line[i - 1].y)) }
@@ -396,10 +410,10 @@ enum EditorRenderer {
         path.closeSubpath()
 
         let (base, _) = point(at: shaftEnd)
-        let dx = a.p1.x - base.x, dy = a.p1.y - base.y
+        let dx = tip.x - base.x, dy = tip.y - base.y
         let len = max(hypot(dx, dy), 0.0001)
         let nx = -dy / len, ny = dx / len
-        path.move(to: a.p1)
+        path.move(to: tip)
         // Same winding as the shaft, so the overlap stays filled.
         path.addLine(to: CGPoint(x: base.x - nx * headHalf, y: base.y - ny * headHalf))
         path.addLine(to: CGPoint(x: base.x + nx * headHalf, y: base.y + ny * headHalf))
@@ -407,8 +421,8 @@ enum EditorRenderer {
         return path
     }
 
-    private static func drawArrow(_ a: Annotation, unit: CGFloat, ctx: CGContext) {
-        let path = arrowPath(a, unit: unit)
+    private static func drawArrow(_ a: Annotation, tip: CGPoint, unit: CGFloat, ctx: CGContext) {
+        let path = arrowPath(a, tip: tip, unit: unit)
         guard !path.isEmpty else { return }
         let w = a.strokeWidth * unit
         if a.style.outline {

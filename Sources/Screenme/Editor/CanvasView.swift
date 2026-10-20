@@ -19,7 +19,7 @@ final class CanvasView: NSView, NSTextViewDelegate {
     private enum Gesture {
         case none
         case pan(startPan: CGPoint, start: CGPoint)
-        case create(id: UUID, start: CGPoint, kind: ToolKind)
+        case create(id: UUID, start: CGPoint)
         case move(last: CGPoint)
         case resize(id: UUID, handle: Handle, original: Annotation)
         case marquee(start: CGPoint, additive: Bool, base: Set<UUID>)
@@ -218,14 +218,7 @@ final class CanvasView: NSView, NSTextViewDelegate {
         let accent = NSColor.controlAccentColor
         let single = controller.selection.count == 1
         for a in controller.selectedAnnotations {
-            if !a.kind.isLineLike {
-                let r = toView(a.bounds(unit: unit)).insetBy(dx: -2, dy: -2)
-                ctx.setStrokeColor(accent.cgColor)
-                ctx.setLineWidth(1.25)
-                if a.kind.isFreehand { ctx.setLineDash(phase: 0, lengths: [4, 3]) }
-                ctx.stroke(r)
-                ctx.setLineDash(phase: 0, lengths: [])
-            } else {
+            if case .segment = a.shape {
                 // A thin highlight along the line shows what is selected.
                 let pts = a.centerline().map { toView($0) }
                 if let first = pts.first {
@@ -237,6 +230,13 @@ final class CanvasView: NSView, NSTextViewDelegate {
                     ctx.strokePath()
                     ctx.setLineDash(phase: 0, lengths: [])
                 }
+            } else {
+                let r = toView(a.bounds(unit: unit)).insetBy(dx: -2, dy: -2)
+                ctx.setStrokeColor(accent.cgColor)
+                ctx.setLineWidth(1.25)
+                if case .stroke = a.shape { ctx.setLineDash(phase: 0, lengths: [4, 3]) }
+                ctx.stroke(r)
+                ctx.setLineDash(phase: 0, lengths: [])
             }
             if single {
                 for (_, p) in a.handlePoints(unit: unit) { drawHandle(ctx, at: toView(p), accent: accent) }
@@ -271,11 +271,8 @@ final class CanvasView: NSView, NSTextViewDelegate {
 
     private func handleHit(at view: CGPoint) -> (Annotation, Handle)? {
         guard controller.selection.count == 1, let a = controller.selectedAnnotations.first else { return nil }
-        for (handle, p) in a.handlePoints(unit: unit) {
-            let v = toView(p)
-            if hypot(v.x - view.x, v.y - view.y) <= 9 { return (a, handle) }
-        }
-        return nil
+        let handles = a.handlePoints(unit: unit).map { ($0.0, toView($0.1)) }
+        return Handle.hitHandle(handles, at: view, radius: 9).map { (a, $0) }
     }
 
     // MARK: Mouse
@@ -304,7 +301,7 @@ final class CanvasView: NSView, NSTextViewDelegate {
         }
 
         let hit = topmostAnnotation(at: dp)
-        if event.clickCount == 2, let hit, hit.kind == .text {
+        if event.clickCount == 2, let hit, case .label = hit.shape {
             controller.select([hit.id])
             beginTextEditing(hit.id)
             return
@@ -327,7 +324,7 @@ final class CanvasView: NSView, NSTextViewDelegate {
                 gesture = .marquee(start: dp, additive: shift, base: controller.selection)
             }
         case .draw(.text):
-            if let hit, hit.kind == .text {
+            if let hit, case .label = hit.shape {
                 controller.select([hit.id])
                 beginTextEditing(hit.id)
             } else {
@@ -360,28 +357,10 @@ final class CanvasView: NSView, NSTextViewDelegate {
             updateTextViewFrame()
             needsDisplay = true
 
-        case .create(let id, let start, let kind):
+        case .create(let id, let start):
             guard let i = index(of: id) else { return }
             var a = controller.state.annotations[i]
-            switch kind {
-            case .arrow, .line:
-                a.p1 = shift ? Annotation.snapAngle(from: start, to: dp) : dp
-            case .pen, .highlighter:
-                if shift {
-                    a.points = [start, dp]
-                } else if let last = a.points.last, hypot(dp.x - last.x, dp.y - last.y) * zoom >= 1.5 {
-                    a.points.append(dp)
-                }
-            case .counter:
-                a.p0 = dp
-            default:
-                var end = dp
-                if shift {
-                    let side = max(abs(dp.x - start.x), abs(dp.y - start.y))
-                    end = CGPoint(x: start.x + (dp.x >= start.x ? side : -side), y: start.y + (dp.y >= start.y ? side : -side))
-                }
-                a.rect = CGRect(x: min(start.x, end.x), y: min(start.y, end.y), width: abs(end.x - start.x), height: abs(end.y - start.y))
-            }
+            a.dragOut(from: start, to: dp, constrain: shift, minStep: 1.5 / zoom)
             controller.state.annotations[i] = a
 
         case .move(let last):
@@ -416,8 +395,8 @@ final class CanvasView: NSView, NSTextViewDelegate {
         let finished = gesture
         gesture = .none
         switch finished {
-        case .create(let id, _, let kind):
-            finishCreate(id: id, kind: kind)
+        case .create(let id, _):
+            finishCreate(id: id)
         case .move, .resize:
             controller.endChange()
         case .marquee:
@@ -433,27 +412,15 @@ final class CanvasView: NSView, NSTextViewDelegate {
     }
 
     private func startCreate(_ kind: ToolKind, at p: CGPoint) {
-        var a = Annotation(kind: kind, style: controller.styles[kind] ?? .defaults(for: kind))
-        switch kind {
-        case .arrow, .line: a.p0 = p; a.p1 = p
-        case .pen, .highlighter: a.points = [p]
-        case .counter: a.p0 = p
-        default: a.rect = CGRect(origin: p, size: .zero)
-        }
+        let a = Annotation(kind: kind, style: controller.styles[kind] ?? kind.traits.style, at: p)
         controller.beginChange()
         controller.state.annotations.append(a)
-        gesture = .create(id: a.id, start: p, kind: kind)
+        gesture = .create(id: a.id, start: p)
     }
 
-    private func finishCreate(id: UUID, kind: ToolKind) {
+    private func finishCreate(id: UUID) {
         guard let a = annotation(withID: id) else { controller.endChange(); return }
-        var tiny = false
-        switch kind {
-        case .arrow, .line: tiny = hypot(a.p1.x - a.p0.x, a.p1.y - a.p0.y) * zoom < 5
-        case .counter, .pen, .highlighter: tiny = false
-        default: tiny = max(a.rect.width, a.rect.height) * zoom < 5
-        }
-        if tiny {
+        if a.isTooSmall(minLength: 5 / zoom) {
             controller.state.annotations.removeAll { $0.id == id }
         } else {
             controller.select([id])
@@ -510,7 +477,7 @@ final class CanvasView: NSView, NSTextViewDelegate {
         guard controller.mode.crop == nil, let hit = topmostAnnotation(at: toDoc(vp)) else { return nil }
         if !controller.selection.contains(hit.id) { controller.select([hit.id]) }
         let menu = NSMenu()
-        if hit.kind == .text {
+        if case .label = hit.shape {
             menu.addItem(withTitle: "Edit Text", action: #selector(menuEditText), keyEquivalent: "").target = self
             menu.addItem(.separator())
         }
@@ -536,9 +503,8 @@ final class CanvasView: NSView, NSTextViewDelegate {
     // MARK: Inline text
 
     private func createText(at p: CGPoint) {
-        var a = Annotation(kind: .text, style: controller.styles[.text] ?? .defaults(for: .text))
-        let pad = a.style.backdrop == .plain ? 0 : a.style.fontSize * unit * 0.42
-        a.rect.origin = CGPoint(x: p.x - pad, y: p.y - a.style.fontSize * unit * 0.6 - pad * 0.62)
+        let style = controller.styles[.text] ?? ToolKind.text.traits.style
+        let a = Annotation(kind: .text, style: style, at: TextLayout.origin(clickedAt: p, style: style, unit: unit))
         controller.beginChange()
         controller.state.annotations.append(a)
         controller.select([a.id])
@@ -547,7 +513,7 @@ final class CanvasView: NSView, NSTextViewDelegate {
 
     func beginTextEditing(_ id: UUID, alreadyBegan: Bool = false) {
         finishTextEditing()
-        guard let a = annotation(withID: id), a.kind == .text else { return }
+        guard let a = annotation(withID: id), case .label(_, let text) = a.shape else { return }
         if !alreadyBegan { controller.beginChange() }
         let tv = NSTextView(frame: .zero)
         tv.drawsBackground = false
@@ -563,7 +529,7 @@ final class CanvasView: NSView, NSTextViewDelegate {
         tv.isAutomaticDashSubstitutionEnabled = false
         tv.isAutomaticSpellingCorrectionEnabled = false
         tv.isAutomaticTextReplacementEnabled = false
-        tv.string = a.text
+        tv.string = text
         tv.delegate = self
         textView = tv
         editingID = id
@@ -584,11 +550,12 @@ final class CanvasView: NSView, NSTextViewDelegate {
         let text = tv.string
         let wasFirstResponder = window?.firstResponder === tv
         tv.removeFromSuperview()
-        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            controller.state.annotations.removeAll { $0.id == id }
-            controller.select(controller.selection.subtracting([id]))
-        } else if let i = index(of: id) {
-            controller.state.annotations[i].text = text
+        if let i = index(of: id), case .label(let origin, _) = controller.state.annotations[i].shape {
+            controller.state.annotations[i].shape = .label(origin: origin, text: text)
+            if controller.state.annotations[i].isTooSmall(minLength: 0) {
+                controller.state.annotations.remove(at: i)
+                controller.select(controller.selection.subtracting([id]))
+            }
         }
         controller.endChange()
         if wasFirstResponder { window?.makeFirstResponder(self) }
@@ -596,8 +563,8 @@ final class CanvasView: NSView, NSTextViewDelegate {
     }
 
     private func updateTextViewFrame() {
-        guard let tv = textView, let id = editingID, let a = annotation(withID: id) else { return }
-        let layout = TextLayout.layout(a, unit: unit)
+        guard let tv = textView, let id = editingID, let a = annotation(withID: id), case .label(let labelOrigin, let text) = a.shape else { return }
+        let layout = TextLayout.layout(text: text, at: labelOrigin, style: a.style, unit: unit)
         let origin = toView(layout.textOrigin)
         tv.font = NSFont.systemFont(ofSize: a.style.fontSize * unit * zoom, weight: a.style.weight.weight)
         let color = TextLayout.textColor(a.style).nsColor
@@ -607,8 +574,9 @@ final class CanvasView: NSView, NSTextViewDelegate {
     }
 
     func textDidChange(_ notification: Notification) {
-        guard let tv = textView, let id = editingID, let i = index(of: id) else { return }
-        controller.state.annotations[i].text = tv.string
+        guard let tv = textView, let id = editingID, let i = index(of: id),
+              case .label(let origin, _) = controller.state.annotations[i].shape else { return }
+        controller.state.annotations[i].shape = .label(origin: origin, text: tv.string)
     }
 
     func textDidEndEditing(_ notification: Notification) {

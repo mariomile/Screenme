@@ -163,7 +163,7 @@ final class EditorController: ObservableObject {
         guard let kind = contextKind else { return }
         let ids = selection
         if !live { beginChange() }
-        var remembered = contextStyle ?? .defaults(for: kind)
+        var remembered = contextStyle ?? kind.traits.style
         change(&remembered)
         styles[kind] = remembered
         EditorStore.save(style: remembered, for: kind)
