@@ -11,7 +11,8 @@ final class AppState: ObservableObject {
     @Published var isRecording = false
 
     var needsSetup: Bool {
-        !Prefs[Pref.onboardingDone] || !screenRecordingGranted || !HotKeyCenter.shared.conflicts.isEmpty
+        // Shortcut conflicts are shown in Settings; they don't reopen setup on every launch.
+        !Prefs[Pref.onboardingDone] || !screenRecordingGranted
     }
 
     func refresh() {
