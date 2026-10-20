@@ -4,7 +4,8 @@ import AppKit
 /// selection chrome and crop overlay, and hosts the inline text editor.
 @MainActor
 final class CanvasView: NSView, NSTextViewDelegate {
-    private unowned let controller: EditorController
+    /// Strong: the controller only holds the canvas weakly, and AppKit may call into the view while the window tears down.
+    private let controller: EditorController
 
     private(set) var zoom: CGFloat = 1
     private var pan = CGPoint.zero
