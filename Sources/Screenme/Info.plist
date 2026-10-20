@@ -24,7 +24,11 @@
 	<string>15.0</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>Screenme shows your camera in a bubble on screen recordings when you turn the camera on.</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>MIT License</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Screenme records your voice with screen recordings when you turn the microphone on.</string>
 </dict>
 </plist>

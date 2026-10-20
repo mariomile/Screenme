@@ -2,91 +2,259 @@ import AppKit
 import AVFoundation
 import ScreenCaptureKit
 
-/// Screen recording to MP4 through ScreenCaptureKit's built-in recording output.
+/// Screen recording: pre-record bar, countdown, capture with pause, and the controls around it.
+///
+/// `start` returns once recording has begun (or the user cancelled). `stop` finishes the file and
+/// returns it; the coordinator then runs the after-capture actions.
 @MainActor
-final class RecordingController: NSObject, SCStreamDelegate, SCRecordingOutputDelegate {
+final class RecordingController {
     static let shared = RecordingController()
 
-    private var stream: SCStream?
-    private var url: URL?
-    private var outline: NSPanel?
-    private var finished: CheckedContinuation<Void, Never>?
+    private var active: ActiveRecording?
+    private var preparing = false
 
-    var isRecording: Bool { stream != nil }
+    var isRecording: Bool { active != nil }
 
-    @MainActor
+    private init() {}
+
+    // MARK: Start
+
     func start(_ target: CaptureTarget) async throws {
-        let (filter, config) = try await target.streamSetup()
-        config.showsCursor = true
-        config.minimumFrameInterval = CMTime(value: 1, timescale: 30)
-        config.queueDepth = 6
+        guard active == nil, !preparing else { return }
+        preparing = true
+        defer { preparing = false }
+        _ = RecordingPrefs.registered
 
-        let url = Storage.newURL(extension: "mp4")
-        let outputConfig = SCRecordingOutputConfiguration()
-        outputConfig.outputURL = url
-        outputConfig.outputFileType = .mp4
-        outputConfig.videoCodecType = .h264
+        // 1. Pre-record bar.
+        let preRecord = PreRecordUI(target: target)
+        let decision = await preRecord.run()
+        preRecord.dismiss()
+        guard decision == .record else {
+            preRecord.closeWebcam()
+            return
+        }
+        let settings = RecordingSettings.current()
 
-        let stream = SCStream(filter: filter, configuration: config, delegate: self)
-        try stream.addRecordingOutput(SCRecordingOutput(configuration: outputConfig, delegate: self))
-        try await stream.startCapture()
-        self.stream = stream
-        self.url = url
+        // 2. Desktop icons: hidden for the duration, restored afterwards.
+        var hidIcons = false
+        if settings.hideDesktopIcons, !DesktopIcons.isHidden {
+            DesktopIcons.toggle()
+            hidIcons = true
+            if settings.countdown == 0 { try? await Task.sleep(for: .milliseconds(700)) }
+        }
+
+        // 3. Countdown.
+        if settings.countdown > 0 {
+            let completed = await CountdownHUD().run(seconds: settings.countdown, around: target.cocoaFrame)
+            guard completed else {
+                preRecord.closeWebcam()
+                if hidIcons { DesktopIcons.toggle() }
+                return
+            }
+        }
+
+        // 4. Capture.
+        let webcam = settings.webcam ? preRecord.takeWebcam() : nil
+        if !settings.webcam { preRecord.closeWebcam() }
+        do {
+            active = try await begin(target, settings: settings, webcam: webcam, hidIcons: hidIcons)
+        } catch {
+            webcam?.close()
+            if hidIcons { DesktopIcons.toggle() }
+            throw error
+        }
         AppState.shared.isRecording = true
-        showOutline(around: target.cocoaFrame)
+        if Prefs[Pref.playSounds] { NSSound(named: "Pop")?.play() }
     }
 
-    /// Stops the stream and returns the finished file once it is fully written.
-    @MainActor
-    func stop() async -> CaptureItem? {
-        guard let stream else { return nil }
-        await withCheckedContinuation { continuation in
-            finished = continuation
-            Task { try? await stream.stopCapture() }
+    private func begin(_ target: CaptureTarget, settings: RecordingSettings, webcam: WebcamBubble?, hidIcons: Bool) async throws -> ActiveRecording {
+        let frame = target.cocoaFrame
+
+        var effects: RecordingEffects?
+        if settings.showKeystrokes && !Accessibility.trusted {
+            Toast.show("Keystrokes need Accessibility access", symbol: "keyboard", duration: 3)
         }
-        self.stream = nil
-        AppState.shared.isRecording = false
-        outline?.orderOut(nil)
-        outline = nil
-        guard let url, FileManager.default.fileExists(atPath: url.path) else { return nil }
+        let showKeys = settings.showKeystrokes && Accessibility.trusted
+        if settings.highlightClicks || showKeys {
+            let overlay = RecordingEffects(frame: frame, highlightClicks: settings.highlightClicks, showKeystrokes: showKeys)
+            overlay.show()
+            effects = overlay
+        }
+
+        let setup: CaptureSetup
+        let recorder: StreamRecorder
+        do {
+            let overlays: [NSWindow] = [effects?.panel, webcam?.panel].compactMap { $0 }
+            // Let the window server register the overlay windows before ScreenCaptureKit looks for them.
+            if !overlays.isEmpty { try? await Task.sleep(for: .milliseconds(200)) }
+            setup = try await CaptureSetup.make(for: target, settings: settings, overlays: overlays)
+            recorder = StreamRecorder(url: Storage.newURL(extension: "mp4"), setup: setup, settings: settings)
+            try await recorder.start(setup)
+        } catch {
+            effects?.stop()
+            throw error
+        }
+
+        let recording = ActiveRecording(target: target, settings: settings, setup: setup, recorder: recorder)
+        recording.effects = effects
+        recording.webcam = webcam
+        recording.hidIcons = hidIcons
+        recorder.onFailure = { [weak self] error in
+            Task { @MainActor in await self?.recorderFailed(error) }
+        }
+
+        effects?.start()
+        let outline: RecordingOutline
+        if case .display = target { outline = RecordingOutline(frame: frame, insideFrame: true) } else { outline = RecordingOutline(frame: frame, insideFrame: false) }
+        outline.show()
+        recording.outline = outline
+
+        let bar = RecordingControlBar(clock: recording.clock, area: frame, screen: Placement.screen(for: target),
+                                      pause: { [weak self] in self?.togglePause() },
+                                      stop: { Task { await CaptureCoordinator.shared.stopRecording() } },
+                                      restart: { [weak self] in Task { await self?.restart() } },
+                                      discard: { [weak self] in self?.confirmDiscard() })
+        bar.show()
+        recording.controlBar = bar
+        return recording
+    }
+
+    // MARK: Stop
+
+    /// Stops, finishes the file and returns it. Returns nil when nothing was recorded or it was discarded.
+    func stop() async -> CaptureItem? {
+        guard let recording = active, !recording.isEnding else { return nil }
+        recording.isEnding = true
+        guard let url = await finish(recording, discard: false) else { return nil }
+        if recording.settings.format == .gif { return await convertToGIF(url) }
         return CaptureItem(url: url, kind: .video)
     }
 
-    nonisolated func recordingOutputDidFinishRecording(_ recordingOutput: SCRecordingOutput) {
-        resume()
+    private func discard() async {
+        guard let recording = active, !recording.isEnding else { return }
+        recording.isEnding = true
+        _ = await finish(recording, discard: true)
     }
 
-    nonisolated func recordingOutput(_ recordingOutput: SCRecordingOutput, didFailWithError error: Error) {
-        resume()
+    /// Takes the controls down, finishes the file and resets the state. Returns the file's URL.
+    private func finish(_ recording: ActiveRecording, discard: Bool) async -> URL? {
+        recording.controlBar?.close()
+        recording.outline?.close()
+        let url = await recording.recorder.finish(discard: discard)
+        recording.effects?.stop()
+        recording.webcam?.close()
+        if recording.hidIcons { DesktopIcons.toggle() }
+        active = nil
+        AppState.shared.isRecording = false
+        return url
     }
 
-    nonisolated func stream(_ stream: SCStream, didStopWithError error: Error) {
-        resume()
-    }
-
-    nonisolated private func resume() {
-        Task { @MainActor in
-            self.finished?.resume()
-            self.finished = nil
+    private func convertToGIF(_ video: URL) async -> CaptureItem? {
+        let hud = ProgressHUD(title: "Creating GIF")
+        hud.show()
+        defer { hud.hide() }
+        do {
+            let gif = try await GIFExporter.export(video, fps: 15, maxWidth: 1000) { value in
+                Task { @MainActor in hud.update(value) }
+            }
+            try? FileManager.default.removeItem(at: video)
+            return CaptureItem(url: gif, kind: .image)
+        } catch {
+            CaptureCoordinator.shared.report(error)
+            return CaptureItem(url: video, kind: .video)
         }
     }
 
-    /// A thin red frame around the recorded area. Screenme's windows are excluded from capture.
-    private func showOutline(around frame: CGRect) {
-        let rect = frame.insetBy(dx: -2, dy: -2)
-        let panel = NSPanel(contentRect: rect, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-        panel.level = .statusBar
-        panel.isOpaque = false
-        panel.backgroundColor = .clear
-        panel.ignoresMouseEvents = true
-        panel.hasShadow = false
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        let border = NSView(frame: CGRect(origin: .zero, size: rect.size))
-        border.wantsLayer = true
-        border.layer?.borderColor = NSColor.systemRed.cgColor
-        border.layer?.borderWidth = 2
-        panel.contentView = border
-        panel.orderFrontRegardless()
-        outline = panel
+    // MARK: Controls
+
+    private func togglePause() {
+        guard let recording = active, !recording.isEnding, !recording.isRestarting else { return }
+        recording.clock.isPaused ? resume(recording) : pause(recording)
+    }
+
+    private func pause(_ recording: ActiveRecording) {
+        recording.recorder.pause()
+        recording.clock.pause()
+        recording.outline?.setPaused(true)
+    }
+
+    private func resume(_ recording: ActiveRecording) {
+        recording.recorder.resume()
+        recording.clock.resume()
+        recording.outline?.setPaused(false)
+    }
+
+    /// Throws the current take away and starts again with the same settings, without a countdown.
+    private func restart() async {
+        guard let recording = active, !recording.isEnding, !recording.isRestarting else { return }
+        recording.isRestarting = true
+        defer { recording.isRestarting = false }
+
+        _ = await recording.recorder.finish(discard: true)
+        let next = StreamRecorder(url: Storage.newURL(extension: "mp4"), setup: recording.setup, settings: recording.settings)
+        next.onFailure = { [weak self] error in
+            Task { @MainActor in await self?.recorderFailed(error) }
+        }
+        do {
+            try await next.start(recording.setup)
+            recording.recorder = next
+            recording.clock.reset()
+            recording.outline?.setPaused(false)
+        } catch {
+            recording.isRestarting = false
+            await discard()
+            CaptureCoordinator.shared.report(error)
+        }
+    }
+
+    private func confirmDiscard() {
+        guard let recording = active, !recording.isEnding, !recording.isRestarting else { return }
+        // The recording waits while the question is open.
+        let wasPaused = recording.clock.isPaused
+        if !wasPaused { pause(recording) }
+
+        let alert = NSAlert()
+        alert.messageText = "Discard this recording?"
+        alert.informativeText = "The recording will be deleted. This can't be undone."
+        alert.addButton(withTitle: "Discard")
+        alert.addButton(withTitle: "Keep Recording")
+        alert.buttons[0].hasDestructiveAction = true
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertFirstButtonReturn {
+            Task { await discard() }
+        } else if !wasPaused, active === recording {
+            resume(recording)
+        }
+    }
+
+    /// The stream or the writer failed: keep what was recorded and tell the user.
+    private func recorderFailed(_ error: Error) async {
+        guard let recording = active, !recording.isEnding, !recording.isRestarting else { return }
+        await CaptureCoordinator.shared.stopRecording()
+        CaptureCoordinator.shared.report(error)
+    }
+}
+
+/// Everything that exists while a recording is running.
+@MainActor
+private final class ActiveRecording {
+    let target: CaptureTarget
+    let settings: RecordingSettings
+    let setup: CaptureSetup
+    var recorder: StreamRecorder
+    let clock = RecordingClock()
+    var controlBar: RecordingControlBar?
+    var outline: RecordingOutline?
+    var effects: RecordingEffects?
+    var webcam: WebcamBubble?
+    var hidIcons = false
+    var isEnding = false
+    var isRestarting = false
+
+    init(target: CaptureTarget, settings: RecordingSettings, setup: CaptureSetup, recorder: StreamRecorder) {
+        self.target = target
+        self.settings = settings
+        self.setup = setup
+        self.recorder = recorder
     }
 }

@@ -22,6 +22,8 @@ targets:
         LSUIElement: true
         LSMinimumSystemVersion: "15.0"
         NSHumanReadableCopyright: "MIT License"
+        NSMicrophoneUsageDescription: "Screenme records your voice with screen recordings when you turn the microphone on."
+        NSCameraUsageDescription: "Screenme shows your camera in a bubble on screen recordings when you turn the camera on."
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.mariomiletta.Screenme
