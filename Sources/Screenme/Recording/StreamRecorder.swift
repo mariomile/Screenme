@@ -1,120 +1,67 @@
-import AppKit
 import AVFoundation
 import CoreMedia
 import ScreenCaptureKit
 
-// MARK: - Stream setup
-
-/// Everything ScreenCaptureKit needs for one recording, plus the pixel size of the output.
-struct CaptureSetup {
-    let filter: SCContentFilter
-    let configuration: SCStreamConfiguration
-    let width: Int
-    let height: Int
-
-    /// Builds the filter and configuration for `target` with `CaptureTarget.streamSetup`.
-    /// `overlays` (click highlights, keystrokes, webcam) are Screenme windows filmed on purpose.
-    @MainActor
-    static func make(for target: CaptureTarget, settings: RecordingSettings, overlays: [NSWindow]) async throws -> CaptureSetup {
-        // GIFs are filmed at 1x: they end up small anyway.
-        let (filter, config) = try await target.streamSetup(showsCursor: settings.showCursor, retina: settings.format != .gif,
-                                                            including: overlays.map { CGWindowID($0.windowNumber) })
-        var width = CGFloat(config.width)
-        var height = CGFloat(config.height)
-        let longest = max(width, height)
-        if longest > 4096 {
-            width *= 4096 / longest
-            height *= 4096 / longest
-        }
-        // H.264 wants even dimensions.
-        let pixelWidth = max(2, Int(width) & ~1)
-        let pixelHeight = max(2, Int(height) & ~1)
-        config.width = pixelWidth
-        config.height = pixelHeight
-
-        let fps = settings.format == .gif ? min(settings.fps, 30) : settings.fps
-        config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
-        config.queueDepth = 8
-        config.colorSpaceName = CGColorSpace.sRGB
-
-        if settings.systemAudio && settings.format == .video {
-            config.capturesAudio = true
-            config.excludesCurrentProcessAudio = true
-            config.sampleRate = 48000
-            config.channelCount = 2
-        }
-        if settings.microphone && settings.format == .video && Permission.microphone.isGranted {
-            config.captureMicrophone = true
-            if !settings.microphoneID.isEmpty { config.microphoneCaptureDeviceID = settings.microphoneID }
-        }
-        return CaptureSetup(filter: filter, configuration: config, width: pixelWidth, height: pixelHeight)
-    }
-}
-
-// MARK: - Recorder
-
 /// Writes an SCStream to an MP4 with AVAssetWriter, which is what makes pause possible:
-/// while paused, samples are dropped and every later timestamp is shifted back by the pause length,
-/// so the file is one seamless movie.
+/// `PauseTimeline` drops what is captured while paused and moves every later sample back by the pause length.
 ///
 /// All mutable state lives on `queue`; ScreenCaptureKit delivers samples there too.
 final class StreamRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
     let url: URL
-    private let width: Int
-    private let height: Int
-    private let fps: Int
-    private let quality: VideoQuality
-    private let wantsSystemAudio: Bool
-    private let wantsMicrophone: Bool
 
     /// Called once, on an arbitrary thread, when the stream or the writer fails.
     var onFailure: (@Sendable (Error) -> Void)?
 
-    let queue = DispatchQueue(label: "dev.mariomiletta.screenme.recorder", qos: .userInitiated)
+    private let setup: CaptureSetup
+    private let queue = DispatchQueue(label: "dev.mariomiletta.screenme.recorder", qos: .userInitiated)
     private var stream: SCStream?
+    /// One writer input per stream output, in track order. The audio formats are fixed: the writer converts
+    /// whatever the device delivers, so the file can be set up before the first sample arrives.
+    private let tracks: [(type: SCStreamOutputType, input: AVAssetWriterInput)]
 
-    // Queue-confined state.
-    private var writer: AVAssetWriter?
-    private var videoInput: AVAssetWriterInput?
-    private var systemInput: AVAssetWriterInput?
-    private var micInput: AVAssetWriterInput?
-    private var systemFormat: CMFormatDescription?
-    private var micFormat: CMFormatDescription?
-    private var firstVideo: CMSampleBuffer?
-    private var latestVideo: CMSampleBuffer?
-    private var sessionStarted = false
-    private var offset = CMTime.zero
-    private var activeFrom = CMTime.invalid
-    private var pausedAt: CMTime?
-    private var lastOutPTS = CMTime.invalid
-    private var clockSkew = CMTime.zero
-    private var stopped = false
-    private var failed = false
-
-    convenience init(url: URL, setup: CaptureSetup, settings: RecordingSettings) {
-        self.init(url: url, width: setup.width, height: setup.height,
-                  fps: settings.format == .gif ? min(settings.fps, 30) : settings.fps, quality: settings.quality,
-                  systemAudio: setup.configuration.capturesAudio, microphone: setup.configuration.captureMicrophone)
+    private enum Phase {
+        case awaitingFirstFrame
+        case writing(AVAssetWriter)
+        case finished
+        case failed
     }
 
-    init(url: URL, width: Int, height: Int, fps: Int, quality: VideoQuality, systemAudio: Bool, microphone: Bool) {
+    // Queue-confined state.
+    private var phase = Phase.awaitingFirstFrame
+    private var timeline = PauseTimeline(start: .zero)
+    /// The newest picture, shown again on resume: screens that stay still send no frames.
+    private var latestVideo: CMSampleBuffer?
+    /// Where each track's last sample ended in the file.
+    private var trackEnds: [SCStreamOutputType: CMTime] = [:]
+
+    init(url: URL, setup: CaptureSetup, quality: VideoQuality) {
         self.url = url
-        self.width = width
-        self.height = height
-        self.fps = fps
-        self.quality = quality
-        wantsSystemAudio = systemAudio
-        wantsMicrophone = microphone
+        self.setup = setup
+        var tracks: [(SCStreamOutputType, AVAssetWriterInput)] = [
+            (.screen, AVAssetWriterInput(mediaType: .video, outputSettings: H264.settings(width: setup.width, height: setup.height,
+                                                                                        fps: setup.fps, quality: quality, realTime: true))),
+        ]
+        if setup.configuration.capturesAudio { tracks.append((.audio, Self.audioInput(channels: 2))) }
+        if setup.configuration.captureMicrophone { tracks.append((.microphone, Self.audioInput(channels: 1))) }
+        tracks.forEach { $0.1.expectsMediaDataInRealTime = true }
+        self.tracks = tracks
         super.init()
+    }
+
+    private static func audioInput(channels: Int) -> AVAssetWriterInput {
+        AVAssetWriterInput(mediaType: .audio, outputSettings: [
+            AVFormatIDKey: kAudioFormatMPEG4AAC,
+            AVSampleRateKey: 48000,
+            AVNumberOfChannelsKey: channels,
+            AVEncoderBitRateKey: channels == 1 ? 96_000 : 160_000,
+        ])
     }
 
     // MARK: Lifecycle
 
-    func start(_ setup: CaptureSetup) async throws {
+    func start() async throws {
         let stream = SCStream(filter: setup.filter, configuration: setup.configuration, delegate: self)
-        try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: queue)
-        if wantsSystemAudio { try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: queue) }
-        if wantsMicrophone { try stream.addStreamOutput(self, type: .microphone, sampleHandlerQueue: queue) }
+        for track in tracks { try stream.addStreamOutput(self, type: track.type, sampleHandlerQueue: queue) }
         self.stream = stream
         try await stream.startCapture()
     }
@@ -127,216 +74,128 @@ final class StreamRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
         }
         let written: URL? = await withCheckedContinuation { continuation in
             queue.async {
-                self.stopped = true
-                if !discard, !self.sessionStarted { self.startWriterIfReady(force: true) }
-                guard !discard, !self.failed, self.sessionStarted, let writer = self.writer, writer.status == .writing else {
-                    self.writer?.cancelWriting()
+                let phase = self.phase
+                self.phase = .finished
+                self.latestVideo = nil
+                guard case .writing(let writer) = phase else {
                     continuation.resume(returning: nil)
                     return
                 }
-                let now = self.pausedAt ?? self.streamNow()
-                var end = CMTimeSubtract(now, self.offset)
-                if self.lastOutPTS.isValid, end < self.lastOutPTS { end = self.lastOutPTS }
+                guard !discard, writer.status == .writing else {
+                    writer.cancelWriting()
+                    continuation.resume(returning: nil)
+                    return
+                }
+                var end = self.timeline.end(at: Self.now())
+                if let last = self.trackEnds[.screen], end < last { end = last }
                 writer.endSession(atSourceTime: end)
-                self.videoInput?.markAsFinished()
-                self.systemInput?.markAsFinished()
-                self.micInput?.markAsFinished()
+                self.tracks.forEach { $0.input.markAsFinished() }
                 writer.finishWriting {
                     continuation.resume(returning: writer.status == .completed ? self.url : nil)
                 }
             }
         }
-        queue.async {
-            self.firstVideo = nil
-            self.latestVideo = nil
-        }
-        if written == nil || discard { try? FileManager.default.removeItem(at: url) }
-        return discard ? nil : written
+        if written == nil { try? FileManager.default.removeItem(at: url) }
+        return written
     }
 
     // MARK: Pause
 
     func pause() {
         queue.async {
-            guard self.sessionStarted, self.pausedAt == nil else { return }
-            self.pausedAt = self.streamNow()
+            guard case .writing = self.phase else { return }
+            self.timeline.pause(at: Self.now())
         }
     }
 
     func resume() {
         queue.async {
-            guard let pausedAt = self.pausedAt else { return }
-            let now = self.streamNow()
-            let pausedOffset = self.offset
-            self.offset = CMTimeAdd(self.offset, CMTimeSubtract(now, pausedAt))
-            self.pausedAt = nil
-            self.activeFrom = now
-            // Screens that stay still send no frames: show the newest picture right away.
-            if let latest = self.latestVideo {
-                let out = CMTimeSubtract(pausedAt, pausedOffset)
-                self.appendVideo(latest, outputTime: out)
-            }
+            guard case .writing = self.phase, self.timeline.isPaused else { return }
+            let now = Self.now()
+            let seam = self.timeline.end(at: now)
+            self.timeline.resume(at: now)
+            if let latest = self.latestVideo { self.append(latest, of: .screen, at: seam) }
         }
     }
 
     // MARK: Samples
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
-        process(sampleBuffer, of: type)
-    }
-
-    /// Handles one sample on the calling queue. Split out so the pipeline can be fed without a stream.
-    func process(_ sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
-        guard !stopped, !failed, sampleBuffer.isValid else { return }
-        switch type {
-        case .screen: handleVideo(sampleBuffer)
-        case .audio: handleAudio(sampleBuffer, system: true)
-        case .microphone: handleAudio(sampleBuffer, system: false)
-        @unknown default: break
+        guard sampleBuffer.isValid else { return }
+        if type == .screen {
+            guard isCompleteFrame(sampleBuffer) else { return }
+        } else {
+            guard sampleBuffer.numSamples > 0 else { return }
+        }
+        switch phase {
+        case .awaitingFirstFrame:
+            if type == .screen { begin(with: sampleBuffer) }
+        case .writing:
+            if type == .screen { latestVideo = sampleBuffer }
+            let duration = type == .screen ? CMTime.zero : sampleBuffer.duration
+            guard let time = timeline.outputTime(for: sampleBuffer.presentationTimeStamp, duration: duration) else { return }
+            append(sampleBuffer, of: type, at: time)
+        case .finished, .failed:
+            break
         }
     }
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {
-        queue.async {
-            guard !self.stopped else { return }
-            self.fail(error)
-        }
+        queue.async { self.fail(error) }
     }
 
-    private func handleVideo(_ sampleBuffer: CMSampleBuffer) {
-        guard isCompleteFrame(sampleBuffer) else { return }
-        let pts = sampleBuffer.presentationTimeStamp
-
-        if !sessionStarted {
-            if firstVideo == nil {
-                firstVideo = sampleBuffer
-                calibrateClock(with: pts)
-                // Give the microphone a moment to deliver its first buffer so the file can match its format.
-                queue.asyncAfter(deadline: .now() + 0.4) { self.startWriterIfReady(force: true) }
-            }
-            latestVideo = sampleBuffer
-            startWriterIfReady(force: false)
-            return
-        }
-
-        latestVideo = sampleBuffer
-        if let pausedAt, pts >= pausedAt { return }
-        if activeFrom.isValid, pts < activeFrom { return }
-        appendVideo(sampleBuffer, outputTime: CMTimeSubtract(pts, offset))
-    }
-
-    private func handleAudio(_ sampleBuffer: CMSampleBuffer, system: Bool) {
-        guard sampleBuffer.numSamples > 0 else { return }
-        if !sessionStarted {
-            if system, systemFormat == nil { systemFormat = sampleBuffer.formatDescription }
-            if !system, micFormat == nil { micFormat = sampleBuffer.formatDescription }
-            startWriterIfReady(force: false)
-            return
-        }
-        guard let input = system ? systemInput : micInput else { return }
-        let pts = sampleBuffer.presentationTimeStamp
-        let end = CMTimeAdd(pts, sampleBuffer.duration)
-        if activeFrom.isValid, end <= activeFrom { return }
-        if let pausedAt, pts >= pausedAt { return }
-        guard input.isReadyForMoreMediaData, let shifted = sampleBuffer.shifted(by: offset) else { return }
-        if !input.append(shifted) { checkWriter() }
-    }
-
-    private func appendVideo(_ sampleBuffer: CMSampleBuffer, outputTime: CMTime) {
-        guard let input = videoInput, input.isReadyForMoreMediaData else { return }
-        var out = outputTime
-        if lastOutPTS.isValid, out <= lastOutPTS {
-            out = CMTimeAdd(lastOutPTS, CMTime(value: 1, timescale: 1000))
-        }
-        let delta = CMTimeSubtract(sampleBuffer.presentationTimeStamp, out)
-        guard let shifted = sampleBuffer.shifted(by: delta) else { return }
-        if input.append(shifted) {
-            lastOutPTS = out
-        } else {
-            checkWriter()
-        }
-    }
-
-    // MARK: Writer
-
-    /// Creates the writer once the first picture (and, if asked for, the first audio buffers) are in,
-    /// so the audio tracks can be built from the real sample format.
-    private func startWriterIfReady(force: Bool) {
-        guard !sessionStarted, !failed, let first = firstVideo else { return }
-        let waitingForSystem = wantsSystemAudio && systemFormat == nil
-        let waitingForMic = wantsMicrophone && micFormat == nil
-        if (waitingForSystem || waitingForMic) && !force { return }
-
+    /// Starts the file at the first picture. Audio captured before it is dropped.
+    private func begin(with first: CMSampleBuffer) {
         do {
             let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
-            let video = AVAssetWriterInput(mediaType: .video, outputSettings: H264.settings(width: width, height: height, fps: fps,
-                                                                                         quality: quality, realTime: true))
-            video.expectsMediaDataInRealTime = true
-            writer.add(video)
-            if let format = systemFormat, wantsSystemAudio {
-                let input = try audioInput(format)
-                writer.add(input)
-                systemInput = input
-            }
-            if let format = micFormat, wantsMicrophone {
-                let input = try audioInput(format)
-                writer.add(input)
-                micInput = input
-            }
+            tracks.forEach { writer.add($0.input) }
             guard writer.startWriting() else { throw writer.error ?? ScreenmeError.recordingFailed }
             let start = first.presentationTimeStamp
             writer.startSession(atSourceTime: start)
-            self.writer = writer
-            videoInput = video
-            activeFrom = start
-            sessionStarted = true
-
-            appendVideo(first, outputTime: start)
-            if let latest = latestVideo, latest.presentationTimeStamp > start {
-                appendVideo(latest, outputTime: latest.presentationTimeStamp)
-            }
-            firstVideo = nil
+            phase = .writing(writer)
+            timeline = PauseTimeline(start: start)
+            latestVideo = first
+            append(first, of: .screen, at: start)
         } catch {
             fail(error)
         }
     }
 
-    private func audioInput(_ format: CMFormatDescription) throws -> AVAssetWriterInput {
-        guard let description = CMAudioFormatDescriptionGetStreamBasicDescription(format)?.pointee else {
-            throw ScreenmeError.recordingFailed
+    /// Writes `sample` at file time `time`. Each track moves forward only: a picture that would land on or
+    /// before the previous one is nudged after it, audio that would overlap is dropped.
+    private func append(_ sample: CMSampleBuffer, of type: SCStreamOutputType, at time: CMTime) {
+        guard let input = tracks.first(where: { $0.type == type })?.input, input.isReadyForMoreMediaData else { return }
+        var time = time
+        if let last = trackEnds[type] {
+            if type == .screen, time <= last {
+                time = CMTimeAdd(last, CMTime(value: 1, timescale: 1000))
+            } else if time < last {
+                return
+            }
         }
-        let channels = min(max(Int(description.mChannelsPerFrame), 1), 2)
-        let settings: [String: Any] = [
-            AVFormatIDKey: kAudioFormatMPEG4AAC,
-            AVSampleRateKey: min(description.mSampleRate, 48000),
-            AVNumberOfChannelsKey: channels,
-            AVEncoderBitRateKey: channels == 1 ? 96_000 : 160_000,
-        ]
-        let input = AVAssetWriterInput(mediaType: .audio, outputSettings: settings, sourceFormatHint: format)
-        input.expectsMediaDataInRealTime = true
-        return input
+        guard let moved = sample.shifted(by: CMTimeSubtract(sample.presentationTimeStamp, time)) else { return }
+        guard input.append(moved) else { return checkWriter() }
+        trackEnds[type] = type == .screen ? time : CMTimeAdd(time, sample.duration)
     }
 
     private func checkWriter() {
-        if let writer, writer.status == .failed { fail(writer.error ?? ScreenmeError.recordingFailed) }
+        if case .writing(let writer) = phase, writer.status == .failed { fail(writer.error ?? ScreenmeError.recordingFailed) }
     }
 
     private func fail(_ error: Error) {
-        guard !failed else { return }
-        failed = true
+        switch phase {
+        case .failed, .finished: return
+        case .writing(let writer): writer.cancelWriting()
+        case .awaitingFirstFrame: break
+        }
+        phase = .failed
+        latestVideo = nil
         onFailure?(error)
     }
 
-    // MARK: Clock
-
-    private func streamNow() -> CMTime {
-        CMTimeAdd(CMClockGetTime(CMClockGetHostTimeClock()), clockSkew)
-    }
-
-    /// Stream timestamps normally share the host clock. If they do not, remember the difference.
-    private func calibrateClock(with pts: CMTime) {
-        let difference = CMTimeSubtract(pts, CMClockGetTime(CMClockGetHostTimeClock()))
-        clockSkew = abs(difference.seconds) > 1 ? difference : .zero
+    /// ScreenCaptureKit stamps samples with `SCStream.synchronizationClock`, which is the host time clock.
+    private static func now() -> CMTime {
+        CMClockGetTime(CMClockGetHostTimeClock())
     }
 
     private func isCompleteFrame(_ sampleBuffer: CMSampleBuffer) -> Bool {

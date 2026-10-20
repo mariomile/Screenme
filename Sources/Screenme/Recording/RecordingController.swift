@@ -90,8 +90,8 @@ final class RecordingController {
             // Let the window server register the overlay windows before ScreenCaptureKit looks for them.
             if !overlays.isEmpty { try? await Task.sleep(for: .milliseconds(200)) }
             setup = try await CaptureSetup.make(for: target, settings: settings, overlays: overlays)
-            recorder = StreamRecorder(url: Storage.newURL(extension: "mp4"), setup: setup, settings: settings)
-            try await recorder.start(setup)
+            recorder = StreamRecorder(url: Storage.newURL(extension: "mp4"), setup: setup, quality: settings.quality)
+            try await recorder.start()
         } catch {
             effects?.stop()
             throw error
@@ -192,12 +192,12 @@ final class RecordingController {
         defer { recording.isRestarting = false }
 
         _ = await recording.recorder.finish(discard: true)
-        let next = StreamRecorder(url: Storage.newURL(extension: "mp4"), setup: recording.setup, settings: recording.settings)
+        let next = StreamRecorder(url: Storage.newURL(extension: "mp4"), setup: recording.setup, quality: recording.settings.quality)
         next.onFailure = { [weak self] error in
             Task { @MainActor in await self?.recorderFailed(error) }
         }
         do {
-            try await next.start(recording.setup)
+            try await next.start()
             // Stop or discard ran while the new stream was starting: it finished the old recorder, so drop this one.
             guard active === recording, !recording.isEnding else {
                 _ = await next.finish(discard: true)
