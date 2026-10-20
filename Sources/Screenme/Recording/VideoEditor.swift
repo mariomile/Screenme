@@ -259,7 +259,11 @@ final class VideoEditorModel: ObservableObject {
                     let output = try await renderOutput(title: "Saving")
                     exportProgress = nil // the export is done; the save panel comes next
                     let name = item.url.deletingPathExtension().lastPathComponent + (format == .gif ? ".gif" : ".mp4")
-                    guard let saved = try await Storage.saveAs(output.url, suggestedName: name) else { return }
+                    guard let saved = try await Storage.saveAs(output.url, suggestedName: name) else {
+                        // Cancelled: drop the export unless it is the recording itself.
+                        if output.url != item.url { try? FileManager.default.removeItem(at: output.url) }
+                        return
+                    }
                     CaptureAction.saveAs.confirm(savedTo: saved)
 
                 case .done:

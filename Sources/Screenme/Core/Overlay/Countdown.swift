@@ -3,7 +3,7 @@ import Carbon.HIToolbox
 import SwiftUI
 
 /// A large countdown with a ring, centered on the area about to be captured or recorded.
-/// Esc cancels without taking focus from the user's app. The panel is gone before `run` returns,
+/// Esc (or a click on it) cancels without taking focus from the user's app. The panel is gone before `run` returns,
 /// so it never appears in the shot.
 @MainActor
 enum Countdown {
@@ -51,9 +51,9 @@ private final class CountdownSession {
         let rect = CGRect(x: min(max(frame.midX - side / 2, screen.minX), screen.maxX - side),
                           y: min(max(frame.midY - side / 2, screen.minY), screen.maxY - side),
                           width: side, height: side)
-        let panel = FloatingPanel(frame: rect, level: .screenSaver, hasShadow: false, ignoresMouse: true,
+        let panel = FloatingPanel(frame: rect, level: .screenSaver, canBeKey: true, hasShadow: false,
                                   collectionBehavior: [.canJoinAllSpaces, .fullScreenAuxiliary, .transient])
-        panel.contentView = NSHostingView(rootView: CountdownView(model: model))
+        panel.contentView = NSHostingView(rootView: CountdownView(model: model) { [weak self] in self?.finish(false) })
         panel.present()
         self.panel = panel
 
@@ -122,6 +122,7 @@ private final class CountdownModel: ObservableObject {
 
 private struct CountdownView: View {
     @ObservedObject var model: CountdownModel
+    let cancel: () -> Void
     @State private var appeared = false
 
     var body: some View {
@@ -153,6 +154,8 @@ private struct CountdownView: View {
         .padding(10)
         .scaleEffect(appeared ? 1 : 0.78)
         .opacity(appeared ? 1 : 0)
+        .contentShape(Circle())
+        .onTapGesture(perform: cancel)
         .onAppear { withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) { appeared = true } }
         .environment(\.colorScheme, .dark)
     }

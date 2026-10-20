@@ -28,6 +28,8 @@ final class CaptureCoordinator {
         // Instant actions open or toggle something and return: they never wait for a capture.
         switch action {
         case .allInOne:
+            // Not over a capture in progress; the shortcut still closes an open bar.
+            guard !busy || AllInOneHUD.isOpen else { return }
             AllInOneHUD.show { [weak self] choice in self?.perform(choice) }
             return
         case .pinLastCapture:

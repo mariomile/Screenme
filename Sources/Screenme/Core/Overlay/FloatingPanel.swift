@@ -24,7 +24,8 @@ class FloatingPanel: NSPanel {
         isOpaque = false
         backgroundColor = .clear
         self.hasShadow = hasShadow
-        ignoresMouseEvents = ignoresMouse
+        // Only ever set to true: an explicit false makes transparent areas catch clicks too.
+        if ignoresMouse { ignoresMouseEvents = true }
         isReleasedWhenClosed = false
         hidesOnDeactivate = false
         animationBehavior = .none
