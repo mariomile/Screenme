@@ -65,9 +65,18 @@ enum Storage {
     }
 
     /// Asks where to save a copy of `url`, replacing a file the user chose to overwrite.
-    /// Returns nil when cancelled. The panel needs Screenme active; focus goes back afterwards.
+    /// Returns nil when cancelled.
     @MainActor
     static func saveAs(_ url: URL, suggestedName: String) async throws -> URL? {
+        guard let destination = await chooseDestination(suggestedName: suggestedName) else { return nil }
+        try copy(url, to: destination)
+        return destination
+    }
+
+    /// The save panel alone, for a file that does not exist yet (an export still to run). Returns nil when cancelled.
+    /// The panel needs Screenme active; focus goes back afterwards.
+    @MainActor
+    static func chooseDestination(suggestedName: String) async -> URL? {
         let panel = NSSavePanel()
         panel.nameFieldStringValue = suggestedName
         panel.directoryURL = saveDirectory
@@ -77,10 +86,13 @@ enum Storage {
         FocusKeeper.activateSelf()
         let response = panel.runModal()
         await FocusKeeper.restore(previous)
-        guard response == .OK, let destination = panel.url else { return nil }
+        return response == .OK ? panel.url : nil
+    }
+
+    /// Copies `url` to `destination`, replacing a file the user chose to overwrite.
+    static func copy(_ url: URL, to destination: URL) throws {
         if FileManager.default.fileExists(atPath: destination.path) { try FileManager.default.removeItem(at: destination) }
         try FileManager.default.copyItem(at: url, to: destination)
-        return destination
     }
 }
 
