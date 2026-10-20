@@ -8,11 +8,11 @@ import ScreenCaptureKit
 /// All mutable state lives on `queue`; ScreenCaptureKit delivers samples there too.
 final class StreamRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
     let url: URL
+    let setup: CaptureSetup
 
     /// Called once, on an arbitrary thread, when the stream or the writer fails.
     var onFailure: (@Sendable (Error) -> Void)?
 
-    private let setup: CaptureSetup
     private let queue = DispatchQueue(label: "dev.mariomiletta.screenme.recorder", qos: .userInitiated)
     private var stream: SCStream?
     /// One writer input per stream output, in track order. The audio formats are fixed: the writer converts
