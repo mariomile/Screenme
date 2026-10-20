@@ -162,14 +162,15 @@ final class StreamRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
     }
 
     /// Writes `sample` at file time `time`. Each track moves forward only: a picture that would land on or
-    /// before the previous one is nudged after it, audio that would overlap is dropped.
+    /// before the previous one is nudged after it; audio that would repeat more than half a buffer is dropped.
+    /// Smaller audio overlaps are normal: device clocks drift against the host clock and timestamps round.
     private func append(_ sample: CMSampleBuffer, of type: SCStreamOutputType, at time: CMTime) {
         guard let input = tracks.first(where: { $0.type == type })?.input, input.isReadyForMoreMediaData else { return }
         var time = time
         if let last = trackEnds[type] {
             if type == .screen, time <= last {
                 time = CMTimeAdd(last, CMTime(value: 1, timescale: 1000))
-            } else if time < last {
+            } else if type != .screen, CMTimeSubtract(last, time) > CMTimeMultiplyByRatio(sample.duration, multiplier: 1, divisor: 2) {
                 return
             }
         }
