@@ -41,7 +41,7 @@ enum HistoryThumbnails {
 
         let result: HistoryThumbnail?
         switch item.kind {
-        case .image: result = imageThumbnail(item.url)
+        case .image, .gif: result = imageThumbnail(item.url)
         case .video: result = await videoThumbnail(item.url)
         }
         if let result, !Task.isCancelled { cache.setObject(result, forKey: key) }

@@ -95,6 +95,11 @@ final class CaptureHistory: ObservableObject {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         guard let entries = try? decoder.decode([Entry].self, from: data) else { return [] }
-        return entries.map { CaptureItem(url: URL(fileURLWithPath: $0.path), kind: $0.kind, id: $0.id, date: $0.date) }
+        return entries.map { entry in
+            let url = URL(fileURLWithPath: entry.path)
+            // Entries written before GIFs had their own kind stored them as images.
+            let kind: CaptureItem.Kind = url.pathExtension.lowercased() == "gif" ? .gif : entry.kind
+            return CaptureItem(url: url, kind: kind, id: entry.id, date: entry.date)
+        }
     }
 }

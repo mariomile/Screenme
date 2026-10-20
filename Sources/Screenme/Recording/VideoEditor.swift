@@ -267,7 +267,7 @@ final class VideoEditorModel: ObservableObject {
                 switch action {
                 case .copy:
                     let output = try await renderOutput(title: "Preparing")
-                    EditorClipboard.copy(output)
+                    Clipboard.copy(output)
                     Toast.show("Copied", symbol: "doc.on.doc.fill")
 
                 case .save:
@@ -320,7 +320,7 @@ final class VideoEditorModel: ObservableObject {
         case .gif:
             let url = try await GIFExporter.export(item.url, range: range, fps: Double(gifFPS), outputSize: outputSize,
                                                    colors: quality.gifColors, dither: quality.gifDither, progress: progress)
-            return CaptureItem(url: url, kind: .image)
+            return CaptureItem(url: url, kind: .gif)
         }
     }
 
@@ -331,20 +331,6 @@ final class VideoEditorModel: ObservableObject {
         panel.nameFieldStringValue = item.url.deletingPathExtension().lastPathComponent + (format == .gif ? ".gif" : ".mp4")
         panel.canCreateDirectories = true
         return panel.runModal() == .OK ? panel.url : nil
-    }
-}
-
-enum EditorClipboard {
-    /// Puts the file on the pasteboard. GIFs also carry their data so chat apps animate them.
-    static func copy(_ item: CaptureItem) {
-        let board = NSPasteboard.general
-        board.clearContents()
-        let pasteboardItem = NSPasteboardItem()
-        pasteboardItem.setString(item.url.absoluteString, forType: .fileURL)
-        if item.url.pathExtension.lowercased() == "gif", let data = try? Data(contentsOf: item.url) {
-            pasteboardItem.setData(data, forType: NSPasteboard.PasteboardType(UTType.gif.identifier))
-        }
-        board.writeObjects([pasteboardItem])
     }
 }
 

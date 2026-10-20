@@ -9,7 +9,7 @@ enum AnnotationEditor {
 
     static func open(_ item: CaptureItem) {
         // A GIF would be flattened to its first frame and saved as PNG bytes over the animation.
-        guard item.kind == .image, !item.isGIF else { return }
+        guard item.kind == .image else { return }
         if let existing = windows[item.id] {
             existing.bringToFront()
             return

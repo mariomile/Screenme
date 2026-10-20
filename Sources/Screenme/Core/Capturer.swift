@@ -89,8 +89,23 @@ enum Clipboard {
     }
 
     static func copy(_ item: CaptureItem) {
-        // GIFs paste as files so apps keep the animation.
-        item.kind == .image && !item.isGIF ? copyImage(at: item.url) : copyFile(at: item.url)
+        switch item.kind {
+        case .image: copyImage(at: item.url)
+        case .video: copyFile(at: item.url)
+        case .gif: copyGIF(at: item.url)
+        }
+    }
+
+    /// The file plus its GIF data, so apps that paste files keep it and chat apps animate it.
+    private static func copyGIF(at url: URL) {
+        let board = NSPasteboard.general
+        board.clearContents()
+        let entry = NSPasteboardItem()
+        entry.setString(url.absoluteString, forType: .fileURL)
+        if let data = try? Data(contentsOf: url) {
+            entry.setData(data, forType: NSPasteboard.PasteboardType(UTType.gif.identifier))
+        }
+        board.writeObjects([entry])
     }
 }
 

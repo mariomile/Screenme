@@ -1,25 +1,6 @@
 import AppKit
 import ScreenCaptureKit
 
-/// One finished capture: a file in `Storage.directory`.
-struct CaptureItem: Identifiable, Hashable {
-    enum Kind: String, Codable { case image, video }
-
-    let id: UUID
-    var url: URL
-    let kind: Kind
-    let date: Date
-
-    var isGIF: Bool { url.pathExtension.lowercased() == "gif" }
-
-    init(url: URL, kind: Kind, id: UUID = UUID(), date: Date = Date()) {
-        self.id = id
-        self.url = url
-        self.kind = kind
-        self.date = date
-    }
-}
-
 /// Routes every user action (shortcut, menu, All-in-One, Quick Access) to the module that does it.
 /// Modules never call each other's selection or capture code directly: they go through here.
 @MainActor
@@ -143,14 +124,19 @@ final class CaptureCoordinator {
     func afterCapture(_ item: CaptureItem) {
         lastCapture = item
         CaptureHistory.shared.add(item)
-        // GIFs come from recordings, so they follow the recording preferences.
-        let image = item.kind == .image && !item.isGIF
-        if image ? Prefs[Pref.afterShotCopy] : Prefs[Pref.afterRecordingCopy] { Clipboard.copy(item) }
-        if image ? Prefs[Pref.afterShotSave] : Prefs[Pref.afterRecordingSave] { _ = try? Storage.save(item.url) }
-        if image && Prefs[Pref.afterShotOpenEditor] {
-            AnnotationEditor.open(item)
-        } else if image ? Prefs[Pref.afterShotQuickAccess] : Prefs[Pref.afterRecordingQuickAccess] {
-            QuickAccess.shared.show(item)
+        switch item.kind {
+        case .image:
+            if Prefs[Pref.afterShotCopy] { Clipboard.copy(item) }
+            if Prefs[Pref.afterShotSave] { _ = try? Storage.save(item.url) }
+            if Prefs[Pref.afterShotOpenEditor] {
+                AnnotationEditor.open(item)
+            } else if Prefs[Pref.afterShotQuickAccess] {
+                QuickAccess.shared.show(item)
+            }
+        case .video, .gif:
+            if Prefs[Pref.afterRecordingCopy] { Clipboard.copy(item) }
+            if Prefs[Pref.afterRecordingSave] { _ = try? Storage.save(item.url) }
+            if Prefs[Pref.afterRecordingQuickAccess] { QuickAccess.shared.show(item) }
         }
     }
 

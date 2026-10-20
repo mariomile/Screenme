@@ -210,13 +210,13 @@ final class QuickAccess {
 
     fileprivate func edit(_ card: QuickAccessCard) {
         let item = card.model.item
-        guard !item.isGIF else { return } // neither editor opens GIFs
+        guard item.kind != .gif else { return } // neither editor opens GIFs
         dismiss(card)
         item.kind == .image ? AnnotationEditor.open(item) : VideoEditor.open(item)
     }
 
     fileprivate func pin(_ card: QuickAccessCard) {
-        guard card.model.item.kind == .image else { return }
+        guard card.model.item.kind != .video else { return }
         PinWindow.pin(card.model.item)
         dismiss(card)
     }
@@ -522,13 +522,13 @@ private struct QuickAccessCardView: View {
                 HStack {
                     HUDCircle(symbol: "xmark", label: "Close", action: model.actions.close)
                     Spacer()
-                    if model.item.kind == .image {
+                    if model.item.kind != .video {
                         HUDCircle(symbol: "pin.fill", label: "Pin to screen", action: model.actions.pin)
                     }
                 }
                 Spacer()
                 HStack {
-                    if !model.item.isGIF {
+                    if model.item.kind != .gif {
                         HUDCircle(symbol: model.item.kind == .image ? "pencil.and.scribble" : "scissors",
                                   label: model.item.kind == .image ? "Annotate" : "Edit", action: model.actions.edit)
                     }
@@ -704,8 +704,8 @@ private final class CardDragView: NSView, NSDraggingSource {
         add("Save As…", "square.and.arrow.down.on.square", actions.saveAs)
         add("Show in Finder", "folder", actions.reveal)
         menu.addItem(.separator())
-        if !model.item.isGIF { add(isImage ? "Annotate" : "Edit", isImage ? "pencil.and.scribble" : "scissors", actions.edit) }
-        if isImage { add("Pin to Screen", "pin", actions.pin) }
+        if model.item.kind != .gif { add(isImage ? "Annotate" : "Edit", isImage ? "pencil.and.scribble" : "scissors", actions.edit) }
+        if model.item.kind != .video { add("Pin to Screen", "pin", actions.pin) }
         menu.addItem(.separator())
         add("Delete", "trash", actions.trash)
         return menu
@@ -742,7 +742,7 @@ private final class CardDragView: NSView, NSDraggingSource {
 enum Thumbnail {
     /// Height over width of the capture, read from the file header. 0.65 when unknown.
     static func aspectRatio(of item: CaptureItem) -> CGFloat {
-        guard item.kind == .image,
+        guard item.kind != .video,
               let source = CGImageSourceCreateWithURL(item.url as CFURL, nil),
               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
               let width = properties[kCGImagePropertyPixelWidth] as? CGFloat,
@@ -752,7 +752,7 @@ enum Thumbnail {
 
     static func make(for item: CaptureItem) async -> NSImage? {
         switch item.kind {
-        case .image:
+        case .image, .gif:
             let options = [
                 kCGImageSourceCreateThumbnailFromImageAlways: true,
                 kCGImageSourceCreateThumbnailWithTransform: true,

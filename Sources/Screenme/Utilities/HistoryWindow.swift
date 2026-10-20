@@ -23,7 +23,7 @@ enum HistoryWindow {
 private enum HistoryActions {
     static func copy(_ item: CaptureItem) {
         Clipboard.copy(item)
-        Toast.show(item.kind == .image ? "Image copied" : "File copied", symbol: "doc.on.doc")
+        Toast.show(item.kind == .video ? "File copied" : "Image copied", symbol: "doc.on.doc")
     }
 
     static func save(_ item: CaptureItem) {
@@ -36,7 +36,11 @@ private enum HistoryActions {
     }
 
     static func edit(_ item: CaptureItem) {
-        item.kind == .image ? AnnotationEditor.open(item) : VideoEditor.open(item)
+        switch item.kind {
+        case .image: AnnotationEditor.open(item)
+        case .video: VideoEditor.open(item)
+        case .gif: break
+        }
     }
 
     static func pin(_ item: CaptureItem) {
@@ -64,7 +68,7 @@ private enum HistoryFilter: String, CaseIterable, Identifiable {
         switch self {
         case .all: true
         case .screenshots: item.kind == .image
-        case .recordings: item.kind == .video
+        case .recordings: item.kind == .video || item.kind == .gif
         }
     }
 }
@@ -90,6 +94,11 @@ private struct HistoryDayGroup: Identifiable {
 /// Text a date search can match: names of the day and month, numbers, the time, the kind of capture.
 private func searchText(for item: CaptureItem) -> String {
     let date = item.date
+    let kind = switch item.kind {
+    case .image: "screenshot image"
+    case .video: "recording video"
+    case .gif: "recording gif"
+    }
     let parts = [
         HistoryDayGroup.title(for: Calendar.current.startOfDay(for: date)),
         date.formatted(.dateTime.weekday(.wide).month(.wide).day().year()),
@@ -97,7 +106,7 @@ private func searchText(for item: CaptureItem) -> String {
         date.formatted(.dateTime.year().month(.twoDigits).day(.twoDigits)),
         date.formatted(.iso8601.year().month().day()),
         date.formatted(date: .omitted, time: .shortened),
-        item.kind == .image ? "screenshot image" : "recording video",
+        kind,
         item.url.lastPathComponent,
     ]
     return parts.joined(separator: " ").lowercased()
@@ -248,7 +257,7 @@ private struct HistoryGridCell: View {
         VStack(alignment: .leading, spacing: 6) {
             tile
             HStack(spacing: 5) {
-                Image(systemName: item.kind == .image ? "photo" : "video.fill")
+                Image(systemName: item.kind == .video ? "video.fill" : "photo")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                 Text(item.date.formatted(date: .omitted, time: .shortened))
@@ -311,10 +320,10 @@ private struct HistoryGridCell: View {
             HStack(spacing: 7) {
                 HistoryActionButton(symbol: "doc.on.doc", help: "Copy") { HistoryActions.copy(item) }
                 HistoryActionButton(symbol: "square.and.arrow.down", help: "Save") { HistoryActions.save(item) }
-                if item.kind == .image {
+                if item.kind != .video {
                     HistoryActionButton(symbol: "pin", help: "Pin") { HistoryActions.pin(item) }
                 }
-                if !item.isGIF {
+                if item.kind != .gif {
                     HistoryActionButton(symbol: item.kind == .image ? "pencil.tip.crop.circle" : "scissors",
                                  help: item.kind == .image ? "Annotate" : "Edit video") { HistoryActions.edit(item) }
                 }
@@ -329,10 +338,10 @@ private struct HistoryGridCell: View {
     private var menu: some View {
         Button("Copy") { HistoryActions.copy(item) }
         Button("Save") { HistoryActions.save(item) }
-        if !item.isGIF {
+        if item.kind != .gif {
             Button(item.kind == .image ? "Annotate" : "Edit Video") { HistoryActions.edit(item) }
         }
-        if item.kind == .image {
+        if item.kind != .video {
             Button("Pin") { HistoryActions.pin(item) }
         }
         Button("Show in Finder") { HistoryActions.reveal(item) }

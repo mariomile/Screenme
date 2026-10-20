@@ -164,7 +164,7 @@ final class RecordingController {
                 Task { @MainActor in hud.update(value) }
             }
             try? FileManager.default.removeItem(at: video)
-            return CaptureItem(url: gif, kind: .image)
+            return CaptureItem(url: gif, kind: .gif)
         } catch {
             CaptureCoordinator.shared.report(error)
             return CaptureItem(url: video, kind: .video)
