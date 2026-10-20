@@ -2,6 +2,7 @@ import AppKit
 import ScreenCaptureKit
 
 /// Full-screen picker: drag to select an area, click to pick the highlighted window, Esc to cancel.
+@MainActor
 final class SelectionOverlay {
     private var panels: [NSPanel] = []
     private var completion: ((CaptureTarget?) -> Void)?
@@ -12,7 +13,7 @@ final class SelectionOverlay {
         self.windows = windows
     }
 
-    static func make() async throws -> SelectionOverlay {
+    nonisolated static func make() async throws -> SelectionOverlay {
         let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
         let byID = Dictionary(uniqueKeysWithValues: content.windows.map { ($0.windowID, $0) })
         let ownPID = ProcessInfo.processInfo.processIdentifier

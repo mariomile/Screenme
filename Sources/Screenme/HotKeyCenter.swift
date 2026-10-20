@@ -18,12 +18,15 @@ final class HotKeyCenter {
         }, 1, &spec, Unmanaged.passUnretained(self).toOpaque(), nil)
     }
 
-    func register(keyCode: Int, modifiers: Int, action: @escaping () -> Void) {
+    /// Returns false when the shortcut is already taken by another app.
+    @discardableResult
+    func register(keyCode: Int, modifiers: Int, action: @escaping () -> Void) -> Bool {
         let id = UInt32(actions.count + 1)
         actions[id] = action
         var ref: EventHotKeyRef?
         let hotKeyID = EventHotKeyID(signature: OSType(0x5343_4D45), id: id) // "SCME"
-        RegisterEventHotKey(UInt32(keyCode), UInt32(modifiers), hotKeyID, GetApplicationEventTarget(), 0, &ref)
+        let status = RegisterEventHotKey(UInt32(keyCode), UInt32(modifiers), hotKeyID, GetApplicationEventTarget(), 0, &ref)
         if let ref { refs.append(ref) }
+        return status == noErr
     }
 }

@@ -3,6 +3,7 @@ import AVFoundation
 import ScreenCaptureKit
 
 /// Screen recording to MP4 through ScreenCaptureKit's built-in recording output.
+@MainActor
 final class Recorder: NSObject, SCStreamDelegate, SCRecordingOutputDelegate {
     private var stream: SCStream?
     private var url: URL?
@@ -47,20 +48,20 @@ final class Recorder: NSObject, SCStreamDelegate, SCRecordingOutputDelegate {
         return url
     }
 
-    func recordingOutputDidFinishRecording(_ recordingOutput: SCRecordingOutput) {
+    nonisolated func recordingOutputDidFinishRecording(_ recordingOutput: SCRecordingOutput) {
         resume()
     }
 
-    func recordingOutput(_ recordingOutput: SCRecordingOutput, didFailWithError error: Error) {
+    nonisolated func recordingOutput(_ recordingOutput: SCRecordingOutput, didFailWithError error: Error) {
         resume()
     }
 
-    func stream(_ stream: SCStream, didStopWithError error: Error) {
+    nonisolated func stream(_ stream: SCStream, didStopWithError error: Error) {
         resume()
     }
 
-    private func resume() {
-        DispatchQueue.main.async {
+    nonisolated private func resume() {
+        Task { @MainActor in
             self.finished?.resume()
             self.finished = nil
         }

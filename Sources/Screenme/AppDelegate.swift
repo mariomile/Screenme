@@ -2,6 +2,7 @@ import AppKit
 import Carbon.HIToolbox
 
 @main
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     static func main() {
         let app = NSApplication.shared
@@ -21,8 +22,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         showIdleStatus()
 
         let modifiers = cmdKey | shiftKey
-        hotKeys.register(keyCode: kVK_ANSI_1, modifiers: modifiers) { [weak self] in self?.captureSelection() }
-        hotKeys.register(keyCode: kVK_ANSI_2, modifiers: modifiers) { [weak self] in self?.toggleRecording() }
+        let registered = [
+            hotKeys.register(keyCode: kVK_ANSI_1, modifiers: modifiers) { [weak self] in self?.captureSelection() },
+            hotKeys.register(keyCode: kVK_ANSI_2, modifiers: modifiers) { [weak self] in self?.toggleRecording() },
+        ]
+        if registered.contains(false) {
+            let alert = NSAlert()
+            alert.messageText = "Another app is using ⌘⇧1 or ⌘⇧2"
+            alert.informativeText = "Turn off that shortcut in the other app (for example Shottr), then relaunch Screenme. The menu bar items still work."
+            NSApp.activate(ignoringOtherApps: true)
+            alert.runModal()
+        }
 
         if !CGPreflightScreenCaptureAccess() {
             CGRequestScreenCaptureAccess()

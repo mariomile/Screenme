@@ -4,6 +4,7 @@ import AVKit
 import UniformTypeIdentifiers
 
 /// Trimming uses AVKit's native trim bar; the result replaces the capture in place.
+@MainActor
 enum Trimmer {
     private static var windows: [NSWindow] = []
 
@@ -26,7 +27,7 @@ enum Trimmer {
         // The trim bar needs the item to be ready before it can open.
         Task { @MainActor in
             _ = try? await player.currentItem?.asset.load(.duration)
-            playerView.beginTrimming { result in
+            playerView.beginTrimming { result in MainActor.assumeIsolated {
                 let item = player.currentItem
                 player.pause()
                 window.close()
@@ -39,7 +40,7 @@ enum Trimmer {
                         onTrimmed(trimmed)
                     }
                 }
-            }
+            } }
         }
     }
 

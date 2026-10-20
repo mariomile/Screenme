@@ -11,6 +11,7 @@ struct CaptureItem: Identifiable {
 }
 
 /// The overlay shown after every capture: drag it into any app, or copy, save, trim, export.
+@MainActor
 final class QuickAccess {
     static let shared = QuickAccess()
 
