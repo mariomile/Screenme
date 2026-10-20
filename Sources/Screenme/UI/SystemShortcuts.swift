@@ -122,12 +122,15 @@ enum SystemShortcuts {
     }
 
     /// The symbolic hotkeys with the five screenshot shortcuts off, and the state to restore later.
-    /// An existing backup is kept: shortcuts that are off now may be off because Screenme turned them off.
+    /// A shortcut that is off now may be off because an earlier takeover turned it off: its entry in an existing
+    /// backup is kept. One that is on now was turned on since, by the user or macOS: it is recorded as it is.
     static func takingOver(_ hotKeys: [String: Any], backup: [SavedShortcut]?) -> (hotKeys: [String: Any], backup: [SavedShortcut]) {
         var hotKeys = hotKeys
-        let saved = backup ?? screenshotDefaults.map { item in
+        let saved = screenshotDefaults.map { item in
             let entry = hotKeys[String(item.id)] as? [String: Any]
-            return SavedShortcut(id: item.id, existed: entry != nil, enabled: isEnabled(entry, default: true))
+            let now = SavedShortcut(id: item.id, existed: entry != nil, enabled: isEnabled(entry, default: true))
+            guard !now.enabled, let earlier = backup?.first(where: { $0.id == item.id }) else { return now }
+            return earlier
         }
         for item in screenshotDefaults {
             var entry = hotKeys[String(item.id)] as? [String: Any] ?? defaultEntry(item.parameters)
