@@ -393,7 +393,7 @@ private struct RecordingPane: View {
     @AppStorage(Pref.recordingShowKeystrokes.name) private var keystrokes = Pref.recordingShowKeystrokes.defaultValue
     @AppStorage(Pref.recordingWebcam.name) private var webcam = Pref.recordingWebcam.defaultValue
     @AppStorage(Pref.recordingQuality.name) private var quality = Pref.recordingQuality.defaultValue
-    @ObservedObject private var permissions = PermissionsModel.shared
+    @ObservedObject private var permissions = Permissions.shared
     @State private var devices: [MicrophoneDevice] = []
 
     var body: some View {
@@ -414,8 +414,8 @@ private struct RecordingPane: View {
                 PrefToggle("Show cursor", Pref.recordingShowCursor)
                 PrefToggle("Highlight clicks", Pref.recordingHighlightClicks)
                 Toggle("Show keystrokes", isOn: $keystrokes)
-                if keystrokes && !permissions.accessibility {
-                    permissionHint("Keystrokes need Accessibility access.", button: "Grant") { permissions.requestAccessibility() }
+                if keystrokes && !permissions.isGranted(.accessibility) {
+                    permissionHint("Keystrokes need Accessibility access.", .accessibility)
                 }
                 PrefIntPicker("Countdown", Pref.recordingCountdown, options: [("Off", 0), ("3 seconds", 3), ("5 seconds", 5), ("10 seconds", 10)])
                 PrefToggle("Hide desktop icons while recording", Pref.recordingHideDesktopIcons)
@@ -431,18 +431,14 @@ private struct RecordingPane: View {
                             Text("Unavailable device").tag(microphoneID)
                         }
                     }
-                    if permissions.microphone != .granted {
-                        permissionHint("Microphone access is off.", button: permissions.microphone == .notDetermined ? "Allow" : "Open Settings") {
-                            permissions.requestMicrophone()
-                        }
+                    if !permissions.isGranted(.microphone) {
+                        permissionHint("Microphone access is off.", .microphone)
                     }
                 }
                 PrefToggle("Record system audio", Pref.recordingSystemAudio)
                 Toggle("Show webcam", isOn: $webcam)
-                if webcam && permissions.camera != .granted {
-                    permissionHint("Camera access is off.", button: permissions.camera == .notDetermined ? "Allow" : "Open Settings") {
-                        permissions.requestCamera()
-                    }
+                if webcam && !permissions.isGranted(.camera) {
+                    permissionHint("Camera access is off.", .camera)
                 }
             }
         }
@@ -453,11 +449,11 @@ private struct RecordingPane: View {
         }
     }
 
-    private func permissionHint(_ text: String, button: String, action: @escaping () -> Void) -> some View {
+    private func permissionHint(_ text: String, _ permission: Permission) -> some View {
         HStack {
             Label(text, systemImage: "exclamationmark.triangle.fill").font(.callout).foregroundStyle(.orange)
             Spacer()
-            Button(button, action: action)
+            Button(permission.requestTitle) { permission.request() }
         }
     }
 }
@@ -490,33 +486,12 @@ private struct TextRecognitionPane: View {
 
 private struct PermissionsPane: View {
     @ObservedObject private var state = AppState.shared
-    @ObservedObject private var permissions = PermissionsModel.shared
+    @ObservedObject private var permissions = Permissions.shared
 
     var body: some View {
         Form {
             Section {
-                PermissionRow(symbol: "rectangle.dashed.badge.record", color: .blue, title: "Screen Recording",
-                              detail: "Required to take screenshots and record the screen.",
-                              granted: state.screenRecordingGranted, primary: { state.requestScreenRecording() },
-                              openSettings: { permissions.openSettings(.screenRecording) })
-                PermissionRow(symbol: "mic.fill", color: .red, title: "Microphone",
-                              detail: "Records your voice in screen recordings.",
-                              granted: permissions.microphone == .granted,
-                              deniedHint: permissions.microphone == .notDetermined ? "Not asked yet" : "Not allowed",
-                              primary: { permissions.requestMicrophone() },
-                              openSettings: { permissions.openSettings(.microphone) },
-                              showOpenSettings: permissions.microphone != .notDetermined)
-                PermissionRow(symbol: "camera.fill", color: .gray, title: "Camera",
-                              detail: "Shows your webcam in screen recordings.",
-                              granted: permissions.camera == .granted,
-                              deniedHint: permissions.camera == .notDetermined ? "Not asked yet" : "Not allowed",
-                              primary: { permissions.requestCamera() },
-                              openSettings: { permissions.openSettings(.camera) },
-                              showOpenSettings: permissions.camera != .notDetermined)
-                PermissionRow(symbol: "accessibility", color: .indigo, title: "Accessibility",
-                              detail: "Shows keystrokes in recordings and drives scrolling capture.",
-                              granted: permissions.accessibility, primary: { permissions.requestAccessibility() },
-                              openSettings: { permissions.openSettings(.accessibility) })
+                ForEach(Permission.allCases) { PermissionRow(permission: $0) }
             } footer: {
                 Text("Permissions are managed by macOS. Screenme only asks for what a feature needs.")
             }
@@ -525,13 +500,13 @@ private struct PermissionsPane: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Relaunch Screenme")
-                        Text(state.screenRecordingGranted
+                        Text(permissions.isGranted(.screenRecording)
                              ? "Use this if captures still fail after changing a permission."
                              : "After turning Screen Recording on, relaunch so macOS applies it.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
-                    if state.screenRecordingGranted {
+                    if permissions.isGranted(.screenRecording) {
                         Button("Relaunch") { state.relaunch() }
                     } else {
                         Button("Relaunch") { state.relaunch() }.buttonStyle(.borderedProminent)

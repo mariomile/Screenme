@@ -44,7 +44,7 @@ final class RecordingEffects {
                 MainActor.assumeIsolated { self?.handleMouse(type) }
             }) { monitors.append(monitor) }
         }
-        if showKeystrokes, Accessibility.trusted {
+        if showKeystrokes, Permission.accessibility.isGranted {
             if let monitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown, handler: { [weak self] event in
                 let label = Self.label(for: event)
                 MainActor.assumeIsolated { if let label { self?.showKey(label) } }

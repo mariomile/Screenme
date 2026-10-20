@@ -43,7 +43,7 @@ struct CaptureSetup {
             config.sampleRate = 48000
             config.channelCount = 2
         }
-        if settings.microphone && settings.format == .video && MediaAccess.isAuthorized(.audio) {
+        if settings.microphone && settings.format == .video && Permission.microphone.isGranted {
             config.captureMicrophone = true
             if !settings.microphoneID.isEmpty { config.microphoneCaptureDeviceID = settings.microphoneID }
         }

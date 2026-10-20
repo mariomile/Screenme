@@ -49,8 +49,8 @@ final class RecorderOptions: ObservableObject {
     init() {
         refreshDevices()
         // A permission revoked since last time must not leave the toggle on.
-        if microphone, !MediaAccess.isAuthorized(.audio) { microphone = false }
-        if webcam, !MediaAccess.isAuthorized(.video) { webcam = false }
+        if microphone, !Permission.microphone.isGranted { microphone = false }
+        if webcam, !Permission.camera.isGranted { webcam = false }
     }
 
     func refreshDevices() {
@@ -68,7 +68,7 @@ final class RecorderOptions: ObservableObject {
             return
         }
         Task {
-            if await MediaAccess.ensure(.audio) { microphone = true } else { MediaAccess.explainDenied(.audio) }
+            if await Permission.microphone.ensure() { microphone = true }
         }
     }
 
@@ -78,7 +78,7 @@ final class RecorderOptions: ObservableObject {
             return
         }
         Task {
-            if await MediaAccess.ensure(.video) { webcam = true } else { MediaAccess.explainDenied(.video) }
+            if await Permission.camera.ensure() { webcam = true }
         }
     }
 
@@ -89,7 +89,7 @@ final class RecorderOptions: ObservableObject {
 
     func setKeystrokes(_ on: Bool) {
         showKeystrokes = on
-        if on, !Accessibility.trusted { Accessibility.prompt() }
+        if on, !Permission.accessibility.isGranted { Permission.accessibility.request() }
     }
 }
 
@@ -177,7 +177,7 @@ final class PreRecordUI {
 
     private func setWebcam(_ on: Bool) {
         if on, webcam == nil {
-            guard MediaAccess.isAuthorized(.video) else { return }
+            guard Permission.camera.isGranted else { return }
             let bubble = WebcamBubble(near: target.cocoaFrame, size: options.webcamSize, deviceID: options.webcamID)
             if let bubble {
                 bubble.show()
@@ -300,7 +300,7 @@ private struct PreRecordBar: View {
             Toggle("Show Cursor", isOn: $options.showCursor)
             Toggle("Highlight Clicks", isOn: $options.highlightClicks)
             Toggle("Show Keystrokes", isOn: Binding(get: { options.showKeystrokes }, set: { options.setKeystrokes($0) }))
-            if options.showKeystrokes, !Accessibility.trusted {
+            if options.showKeystrokes, !Permission.accessibility.isGranted {
                 Text("Keystrokes need Accessibility access")
             }
             Divider()

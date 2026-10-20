@@ -20,7 +20,7 @@ final class CaptureCoordinator {
         }
         guard !busy, !RecordingController.shared.isRecording else { return }
         let needsScreen: Set<ShortcutAction> = [.openHistory, .toggleDesktopIcons, .pinLastCapture]
-        if !needsScreen.contains(action), !state.screenRecordingGranted {
+        if !needsScreen.contains(action), !Permission.screenRecording.isGranted {
             OnboardingWindow.show()
             return
         }
@@ -144,7 +144,7 @@ final class CaptureCoordinator {
 
     func report(_ error: Error) {
         let alert = NSAlert(error: error)
-        if !state.screenRecordingGranted {
+        if !Permission.screenRecording.isGranted {
             alert.informativeText = "Screenme needs Screen Recording permission. Open Settings > Permissions to turn it on."
         }
         FocusKeeper.activateSelf()

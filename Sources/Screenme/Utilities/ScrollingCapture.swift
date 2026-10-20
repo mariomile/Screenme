@@ -108,7 +108,8 @@ private final class ScrollSession: ObservableObject {
             status = Message.capturing
             return
         }
-        guard accessibilityGranted(prompt: true) else {
+        guard Permission.accessibility.isGranted else {
+            Permission.accessibility.request()
             status = Message.needsAccess
             return
         }
@@ -174,12 +175,6 @@ private final class ScrollSession: ObservableObject {
         autoTask?.cancel()
         autoTask = nil
         isAutoScrolling = false
-    }
-
-    private func accessibilityGranted(prompt: Bool) -> Bool {
-        if AXIsProcessTrusted() { return true }
-        guard prompt else { return false }
-        return AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary)
     }
 
     /// Posts pixel scroll events over the middle of the area until the page stops moving.

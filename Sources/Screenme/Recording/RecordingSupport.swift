@@ -60,45 +60,6 @@ struct RecordingSettings {
     }
 }
 
-// MARK: - Permissions
-
-enum MediaAccess {
-    /// True when the app may use `type`. Asks the user the first time.
-    static func ensure(_ type: AVMediaType) async -> Bool {
-        switch AVCaptureDevice.authorizationStatus(for: type) {
-        case .authorized: return true
-        case .notDetermined: return await AVCaptureDevice.requestAccess(for: type)
-        default: return false
-        }
-    }
-
-    static func isAuthorized(_ type: AVMediaType) -> Bool {
-        AVCaptureDevice.authorizationStatus(for: type) == .authorized
-    }
-
-    /// Tells the user how to fix a denied permission and opens the right pane.
-    @MainActor
-    static func explainDenied(_ type: AVMediaType) {
-        let microphone = type == .audio
-        Toast.show(microphone ? "Microphone access is off. Allow Screenme in Privacy settings."
-                              : "Camera access is off. Allow Screenme in Privacy settings.",
-                   symbol: microphone ? "mic.slash.fill" : "video.slash.fill", duration: 3)
-        let pane = microphone ? "Privacy_Microphone" : "Privacy_Camera"
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)") {
-            NSWorkspace.shared.open(url)
-        }
-    }
-}
-
-enum Accessibility {
-    static var trusted: Bool { AXIsProcessTrusted() }
-
-    /// Shows the system prompt that sends the user to Privacy > Accessibility.
-    static func prompt() {
-        _ = AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary)
-    }
-}
-
 // MARK: - Devices
 
 enum InputDevices {

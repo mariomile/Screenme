@@ -1,36 +1,22 @@
 import AppKit
 import ServiceManagement
 
-/// System requirements and app-wide live state. Preferences live in `Prefs`.
+/// App-wide live state: recording, launch at login, the save folder. Preferences live in `Prefs`,
+/// permissions in `Permissions`.
 @MainActor
 final class AppState: ObservableObject {
     static let shared = AppState()
 
-    @Published var screenRecordingGranted = CGPreflightScreenCaptureAccess()
     @Published var launchAtLogin = SMAppService.mainApp.status == .enabled
     @Published var isRecording = false
 
     var needsSetup: Bool {
         // Shortcut conflicts are shown in Settings; they don't reopen setup on every launch.
-        !Prefs[Pref.onboardingDone] || !screenRecordingGranted
+        !Prefs[Pref.onboardingDone] || !Permission.screenRecording.isGranted
     }
 
     func refresh() {
-        screenRecordingGranted = CGPreflightScreenCaptureAccess()
         launchAtLogin = SMAppService.mainApp.status == .enabled
-    }
-
-    // MARK: Screen recording permission
-
-    func requestScreenRecording() {
-        if !CGRequestScreenCaptureAccess() {
-            openScreenRecordingSettings()
-        }
-        refresh()
-    }
-
-    func openScreenRecordingSettings() {
-        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
     }
 
     /// macOS applies a new Screen Recording grant only to a fresh process.

@@ -1,77 +1,5 @@
-import ApplicationServices
-import AVFoundation
 import AppKit
 import SwiftUI
-
-// MARK: - Permissions
-
-/// Live status of the permissions Screenme can use. Screen Recording lives in `AppState`.
-@MainActor
-final class PermissionsModel: ObservableObject {
-    static let shared = PermissionsModel()
-
-    enum Status { case granted, notDetermined, denied }
-
-    @Published private(set) var microphone: Status = .notDetermined
-    @Published private(set) var camera: Status = .notDetermined
-    @Published private(set) var accessibility = false
-
-    private init() { refresh() }
-
-    func refresh() {
-        AppState.shared.refresh()
-        let mic = Self.status(AVCaptureDevice.authorizationStatus(for: .audio))
-        let cam = Self.status(AVCaptureDevice.authorizationStatus(for: .video))
-        let ax = AXIsProcessTrusted()
-        if mic != microphone { microphone = mic }
-        if cam != camera { camera = cam }
-        if ax != accessibility { accessibility = ax }
-    }
-
-    private static func status(_ status: AVAuthorizationStatus) -> Status {
-        switch status {
-        case .authorized: .granted
-        case .notDetermined: .notDetermined
-        default: .denied
-        }
-    }
-
-    // MARK: Requests
-
-    func requestMicrophone() {
-        // Asking without a usage description in Info.plist aborts the process, so fall back to System Settings.
-        guard Bundle.main.object(forInfoDictionaryKey: "NSMicrophoneUsageDescription") != nil,
-              microphone == .notDetermined else { return openSettings(.microphone) }
-        AVCaptureDevice.requestAccess(for: .audio) { _ in
-            DispatchQueue.main.async { MainActor.assumeIsolated { PermissionsModel.shared.refresh() } }
-        }
-    }
-
-    func requestCamera() {
-        guard Bundle.main.object(forInfoDictionaryKey: "NSCameraUsageDescription") != nil,
-              camera == .notDetermined else { return openSettings(.camera) }
-        AVCaptureDevice.requestAccess(for: .video) { _ in
-            DispatchQueue.main.async { MainActor.assumeIsolated { PermissionsModel.shared.refresh() } }
-        }
-    }
-
-    func requestAccessibility() {
-        let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
-        _ = AXIsProcessTrustedWithOptions(options)
-        refresh()
-    }
-
-    enum Pane: String {
-        case screenRecording = "Privacy_ScreenCapture"
-        case microphone = "Privacy_Microphone"
-        case camera = "Privacy_Camera"
-        case accessibility = "Privacy_Accessibility"
-    }
-
-    func openSettings(_ pane: Pane) {
-        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane.rawValue)")!)
-    }
-}
 
 // MARK: - Shortcut status
 
@@ -190,36 +118,25 @@ struct StatusLabel: View {
     }
 }
 
-/// One permission: icon, what it is for, live status, and the right button.
+/// One permission: icon, what it is for, live status, and one button titled from the status.
 struct PermissionRow: View {
-    let symbol: String
-    let color: Color
-    let title: String
-    let detail: String
-    let granted: Bool
-    var deniedHint: String = "Not allowed"
-    var primaryTitle: String = "Allow"
-    let primary: () -> Void
-    let openSettings: () -> Void
-    var showOpenSettings = true
+    let permission: Permission
+    @ObservedObject private var permissions = Permissions.shared
 
     var body: some View {
         HStack(spacing: 12) {
-            SymbolTile(symbol: symbol, color: color, size: 32)
+            SymbolTile(symbol: permission.symbol, color: permission.color, size: 32)
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.body.weight(.medium))
-                Text(detail).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Text(permission.title).font(.body.weight(.medium))
+                Text(permission.detail).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 12)
-            if granted {
-                StatusLabel(text: "Allowed", tone: .good)
+            if permissions.isGranted(permission) {
+                StatusLabel(text: permission.statusText, tone: .good)
             } else {
                 HStack(spacing: 8) {
-                    StatusLabel(text: deniedHint, tone: .neutral)
-                    Button(primaryTitle, action: primary)
-                    if showOpenSettings {
-                        Button("Open Settings", action: openSettings)
-                    }
+                    StatusLabel(text: permission.statusText, tone: .neutral)
+                    Button(permission.requestTitle) { permission.request() }
                 }
             }
         }

@@ -76,10 +76,10 @@ final class RecordingController {
         let frame = target.cocoaFrame
 
         var effects: RecordingEffects?
-        if settings.showKeystrokes && !Accessibility.trusted {
+        if settings.showKeystrokes && !Permission.accessibility.isGranted {
             Toast.show("Keystrokes need Accessibility access", symbol: "keyboard", duration: 3)
         }
-        let showKeys = settings.showKeystrokes && Accessibility.trusted
+        let showKeys = settings.showKeystrokes && Permission.accessibility.isGranted
         if settings.highlightClicks || showKeys {
             let overlay = RecordingEffects(frame: frame, highlightClicks: settings.highlightClicks, showKeystrokes: showKeys)
             overlay.show()

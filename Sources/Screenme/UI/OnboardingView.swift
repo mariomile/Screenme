@@ -18,18 +18,19 @@ enum OnboardingWindow {
     /// Before setup is done, resume the saved step (never past a missing Screen Recording grant).
     /// After setup, jump to the first step that needs attention.
     private static func placeStep() {
-        AppState.shared.refresh()
+        Permissions.shared.refresh()
         SystemShortcuts.shared.refresh()
+        let screenRecording = Permission.screenRecording.isGranted
         var step = Prefs[Pref.onboardingStep]
         if Prefs[Pref.onboardingDone] {
-            if !AppState.shared.screenRecordingGranted {
+            if !screenRecording {
                 step = 1
             } else if SystemShortcuts.shared.macOSOwnsScreenshotShortcuts || !HotKeyCenter.shared.conflicts.isEmpty {
                 step = 2
             } else {
                 step = 0
             }
-        } else if !AppState.shared.screenRecordingGranted && step > 1 {
+        } else if !screenRecording && step > 1 {
             step = 1
         }
         Prefs[Pref.onboardingStep] = min(max(step, 0), stepCount - 1)
@@ -38,21 +39,20 @@ enum OnboardingWindow {
 
 struct OnboardingView: View {
     @AppStorage(Pref.onboardingStep.name) private var storedStep = Pref.onboardingStep.defaultValue
-    @ObservedObject private var state = AppState.shared
-    @ObservedObject private var permissions = PermissionsModel.shared
+    @ObservedObject private var permissions = Permissions.shared
     @State private var forward = true
 
     private var step: Int { min(max(storedStep, 0), OnboardingWindow.stepCount - 1) }
     private var isLast: Bool { step == OnboardingWindow.stepCount - 1 }
 
     private var canContinue: Bool {
-        step == 1 ? state.screenRecordingGranted : true
+        step == 1 ? permissions.isGranted(.screenRecording) : true
     }
 
     private var primaryTitle: String {
         switch step {
         case 0: "Get Started"
-        case 3: (permissions.microphone == .granted || permissions.camera == .granted || permissions.accessibility) ? "Continue" : "Skip for Now"
+        case 3: [Permission.microphone, .camera, .accessibility].contains(where: permissions.isGranted) ? "Continue" : "Skip for Now"
         case OnboardingWindow.stepCount - 1: "Start Using Screenme"
         default: "Continue"
         }
@@ -231,12 +231,13 @@ private struct WelcomeStep: View {
 
 private struct ScreenRecordingStep: View {
     @ObservedObject private var state = AppState.shared
+    @ObservedObject private var permissions = Permissions.shared
 
     var body: some View {
         StepPage(symbol: "rectangle.dashed.badge.record", color: .blue,
                  title: "Allow Screen Recording",
                  subtitle: "macOS asks for this before any app can capture the screen. Screenme never sends your screen anywhere.") {
-            if state.screenRecordingGranted {
+            if permissions.isGranted(.screenRecording) {
                 GroupCard {
                     HStack(spacing: 12) {
                         Image(systemName: "checkmark.circle.fill").font(.system(size: 28)).foregroundStyle(.green)
@@ -255,7 +256,7 @@ private struct ScreenRecordingStep: View {
                     instruction(3, "Come back here and click Relaunch.")
                 }
                 HStack(spacing: 10) {
-                    Button("Open System Settings") { state.requestScreenRecording() }
+                    Button("Open System Settings") { Permission.screenRecording.request() }
                         .buttonStyle(.borderedProminent)
                     Button("I turned it on: Relaunch") { state.relaunch() }
                 }
@@ -264,8 +265,8 @@ private struct ScreenRecordingStep: View {
                     .font(.caption).foregroundStyle(.tertiary).multilineTextAlignment(.center).frame(maxWidth: 440)
             }
         }
-        .animation(.spring(duration: 0.4, bounce: 0.15), value: state.screenRecordingGranted)
-        .polling(every: 0.8) { PermissionsModel.shared.refresh() }
+        .animation(.spring(duration: 0.4, bounce: 0.15), value: permissions.isGranted(.screenRecording))
+        .polling(every: 0.8) { Permissions.shared.refresh() }
     }
 
     private func instruction(_ number: Int, _ text: String) -> some View {
@@ -346,45 +347,43 @@ private struct ShortcutsStep: View {
 // MARK: - 3 Optional permissions
 
 private struct OptionalPermissionsStep: View {
-    @ObservedObject private var permissions = PermissionsModel.shared
-    @State private var skipped: Set<String> = []
+    @ObservedObject private var permissions = Permissions.shared
+    @State private var skipped: Set<Permission> = []
 
     var body: some View {
         StepPage(symbol: "lock.open.fill", color: .green,
                  title: "Optional permissions",
                  subtitle: "Only some features need these. Allow what you plan to use, skip the rest. You can change them anytime in Settings.") {
             GroupCard {
-                row(id: "mic", symbol: "mic.fill", color: .red, title: "Microphone", detail: "Record your voice in screen recordings.",
-                    granted: permissions.microphone == .granted, allow: { permissions.requestMicrophone() })
+                row(.microphone)
                 Divider()
-                row(id: "cam", symbol: "camera.fill", color: .gray, title: "Camera", detail: "Show your webcam in recordings.",
-                    granted: permissions.camera == .granted, allow: { permissions.requestCamera() })
+                row(.camera)
                 Divider()
-                row(id: "ax", symbol: "accessibility", color: .indigo, title: "Accessibility", detail: "Show keystrokes and scroll automatically for scrolling capture.",
-                    granted: permissions.accessibility, allow: { permissions.requestAccessibility() })
+                row(.accessibility)
             }
         }
-        .polling(every: 1) { PermissionsModel.shared.refresh() }
+        .polling(every: 1) { Permissions.shared.refresh() }
     }
 
-    private func row(id: String, symbol: String, color: Color, title: String, detail: String, granted: Bool, allow: @escaping () -> Void) -> some View {
-        HStack(spacing: 12) {
-            SymbolTile(symbol: symbol, color: color, size: 32)
+    private func row(_ permission: Permission) -> some View {
+        let allow = { permission.request() }
+        return HStack(spacing: 12) {
+            SymbolTile(symbol: permission.symbol, color: permission.color, size: 32)
             VStack(alignment: .leading, spacing: 1) {
-                Text(title).font(.system(size: 14, weight: .semibold))
-                Text(detail).font(.system(size: 12.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Text(permission.title).font(.system(size: 14, weight: .semibold))
+                Text(permission.detail).font(.system(size: 12.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 8)
-            if granted {
+            if permissions.isGranted(permission) {
                 StatusLabel(text: "Allowed", tone: .good)
-            } else if skipped.contains(id) {
+            } else if skipped.contains(permission) {
                 HStack(spacing: 8) {
                     Text("Skipped").font(.callout).foregroundStyle(.secondary)
                     Button("Allow", action: allow).buttonStyle(.link)
                 }
             } else {
                 HStack(spacing: 8) {
-                    Button("Not Now") { withAnimation(.easeOut(duration: 0.15)) { _ = skipped.insert(id) } }
+                    Button("Not Now") { withAnimation(.easeOut(duration: 0.15)) { _ = skipped.insert(permission) } }
                     Button("Allow", action: allow).buttonStyle(.borderedProminent)
                 }
             }
