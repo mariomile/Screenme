@@ -51,7 +51,10 @@ extension CaptureTarget {
             guard let display = content.displays.first(where: { $0.displayID == screen.displayID }) else {
                 throw ScreenmeError.displayNotFound
             }
-            let filter = SCContentFilter(display: display, excludingApplications: ownApps, exceptingWindows: [])
+            // Desktop icon covers belong to Screenme but must appear in captures, or hidden icons come back.
+            let coverIDs = await MainActor.run { DesktopIcons.coverWindowIDs }
+            let covers = content.windows.filter { coverIDs.contains($0.windowID) }
+            let filter = SCContentFilter(display: display, excludingApplications: ownApps, exceptingWindows: covers)
             let scale = retina ? screen.backingScaleFactor : 1
             var size = screen.frame.size
             if case .area(let rect, _) = self {

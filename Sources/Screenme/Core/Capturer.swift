@@ -12,10 +12,10 @@ enum Capturer {
 }
 
 enum Storage {
-    /// Captures live in Caches until the user saves them; drag, copy and history read from here.
+    /// Captures live in Application Support (not Caches, which macOS may purge) so history keeps working.
     static let directory: URL = {
-        let url = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Screenme", isDirectory: true)
+        let url = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Screenme/Captures", isDirectory: true)
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
     }()
