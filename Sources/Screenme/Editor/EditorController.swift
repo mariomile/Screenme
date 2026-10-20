@@ -437,7 +437,7 @@ final class EditorController: ObservableObject {
             return
         }
         savedState = state
-        NotificationCenter.default.post(name: Notification.Name("ScreenmeCaptureUpdated"), object: item.url)
+        NotificationCenter.default.post(name: .captureUpdated, object: item.url)
         if Prefs[Pref.afterShotCopy] { Clipboard.copyImage(at: item.url) }
         window?.close()
     }

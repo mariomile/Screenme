@@ -60,19 +60,6 @@ struct RecordingSettings {
     }
 }
 
-// MARK: - Devices
-
-enum InputDevices {
-    static func microphones() -> [AVCaptureDevice] {
-        AVCaptureDevice.DiscoverySession(deviceTypes: [.microphone, .external], mediaType: .audio, position: .unspecified).devices
-    }
-
-    static func cameras() -> [AVCaptureDevice] {
-        AVCaptureDevice.DiscoverySession(deviceTypes: [.builtInWideAngleCamera, .external, .continuityCamera],
-                                         mediaType: .video, position: .unspecified).devices
-    }
-}
-
 // MARK: - Sample buffer timing
 
 extension CMSampleBuffer {

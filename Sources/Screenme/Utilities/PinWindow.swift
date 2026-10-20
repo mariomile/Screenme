@@ -1,6 +1,4 @@
 import AppKit
-import AVFoundation
-import ImageIO
 
 /// Floating, always-on-top screenshots. Pin as many as you like; they follow you across Spaces.
 @MainActor
@@ -8,19 +6,11 @@ enum PinWindow {
     private static var controllers: [PinWindowController] = []
     private static var lockTimer: Timer?
 
-    /// Pins a capture. Videos pin their first frame.
+    /// Pins a capture at full size. Videos pin a frame near the start, GIFs their first frame.
     static func pin(_ item: CaptureItem) {
-        switch item.kind {
-        case .image, .gif:
-            guard let image = loadImage(item.url) else { return }
-            show(image, for: item)
-        case .video:
-            Task {
-                let generator = AVAssetImageGenerator(asset: AVURLAsset(url: item.url))
-                generator.appliesPreferredTrackTransform = true
-                guard let (image, _) = try? await generator.image(at: .zero) else { return }
-                show(image, for: item)
-            }
+        Task {
+            guard let preview = await Thumbnails.make(for: item, maxPixelSize: nil) else { return }
+            show(preview.image, for: item)
         }
     }
 
@@ -67,11 +57,6 @@ enum PinWindow {
         let controller = PinWindowController(image: image, item: item, index: controllers.count)
         controllers.append(controller)
         controller.present()
-    }
-
-    private static func loadImage(_ url: URL) -> CGImage? {
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
-        return CGImageSourceCreateImageAtIndex(source, 0, nil)
     }
 }
 

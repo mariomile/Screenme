@@ -377,16 +377,6 @@ private struct QuickAccessPane: View {
 
 // MARK: - Recording
 
-private struct MicrophoneDevice: Identifiable, Hashable {
-    let id: String
-    let name: String
-
-    static func available() -> [MicrophoneDevice] {
-        AVCaptureDevice.DiscoverySession(deviceTypes: [.microphone, .external], mediaType: .audio, position: .unspecified)
-            .devices.map { MicrophoneDevice(id: $0.uniqueID, name: $0.localizedName) }
-    }
-}
-
 private struct RecordingPane: View {
     @AppStorage(Pref.recordingMicrophone.name) private var microphoneOn = Pref.recordingMicrophone.defaultValue
     @AppStorage(Pref.recordingMicrophoneID.name) private var microphoneID = Pref.recordingMicrophoneID.defaultValue
@@ -394,7 +384,7 @@ private struct RecordingPane: View {
     @AppStorage(Pref.recordingWebcam.name) private var webcam = Pref.recordingWebcam.defaultValue
     @AppStorage(Pref.recordingQuality.name) private var quality = Pref.recordingQuality.defaultValue
     @ObservedObject private var permissions = Permissions.shared
-    @State private var devices: [MicrophoneDevice] = []
+    @State private var devices: [AVCaptureDevice] = []
 
     var body: some View {
         Form {
@@ -426,8 +416,8 @@ private struct RecordingPane: View {
                 if microphoneOn {
                     Picker("Microphone", selection: $microphoneID) {
                         Text("System default").tag("")
-                        ForEach(devices) { Text($0.name).tag($0.id) }
-                        if !microphoneID.isEmpty && !devices.contains(where: { $0.id == microphoneID }) {
+                        ForEach(devices, id: \.uniqueID) { Text($0.localizedName).tag($0.uniqueID) }
+                        if !microphoneID.isEmpty && !devices.contains(where: { $0.uniqueID == microphoneID }) {
                             Text("Unavailable device").tag(microphoneID)
                         }
                     }
@@ -445,7 +435,7 @@ private struct RecordingPane: View {
         .formStyle(.grouped)
         .polling(every: 2) {
             permissions.refresh()
-            devices = MicrophoneDevice.available()
+            devices = InputDevices.microphones()
         }
     }
 

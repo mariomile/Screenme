@@ -1,6 +1,4 @@
 import AppKit
-import ImageIO
-import ScreenCaptureKit
 
 /// Hides desktop icons without touching Finder: one borderless window per screen, sitting just
 /// above the desktop icons, shows that screen's wallpaper and ignores the mouse.
@@ -151,7 +149,7 @@ private final class DesktopCover {
 
     func loadWallpaper(for screen: NSScreen) {
         loadTask?.cancel()
-        let url = NSWorkspace.shared.desktopImageURL(for: screen)
+        let url = WallpaperLoader.pictureURL(for: screen)
         let options = NSWorkspace.shared.desktopImageOptions(for: screen) ?? [:]
         let style = WallpaperStyle(options: options)
         let pixelSize = CGSize(width: screen.frame.width * screen.backingScaleFactor,
@@ -163,7 +161,11 @@ private final class DesktopCover {
         loadTask = Task { [weak self] in
             var image: CGImage?
             var gravity = style.gravity
-            if let url { image = await WallpaperLoader.load(url, style: style, pixelSize: pixelSize) }
+            if let url {
+                // Fill needs the short side to cover the screen, so allow the longest side to be larger.
+                let maxPixelSize = style.scaling == .scaleNone ? nil : Int(max(pixelSize.width, pixelSize.height) * 1.6)
+                image = await Task.detached { Thumbnails.decodeImage(at: url, maxPixelSize: maxPixelSize) }.value
+            }
             // Dynamic and video wallpapers have no single file: ask the compositor instead.
             if image == nil {
                 image = await WallpaperLoader.snapshot(displayID: displayID, pixelSize: pixelSize)
@@ -202,47 +204,5 @@ private struct WallpaperStyle {
         case .scaleNone: .center
         default: allowClipping ? .resizeAspectFill : .resizeAspect
         }
-    }
-}
-
-private enum WallpaperLoader {
-    /// Decodes the wallpaper file at (at most) screen size, off the main thread.
-    nonisolated static func load(_ url: URL, style: WallpaperStyle, pixelSize: CGSize) async -> CGImage? {
-        var target = url
-        var isDirectory: ObjCBool = false
-        if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue {
-            // A rotating folder: the system keeps the current pick private, take the first picture.
-            let files = (try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil)) ?? []
-            guard let first = files.filter({ ["jpg", "jpeg", "png", "heic", "tiff"].contains($0.pathExtension.lowercased()) })
-                .sorted(by: { $0.lastPathComponent < $1.lastPathComponent }).first else { return nil }
-            target = first
-        }
-        guard let source = CGImageSourceCreateWithURL(target as CFURL, nil) else { return nil }
-        if style.scaling == .scaleNone {
-            return CGImageSourceCreateImageAtIndex(source, 0, nil)
-        }
-        let longest = max(pixelSize.width, pixelSize.height) * 1.0
-        let options: [CFString: Any] = [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-            // Fill needs the short side to cover the screen, so allow the longest side to be larger.
-            kCGImageSourceThumbnailMaxPixelSize: Int(longest * 1.6),
-        ]
-        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
-    }
-
-    /// Captures only the wallpaper windows of a display with ScreenCaptureKit.
-    nonisolated static func snapshot(displayID: CGDirectDisplayID, pixelSize: CGSize) async -> CGImage? {
-        guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true),
-              let display = content.displays.first(where: { $0.displayID == displayID }) else { return nil }
-        let iconLevel = Int(CGWindowLevelForKey(.desktopIconWindow))
-        let wallpapers = content.windows.filter { $0.windowLayer < iconLevel }
-        guard !wallpapers.isEmpty else { return nil }
-        let filter = SCContentFilter(display: display, including: wallpapers)
-        let config = SCStreamConfiguration()
-        config.width = Int(pixelSize.width)
-        config.height = Int(pixelSize.height)
-        config.showsCursor = false
-        return try? await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
     }
 }

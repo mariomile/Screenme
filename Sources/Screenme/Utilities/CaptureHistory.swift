@@ -1,6 +1,6 @@
 import AppKit
 
-/// Recent captures, newest first. Thumbnails refresh on `ScreenmeCaptureUpdated` (object: the file URL).
+/// Recent captures, newest first. Thumbnails refresh on `.captureUpdated`.
 /// The index is a small JSON file in Application Support;
 /// the captures themselves stay in `Storage.directory`.
 @MainActor
@@ -28,7 +28,7 @@ final class CaptureHistory: ObservableObject {
         indexURL = support.appendingPathComponent("history.json")
         items = Self.load(from: indexURL)
 
-        NotificationCenter.default.addObserver(forName: Notification.Name("ScreenmeCaptureUpdated"), object: nil, queue: .main) { [weak self] note in
+        NotificationCenter.default.addObserver(forName: .captureUpdated, object: nil, queue: .main) { [weak self] note in
             let url = note.object as? URL
             MainActor.assumeIsolated { self?.fileChanged(url) }
         }
@@ -72,7 +72,6 @@ final class CaptureHistory: ObservableObject {
 
     private func fileChanged(_ url: URL?) {
         guard let url else { return }
-        HistoryThumbnails.invalidate(url)
         revisions[url, default: 0] += 1
     }
 

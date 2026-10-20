@@ -8,14 +8,10 @@ import SwiftUI
 enum VideoEditor {
     static func open(_ item: CaptureItem) {
         let id = "videoEditor-\(item.id.uuidString)"
-        let size = CGSize(width: 940, height: 680)
-        let style: NSWindow.StyleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
-        if WindowPresenter.shared.isOpen(id) {
-            WindowPresenter.shared.show(id, title: item.url.lastPathComponent, size: size, style: style) { EmptyView() }
-            return
-        }
+        if WindowPresenter.shared.focus(id) { return }
         let model = VideoEditorModel(item: item)
-        let window = WindowPresenter.shared.show(id, title: item.url.lastPathComponent, size: size, style: style) {
+        let window = WindowPresenter.shared.show(id, title: item.url.lastPathComponent, size: CGSize(width: 940, height: 680),
+                                                 style: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]) {
             VideoEditorView(model: model)
         }
         window.minSize = CGSize(width: 780, height: 560)
@@ -383,13 +379,13 @@ private struct VideoEditorView: View {
             .buttonStyle(.plain)
             .help("Play / Pause (Space)")
 
-            Text("\(Self.time(model.currentTime))  /  \(Self.time(model.duration))")
+            Text("\(Duration.format(model.currentTime, tenths: true))  /  \(Duration.format(model.duration, tenths: true))")
                 .font(.system(size: 12, weight: .medium).monospacedDigit())
                 .foregroundStyle(.secondary)
 
             Spacer()
 
-            Text("Selected \(Self.time(model.clipDuration))")
+            Text("Selected \(Duration.format(model.clipDuration, tenths: true))")
                 .font(.system(size: 12, weight: .medium).monospacedDigit())
                 .foregroundStyle(.secondary)
         }
@@ -494,14 +490,6 @@ private struct VideoEditorView: View {
         }
         .opacity(0)
         .allowsHitTesting(false)
-    }
-
-    static func time(_ seconds: Double) -> String {
-        let value = max(seconds, 0)
-        let minutes = Int(value) / 60
-        let secs = Int(value) % 60
-        let tenths = Int((value - Double(Int(value))) * 10)
-        return String(format: "%d:%02d.%d", minutes, secs, tenths)
     }
 }
 

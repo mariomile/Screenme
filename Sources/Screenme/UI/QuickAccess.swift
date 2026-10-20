@@ -23,16 +23,10 @@ final class QuickAccess {
     private var updateObserver: NSObjectProtocol?
 
     private init() {
-        updateObserver = NotificationCenter.default.addObserver(forName: Notification.Name("ScreenmeCaptureUpdated"), object: nil, queue: .main) { note in
-            guard let url = Self.fileURL(from: note.object) else { return }
+        updateObserver = NotificationCenter.default.addObserver(forName: .captureUpdated, object: nil, queue: .main) { note in
+            guard let url = note.object as? URL else { return }
             MainActor.assumeIsolated { QuickAccess.shared.reload(url) }
         }
-    }
-
-    private nonisolated static func fileURL(from object: Any?) -> URL? {
-        if let url = object as? URL { return url }
-        if let path = object as? String { return URL(fileURLWithPath: path) }
-        return nil
     }
 
     // MARK: Showing
@@ -198,7 +192,7 @@ final class QuickAccessCard {
         self.screen = screen
         self.owner = owner
         let width = QuickAccess.cardWidth
-        let height = CGFloat.minimum(220, CGFloat.maximum(140, width * Thumbnail.aspectRatio(of: item)))
+        let height = CGFloat.minimum(220, CGFloat.maximum(140, width * Thumbnails.aspectRatio(of: item)))
         size = CGSize(width: width, height: height)
         model = CardModel(item: item)
 
@@ -366,9 +360,9 @@ final class CardModel: ObservableObject {
     init(item: CaptureItem) { self.item = item }
 
     func reload() async {
-        let image = await Thumbnail.make(for: item)
-        thumbnail = image
-        if item.kind == .video { duration = await Thumbnail.duration(of: item.url) }
+        let preview = await Thumbnails.make(for: item, maxPixelSize: 720)
+        thumbnail = preview.map { NSImage(cgImage: $0.image, size: .zero) }
+        if item.kind == .video { duration = preview?.duration.map { Duration.format($0) } }
     }
 }
 
@@ -648,53 +642,5 @@ private final class CardDragView: NSView, NSDraggingSource {
     func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
         let dropped = !operation.isEmpty
         model.actions.dragEnded(dropped)
-    }
-}
-
-// MARK: - Thumbnails
-
-enum Thumbnail {
-    /// Height over width of the capture, read from the file header. 0.65 when unknown.
-    static func aspectRatio(of item: CaptureItem) -> CGFloat {
-        guard item.kind != .video,
-              let source = CGImageSourceCreateWithURL(item.url as CFURL, nil),
-              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
-              let width = properties[kCGImagePropertyPixelWidth] as? CGFloat,
-              let height = properties[kCGImagePropertyPixelHeight] as? CGFloat, width > 0 else { return 0.65 }
-        return height / width
-    }
-
-    static func make(for item: CaptureItem) async -> NSImage? {
-        switch item.kind {
-        case .image, .gif:
-            let options = [
-                kCGImageSourceCreateThumbnailFromImageAlways: true,
-                kCGImageSourceCreateThumbnailWithTransform: true,
-                kCGImageSourceThumbnailMaxPixelSize: 720,
-                kCGImageSourceShouldCache: false,
-            ] as CFDictionary
-            guard let source = CGImageSourceCreateWithURL(item.url as CFURL, nil),
-                  let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options) else {
-                return NSImage(contentsOf: item.url)
-            }
-            return NSImage(cgImage: image, size: .zero)
-        case .video:
-            let asset = AVURLAsset(url: item.url)
-            let generator = AVAssetImageGenerator(asset: asset)
-            generator.appliesPreferredTrackTransform = true
-            generator.maximumSize = CGSize(width: 720, height: 720)
-            let seconds = (try? await asset.load(.duration).seconds) ?? 0
-            let time = CMTime(seconds: seconds > 1 ? 0.3 : 0, preferredTimescale: 600)
-            guard let (image, _) = try? await generator.image(at: time) else { return nil }
-            return NSImage(cgImage: image, size: .zero)
-        }
-    }
-
-    /// "0:12", "1:05", "1:02:03".
-    static func duration(of url: URL) async -> String? {
-        guard let seconds = try? await AVURLAsset(url: url).load(.duration).seconds, seconds.isFinite else { return nil }
-        let total = Int(seconds.rounded())
-        let hours = total / 3600, minutes = (total % 3600) / 60, secs = total % 60
-        return hours > 0 ? String(format: "%d:%02d:%02d", hours, minutes, secs) : String(format: "%d:%02d", minutes, secs)
     }
 }

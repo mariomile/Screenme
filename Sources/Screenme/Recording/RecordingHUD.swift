@@ -73,7 +73,7 @@ final class RecordingControlBar {
                 .help("Stop recording")
 
                 TimelineView(.periodic(from: .now, by: 0.1)) { context in
-                    Text(Self.format(clock.elapsed(at: context.date)))
+                    Text(Duration.format(clock.elapsed(at: context.date), tenths: true))
                         .font(.system(size: 14, weight: .semibold, design: .rounded))
                         .monospacedDigit()
                         .foregroundStyle(.white)
@@ -93,13 +93,6 @@ final class RecordingControlBar {
             .overlay(Capsule().strokeBorder(.white.opacity(0.14)))
             .environment(\.colorScheme, .dark)
             .fixedSize()
-        }
-
-        static func format(_ seconds: TimeInterval) -> String {
-            let total = Int(seconds)
-            let tenths = Int((seconds - Double(total)) * 10)
-            if total >= 3600 { return String(format: "%d:%02d:%02d", total / 3600, (total / 60) % 60, total % 60) }
-            return String(format: "%d:%02d.%d", total / 60, total % 60, tenths)
         }
     }
 

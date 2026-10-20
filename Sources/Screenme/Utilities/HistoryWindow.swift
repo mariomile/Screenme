@@ -211,7 +211,7 @@ private struct HistoryGridCell: View {
     let isSelected: Bool
     let select: () -> Void
 
-    @State private var thumbnail: HistoryThumbnail?
+    @State private var thumbnail: Thumbnail?
     @State private var hovering = false
 
     var body: some View {
@@ -237,8 +237,8 @@ private struct HistoryGridCell: View {
         .onDrag { NSItemProvider(contentsOf: item.url) ?? NSItemProvider() }
         .contextMenu { menu }
         .task(id: "\(item.url.path)#\(revision)") {
-            if let cached = HistoryThumbnails.cached(for: item) { thumbnail = cached; return }
-            thumbnail = await HistoryThumbnails.thumbnail(for: item)
+            if let cached = Thumbnails.cached(for: item, maxPixelSize: Self.thumbnailSize) { thumbnail = cached; return }
+            thumbnail = await Thumbnails.make(for: item, maxPixelSize: Self.thumbnailSize)
         }
         .transition(.scale(scale: 0.92).combined(with: .opacity))
     }
@@ -261,7 +261,7 @@ private struct HistoryGridCell: View {
             }
             .overlay(alignment: .bottomTrailing) {
                 if let duration = thumbnail?.duration, !hovering {
-                    Label(Self.format(duration), systemImage: "play.fill")
+                    Label(Duration.format(duration), systemImage: "play.fill")
                         .labelStyle(HistoryBadgeStyle())
                         .padding(6)
                 }
@@ -301,11 +301,8 @@ private struct HistoryGridCell: View {
         Task { await action.perform(item) }
     }
 
-    private static func format(_ seconds: TimeInterval) -> String {
-        let total = Int(seconds.rounded())
-        let hours = total / 3600, minutes = (total % 3600) / 60, secs = total % 60
-        return hours > 0 ? String(format: "%d:%02d:%02d", hours, minutes, secs) : String(format: "%d:%02d", minutes, secs)
-    }
+    /// Longest side in pixels: enough for a retina grid cell.
+    private static let thumbnailSize = 640
 }
 
 private struct HistoryActionButton: View {

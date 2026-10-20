@@ -152,13 +152,7 @@ enum BackgroundImages {
 
     static func wallpaper() -> CGImage? {
         if let cached = cache["wallpaper"] { return cached }
-        guard let screen = NSScreen.main, var url = NSWorkspace.shared.desktopImageURL(for: screen) else { return nil }
-        var isDirectory: ObjCBool = false
-        if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue {
-            let files = (try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil)) ?? []
-            guard let first = files.sorted(by: { $0.path < $1.path }).first(where: { NSImage(contentsOf: $0) != nil }) else { return nil }
-            url = first
-        }
+        guard let screen = NSScreen.main, let url = WallpaperLoader.pictureURL(for: screen) else { return nil }
         let image = decode(url)
         if let image { cache["wallpaper"] = image }
         return image
@@ -174,12 +168,6 @@ enum BackgroundImages {
     static func forget(_ path: String) { cache[path] = nil }
 
     private static func decode(_ url: URL) -> CGImage? {
-        guard let src = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
-        let options: [CFString: Any] = [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceThumbnailMaxPixelSize: 3200,
-        ]
-        return CGImageSourceCreateThumbnailAtIndex(src, 0, options as CFDictionary)
+        Thumbnails.decodeImage(at: url, maxPixelSize: 3200)
     }
 }

@@ -5,15 +5,15 @@ import SwiftUI
 /// The annotation editor. One window per open capture.
 @MainActor
 enum AnnotationEditor {
-    private static var windows: [UUID: EditorWindow] = [:]
+    /// Owns each window's toolbar delegate and key monitor; `WindowPresenter` owns the windows.
+    private static var editors: [UUID: EditorWindow] = [:]
+
+    static func windowID(for item: CaptureItem) -> String { "editor-\(item.id.uuidString)" }
 
     static func open(_ item: CaptureItem) {
         // A GIF would be flattened to its first frame and saved as PNG bytes over the animation.
         guard item.kind == .image else { return }
-        if let existing = windows[item.id] {
-            existing.bringToFront()
-            return
-        }
+        if WindowPresenter.shared.focus(windowID(for: item)) { return }
         guard let source = ImageSource.load(url: item.url) else {
             let alert = NSAlert()
             alert.messageText = "Screenme could not open this image."
@@ -23,8 +23,7 @@ enum AnnotationEditor {
             return
         }
         let controller = EditorController(item: item, source: source)
-        let editor = EditorWindow(controller: controller) { windows[item.id] = nil }
-        windows[item.id] = editor
+        editors[item.id] = EditorWindow(controller: controller) { editors[item.id] = nil }
     }
 }
 
@@ -51,11 +50,10 @@ private final class EditorWindow: NSObject, NSWindowDelegate, NSToolbarDelegate 
         let size = CGSize(width: min(max(imageSize.width + 140, 1020), visible.width * 0.92),
                           height: min(max(imageSize.height + 52 + 140, 640), visible.height * 0.9))
 
-        window = WindowPresenter.shared.show("editor-\(controller.item.id.uuidString)",
+        window = WindowPresenter.shared.show(AnnotationEditor.windowID(for: controller.item),
                                              title: controller.item.url.lastPathComponent,
                                              size: size,
-                                             style: [.titled, .closable, .miniaturizable, .resizable],
-                                             transparentTitlebar: false) {
+                                             style: [.titled, .closable, .miniaturizable, .resizable]) {
             EditorRootView(c: controller)
         }
         super.init()
@@ -86,11 +84,6 @@ private final class EditorWindow: NSObject, NSWindowDelegate, NSToolbarDelegate 
         changes = controller.objectWillChange.sink { [weak self] _ in
             DispatchQueue.main.async { self?.syncEditedDot() }
         }
-    }
-
-    func bringToFront() {
-        FocusKeeper.activateSelf()
-        window.makeKeyAndOrderFront(nil)
     }
 
     private func syncEditedDot() {

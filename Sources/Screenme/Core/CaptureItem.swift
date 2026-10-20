@@ -17,3 +17,8 @@ struct CaptureItem: Identifiable, Hashable {
         self.date = date
     }
 }
+
+extension Notification.Name {
+    /// A capture file changed on disk (the editor saved over it). `object` is the file URL.
+    static let captureUpdated = Notification.Name("ScreenmeCaptureUpdated")
+}
