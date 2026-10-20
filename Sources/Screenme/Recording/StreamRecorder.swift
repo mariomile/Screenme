@@ -33,7 +33,10 @@ struct CaptureSetup {
             guard let display = content.displays.first(where: { $0.displayID == screen.displayID }) else {
                 throw ScreenmeError.displayNotFound
             }
-            filter = SCContentFilter(display: display, excludingApplications: ownApps, exceptingWindows: included)
+            // Desktop icon covers belong to Screenme but must be filmed, or hidden icons show up in the video.
+            let coverIDs = Set(DesktopIcons.coverWindowIDs)
+            let covers = content.windows.filter { coverIDs.contains($0.windowID) }
+            filter = SCContentFilter(display: display, excludingApplications: ownApps, exceptingWindows: included + covers)
             scale = settings.format == .gif ? 1 : screen.backingScaleFactor
             size = screen.frame.size
             if case .area(let rect, _) = target {
