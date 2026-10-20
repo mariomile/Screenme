@@ -19,9 +19,9 @@ final class CanvasView: NSView, NSTextViewDelegate {
     private enum Gesture {
         case none
         case pan(startPan: CGPoint, start: CGPoint)
-        case create(id: UUID, start: CGPoint)
-        case move(last: CGPoint)
-        case resize(id: UUID, handle: Handle, original: Annotation)
+        case create(EditorController.Checkpoint, id: UUID, start: CGPoint)
+        case move(EditorController.Checkpoint, last: CGPoint)
+        case resize(EditorController.Checkpoint, id: UUID, handle: Handle, original: Annotation)
         case marquee(start: CGPoint, additive: Bool, base: Set<UUID>)
         case crop(CropInteraction)
     }
@@ -30,6 +30,9 @@ final class CanvasView: NSView, NSTextViewDelegate {
 
     private var textView: NSTextView?
     private var editingID: UUID?
+    /// The document before the inline edit began, including before a new label was added.
+    private var textCheckpoint: EditorController.Checkpoint?
+    var isEditingText: Bool { textView != nil }
 
     private var unit: CGFloat { controller.unit }
     private var minZoom: CGFloat { 0.04 / unit }
@@ -295,8 +298,7 @@ final class CanvasView: NSView, NSTextViewDelegate {
         }
 
         if let (a, handle) = handleHit(at: vp) {
-            controller.beginChange()
-            gesture = .resize(id: a.id, handle: handle, original: a)
+            gesture = .resize(controller.checkpoint(), id: a.id, handle: handle, original: a)
             return
         }
 
@@ -317,8 +319,7 @@ final class CanvasView: NSView, NSTextViewDelegate {
                 } else if !controller.selection.contains(hit.id) {
                     controller.select([hit.id])
                 }
-                controller.beginChange()
-                gesture = .move(last: dp)
+                gesture = .move(controller.checkpoint(), last: dp)
             } else {
                 if !shift { controller.select([]) }
                 gesture = .marquee(start: dp, additive: shift, base: controller.selection)
@@ -332,8 +333,7 @@ final class CanvasView: NSView, NSTextViewDelegate {
             }
         case .draw(let kind):
             if let hit, controller.selection.contains(hit.id) {
-                controller.beginChange()
-                gesture = .move(last: dp)
+                gesture = .move(controller.checkpoint(), last: dp)
             } else {
                 startCreate(kind, at: dp)
             }
@@ -357,27 +357,23 @@ final class CanvasView: NSView, NSTextViewDelegate {
             updateTextViewFrame()
             needsDisplay = true
 
-        case .create(let id, let start):
-            guard let i = index(of: id) else { return }
-            var a = controller.state.annotations[i]
-            a.dragOut(from: start, to: dp, constrain: shift, minStep: 1.5 / zoom)
-            controller.state.annotations[i] = a
+        case .create(_, let id, let start):
+            let minStep = 1.5 / zoom
+            modify(id) { $0.dragOut(from: start, to: dp, constrain: shift, minStep: minStep) }
 
-        case .move(let last):
+        case .move(let before, let last):
             let dx = dp.x - last.x, dy = dp.y - last.y
             let ids = controller.selection
-            var s = controller.state
-            for i in s.annotations.indices where ids.contains(s.annotations[i].id) {
-                s.annotations[i].translate(dx: dx, dy: dy)
+            controller.update { s in
+                for i in s.annotations.indices where ids.contains(s.annotations[i].id) {
+                    s.annotations[i].translate(dx: dx, dy: dy)
+                }
             }
-            controller.state = s
-            gesture = .move(last: dp)
+            gesture = .move(before, last: dp)
 
-        case .resize(let id, let handle, let original):
-            guard let i = index(of: id) else { return }
-            var a = controller.state.annotations[i]
-            a.apply(handle: handle, to: dp, original: original, unit: unit, constrain: shift)
-            controller.state.annotations[i] = a
+        case .resize(_, let id, let handle, let original):
+            let unit = unit
+            modify(id) { $0.apply(handle: handle, to: dp, original: original, unit: unit, constrain: shift) }
 
         case .marquee(let start, let additive, let base):
             let r = CGRect(x: min(start.x, dp.x), y: min(start.y, dp.y), width: abs(dp.x - start.x), height: abs(dp.y - start.y))
@@ -395,10 +391,10 @@ final class CanvasView: NSView, NSTextViewDelegate {
         let finished = gesture
         gesture = .none
         switch finished {
-        case .create(let id, _):
-            finishCreate(id: id)
-        case .move, .resize:
-            controller.endChange()
+        case .create(let before, let id, _):
+            finishCreate(id: id, since: before)
+        case .move(let before, _), .resize(let before, _, _, _):
+            controller.commit(since: before)
         case .marquee:
             marquee = nil
             needsDisplay = true
@@ -413,19 +409,25 @@ final class CanvasView: NSView, NSTextViewDelegate {
 
     private func startCreate(_ kind: ToolKind, at p: CGPoint) {
         let a = Annotation(kind: kind, style: controller.styles[kind] ?? kind.traits.style, at: p)
-        controller.beginChange()
-        controller.state.annotations.append(a)
-        gesture = .create(id: a.id, start: p)
+        let before = controller.checkpoint()
+        controller.update { $0.annotations.append(a) }
+        gesture = .create(before, id: a.id, start: p)
     }
 
-    private func finishCreate(id: UUID) {
-        guard let a = annotation(withID: id) else { controller.endChange(); return }
-        if a.isTooSmall(minLength: 5 / zoom) {
-            controller.state.annotations.removeAll { $0.id == id }
-        } else {
+    private func finishCreate(id: UUID, since before: EditorController.Checkpoint) {
+        if let a = annotation(withID: id), a.isTooSmall(minLength: 5 / zoom) {
+            controller.update { $0.annotations.removeAll { $0.id == id } }
+        } else if annotation(withID: id) != nil {
             controller.select([id])
         }
-        controller.endChange()
+        controller.commit(since: before)
+    }
+
+    /// Changes one annotation through the controller, if it still exists.
+    private func modify(_ id: UUID, _ change: (inout Annotation) -> Void) {
+        controller.update { s in
+            if let i = s.annotations.firstIndex(where: { $0.id == id }) { change(&s.annotations[i]) }
+        }
     }
 
     // MARK: Cursor
@@ -505,16 +507,17 @@ final class CanvasView: NSView, NSTextViewDelegate {
     private func createText(at p: CGPoint) {
         let style = controller.styles[.text] ?? ToolKind.text.traits.style
         let a = Annotation(kind: .text, style: style, at: TextLayout.origin(clickedAt: p, style: style, unit: unit))
-        controller.beginChange()
-        controller.state.annotations.append(a)
+        let before = controller.checkpoint()
+        controller.update { $0.annotations.append(a) }
         controller.select([a.id])
-        beginTextEditing(a.id, alreadyBegan: true)
+        beginTextEditing(a.id, since: before)
     }
 
-    func beginTextEditing(_ id: UUID, alreadyBegan: Bool = false) {
+    /// `before` is the document before the edit; a new label passes the one from before it was added.
+    func beginTextEditing(_ id: UUID, since before: EditorController.Checkpoint? = nil) {
         finishTextEditing()
         guard let a = annotation(withID: id), case .label(_, let text) = a.shape else { return }
-        if !alreadyBegan { controller.beginChange() }
+        textCheckpoint = before ?? controller.checkpoint()
         let tv = NSTextView(frame: .zero)
         tv.drawsBackground = false
         tv.isRichText = false
@@ -533,7 +536,6 @@ final class CanvasView: NSView, NSTextViewDelegate {
         tv.delegate = self
         textView = tv
         editingID = id
-        controller.isEditingText = true
         addSubview(tv)
         updateTextViewFrame()
         window?.makeFirstResponder(tv)
@@ -542,22 +544,20 @@ final class CanvasView: NSView, NSTextViewDelegate {
     }
 
     func finishTextEditing() {
-        guard let tv = textView, let id = editingID else { return }
+        guard let tv = textView, let id = editingID, let before = textCheckpoint else { return }
         textView = nil
         editingID = nil
-        controller.isEditingText = false
+        textCheckpoint = nil
         tv.delegate = nil
         let text = tv.string
         let wasFirstResponder = window?.firstResponder === tv
         tv.removeFromSuperview()
-        if let i = index(of: id), case .label(let origin, _) = controller.state.annotations[i].shape {
-            controller.state.annotations[i].shape = .label(origin: origin, text: text)
-            if controller.state.annotations[i].isTooSmall(minLength: 0) {
-                controller.state.annotations.remove(at: i)
-                controller.select(controller.selection.subtracting([id]))
-            }
+        setText(text, of: id)
+        if let a = annotation(withID: id), a.isTooSmall(minLength: 0) {
+            controller.update { $0.annotations.removeAll { $0.id == id } }
+            controller.select(controller.selection.subtracting([id]))
         }
-        controller.endChange()
+        controller.commit(since: before)
         if wasFirstResponder { window?.makeFirstResponder(self) }
         needsDisplay = true
     }
@@ -574,9 +574,14 @@ final class CanvasView: NSView, NSTextViewDelegate {
     }
 
     func textDidChange(_ notification: Notification) {
-        guard let tv = textView, let id = editingID, let i = index(of: id),
-              case .label(let origin, _) = controller.state.annotations[i].shape else { return }
-        controller.state.annotations[i].shape = .label(origin: origin, text: tv.string)
+        guard let tv = textView, let id = editingID else { return }
+        setText(tv.string, of: id)
+    }
+
+    private func setText(_ text: String, of id: UUID) {
+        modify(id) { a in
+            if case .label(let origin, _) = a.shape { a.shape = .label(origin: origin, text: text) }
+        }
     }
 
     func textDidEndEditing(_ notification: Notification) {

@@ -15,14 +15,19 @@ final class EditorController: ObservableObject {
     let source: ImageSource
     var unit: CGFloat { source.unit }
 
-    /// The document. Mutating it redraws the canvas; SwiftUI is told separately with `notify()`.
-    var state: EditState {
-        didSet { canvas?.documentChanged() }
+    /// The document. It changes only through `update` and `perform` (and undo), so every change
+    /// redraws the canvas and tells SwiftUI here.
+    private(set) var state: EditState {
+        didSet {
+            canvas?.documentChanged()
+            notify()
+        }
     }
     private(set) var savedState: EditState
-    private var undoStack: [EditState] = []
+    private var undoStack: [UndoStep] = []
     private var redoStack: [EditState] = []
-    private var pendingSnapshot: EditState?
+    /// Counts committed undo steps, so an interaction knows which steps came after it began.
+    private var stepCount = 0
     private var annotationClipboard: [Annotation] = []
 
     @Published private(set) var mode = Mode.select
@@ -31,7 +36,6 @@ final class EditorController: ObservableObject {
     @Published var zoomPercent = 100
     @Published var sheet: EditorSheet?
     @Published var presets: [BackgroundPreset]
-    @Published var isEditingText = false
 
     weak var canvas: CanvasView?
     weak var window: NSWindow?
@@ -72,45 +76,66 @@ final class EditorController: ObservableObject {
 
     // MARK: Undo
 
-    func beginChange() {
-        if pendingSnapshot == nil { pendingSnapshot = state }
+    /// The document as an interaction found it. A drag, a slider or an inline text edit takes one when it
+    /// starts, changes the document with `update`, and ends with `commit(since:)`.
+    struct Checkpoint {
+        fileprivate let state: EditState
+        fileprivate let stepCount: Int
     }
 
-    func endChange() {
-        guard let snapshot = pendingSnapshot else { return }
-        pendingSnapshot = nil
-        if snapshot != state {
-            undoStack.append(snapshot)
-            if undoStack.count > 300 { undoStack.removeFirst() }
-            redoStack.removeAll()
-        }
-        notify()
+    private struct UndoStep {
+        let before: EditState
+        let number: Int
+        /// Steps in a row with the same key are one continuous edit (a color panel drag).
+        let coalesce: String?
     }
 
-    func perform(_ change: (inout EditState) -> Void) {
-        beginChange()
+    func checkpoint() -> Checkpoint { Checkpoint(state: state, stepCount: stepCount) }
+
+    /// Changes the document without an undo step of its own: the interaction around it commits.
+    func update(_ change: (inout EditState) -> Void) {
         change(&state)
-        endChange()
+    }
+
+    /// Makes everything since `before` one undo step. Steps committed in the meantime (a weight picked
+    /// while typing) fold into it. A commit with the same `coalesce` key as the step just before it merges
+    /// into that step.
+    func commit(since before: Checkpoint, coalesce key: String? = nil) {
+        defer { notify() }
+        guard state != before.state else { return }
+        undoStack.removeAll { $0.number > before.stepCount }
+        if let key, let last = undoStack.last, last.coalesce == key, last.number == stepCount { return }
+        push(before.state, coalesce: key)
+        redoStack.removeAll()
+    }
+
+    /// A one-shot edit: one undo step.
+    func perform(_ change: (inout EditState) -> Void) {
+        let before = checkpoint()
+        update(change)
+        commit(since: before)
+    }
+
+    private func push(_ before: EditState, coalesce key: String?) {
+        stepCount += 1
+        undoStack.append(UndoStep(before: before, number: stepCount, coalesce: key))
+        if undoStack.count > 300 { undoStack.removeFirst() }
     }
 
     func undo() {
         canvas?.finishTextEditing()
-        endChange()
-        guard let previous = undoStack.popLast() else { return }
+        guard let step = undoStack.popLast() else { return }
         redoStack.append(state)
-        state = previous
+        state = step.before
         pruneSelection()
-        notify()
     }
 
     func redo() {
         canvas?.finishTextEditing()
-        endChange()
         guard let next = redoStack.popLast() else { return }
-        undoStack.append(state)
+        push(state, coalesce: nil)
         state = next
         pruneSelection()
-        notify()
     }
 
     private func pruneSelection() {
@@ -157,35 +182,42 @@ final class EditorController: ObservableObject {
         return selectedAnnotations.first?.style ?? styles[kind]
     }
 
-    /// Applies a style change to the selection (undoably) and remembers it as the tool's style.
-    /// Pass `live: true` for slider drags: the caller brackets them with `beginChange()` and `endChange()`.
-    func updateStyle(live: Bool = false, _ change: (inout ToolStyle) -> Void) {
+    /// Applies a style change to the selection and remembers it as the kind's style, without an undo step:
+    /// for slider drags, which commit when they end.
+    func applyStyle(_ change: (inout ToolStyle) -> Void) {
         guard let kind = contextKind else { return }
         let ids = selection
-        if !live { beginChange() }
         var remembered = contextStyle ?? kind.traits.style
         change(&remembered)
         styles[kind] = remembered
         EditorStore.save(style: remembered, for: kind)
-        if !ids.isEmpty {
-            var s = state
+        guard !ids.isEmpty else { return }
+        update { s in
             for i in s.annotations.indices where ids.contains(s.annotations[i].id) {
                 change(&s.annotations[i].style)
             }
-            state = s
         }
-        if !live { endChange() }
-        notify()
     }
 
-    /// Sets the document's spotlight dim and remembers it for the next document.
-    /// Pass `live: true` for slider drags: the caller brackets them with `beginChange()` and `endChange()`.
-    func setSpotlightDim(_ dim: Double, live: Bool = false) {
-        if !live { beginChange() }
-        state.spotlightDim = dim
+    /// A style change as one undo step.
+    func updateStyle(_ change: (inout ToolStyle) -> Void) {
+        let before = checkpoint()
+        applyStyle(change)
+        commit(since: before)
+    }
+
+    /// The custom color well. The color panel sends a stream of colors while the user drags in it:
+    /// they make one undo step as long as nothing else happens in between.
+    func setColor(_ color: RGBA) {
+        let before = checkpoint()
+        applyStyle { $0.color = color }
+        commit(since: before, coalesce: "color " + selection.map(\.uuidString).sorted().joined())
+    }
+
+    /// Sets the document's spotlight dim and remembers it for the next document, without an undo step.
+    func applySpotlightDim(_ dim: Double) {
+        update { $0.spotlightDim = dim }
         Prefs[Pref.editorSpotlightDim] = dim
-        if !live { endChange() }
-        notify()
     }
 
     func select(_ ids: Set<UUID>) {
@@ -351,38 +383,24 @@ final class EditorController: ObservableObject {
         updateBackground { $0.enabled.toggle() }
     }
 
-    private var colorSettleTask: Task<Void, Never>?
-
-    /// A color picker drags continuously: group the drag into one undo step that closes when it goes quiet.
-    private func settleLater() {
-        colorSettleTask?.cancel()
-        colorSettleTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(600))
-            guard !Task.isCancelled else { return }
-            self?.endChange()
-        }
+    /// Changes the background and remembers it for the next document, without an undo step.
+    func applyBackground(_ change: (inout BackgroundSettings) -> Void) {
+        update { change(&$0.background) }
+        EditorStore.save(background: state.background)
     }
 
-    func setColorLive(_ color: RGBA) {
-        beginChange()
-        updateStyle(live: true) { $0.color = color }
-        settleLater()
+    /// A background change as one undo step.
+    func updateBackground(_ change: (inout BackgroundSettings) -> Void) {
+        let before = checkpoint()
+        applyBackground(change)
+        commit(since: before)
     }
 
-    func setBackgroundColorLive(_ color: RGBA) {
-        beginChange()
-        updateBackground(live: true) { $0.fill = .solid(color) }
-        settleLater()
-    }
-
-    func updateBackground(live: Bool = false, _ change: (inout BackgroundSettings) -> Void) {
-        if !live { beginChange() }
-        var s = state
-        change(&s.background)
-        state = s
-        EditorStore.save(background: s.background)
-        if !live { endChange() }
-        notify()
+    /// The custom background color well: one undo step per color panel drag, like `setColor`.
+    func setBackgroundColor(_ color: RGBA) {
+        let before = checkpoint()
+        applyBackground { $0.fill = .solid(color) }
+        commit(since: before, coalesce: "background color")
     }
 
     func savePreset(named name: String) {
@@ -548,7 +566,7 @@ final class EditorController: ObservableObject {
         let key = event.charactersIgnoringModifiers?.lowercased() ?? ""
         let inTextField = window?.firstResponder is NSText
 
-        if isEditingText {
+        if canvas?.isEditingText == true {
             if event.keyCode == 53 || (mods == .command && (event.keyCode == 36 || event.keyCode == 76)) {
                 canvas?.finishTextEditing()
                 return true

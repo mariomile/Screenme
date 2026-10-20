@@ -165,6 +165,34 @@ struct ToolbarTrailing: View {
     }
 }
 
+/// A slider whose whole drag is one undo step. `apply` changes the document without committing.
+struct EditSlider: View {
+    @ObservedObject var c: EditorController
+    let value: Double
+    let range: ClosedRange<Double>
+    let apply: (Double) -> Void
+    @State private var before: EditorController.Checkpoint?
+
+    var body: some View {
+        Slider(value: Binding(get: { value }, set: change), in: range) { editing in
+            if editing {
+                before = c.checkpoint()
+            } else if let before {
+                self.before = nil
+                c.commit(since: before)
+            }
+        }
+    }
+
+    /// A change outside a drag (the keyboard, a click on the track) is a step of its own.
+    private func change(_ newValue: Double) {
+        guard before == nil else { return apply(newValue) }
+        let start = c.checkpoint()
+        apply(newValue)
+        c.commit(since: start)
+    }
+}
+
 struct IconButton: View {
     let symbol: String
     let help: String
@@ -354,11 +382,8 @@ private struct StyleControls: View {
     }
 
     private func slider(_ keyPath: WritableKeyPath<ToolStyle, Double>, in range: ClosedRange<Double>) -> some View {
-        Slider(value: Binding(get: { style[keyPath: keyPath] }, set: { value in c.updateStyle(live: true) { $0[keyPath: keyPath] = value } }),
-               in: range) { editing in
-            if editing { c.beginChange() } else { c.endChange() }
-        }
-        .frame(width: 120)
+        EditSlider(c: c, value: style[keyPath: keyPath], range: range) { value in c.applyStyle { $0[keyPath: keyPath] = value } }
+            .frame(width: 120)
     }
 
     private func caption(_ text: String) -> some View {
@@ -445,10 +470,8 @@ private struct StyleControls: View {
         case .dim:
             HStack(spacing: 6) {
                 caption("Dim")
-                Slider(value: Binding(get: { c.state.spotlightDim }, set: { c.setSpotlightDim($0, live: true) }), in: 0.15...0.95) { editing in
-                    if editing { c.beginChange() } else { c.endChange() }
-                }
-                .frame(width: 120)
+                EditSlider(c: c, value: c.state.spotlightDim, range: 0.15...0.95) { c.applySpotlightDim($0) }
+                    .frame(width: 120)
             }
         }
     }
@@ -504,7 +527,7 @@ private struct ColorSwatches: View {
             }
             ColorPicker("Custom color", selection: Binding(
                 get: { selected.color },
-                set: { new in c.setColorLive(RGBA(NSColor(new)).with(alpha: 1)) }
+                set: { new in c.setColor(RGBA(NSColor(new)).with(alpha: 1)) }
             ), supportsOpacity: false)
             .labelsHidden()
             .help("Custom color")
