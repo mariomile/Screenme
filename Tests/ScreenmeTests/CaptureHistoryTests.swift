@@ -74,4 +74,28 @@ final class CaptureHistoryTests: PrefsSandboxTestCase {
         XCTAssertEqual(history.items.map(\.url), [old])
         XCTAssertTrue(FileManager.default.fileExists(atPath: old.path))
     }
+
+    @MainActor func testTrashAndPruneRemoveTheSavedAnnotations() throws {
+        Prefs[Pref.historyDays] = 30
+        let now = Date()
+        let trashed = try file("trashed.png", in: captures)
+        let expired = try file("expired.png", in: captures)
+        for url in [trashed, expired] {
+            try EditSidecar.keepOriginal(of: url)
+            try EditSidecar.write(EditState(cropRect: CGRect(x: 0, y: 0, width: 1, height: 1)), for: url)
+            XCTAssertNotNil(EditSidecar.load(for: url))
+        }
+        let history = history()
+        let item = CaptureItem(url: trashed, kind: .image, date: now)
+        history.add(item)
+        history.add(CaptureItem(url: expired, kind: .image, date: now.addingTimeInterval(-31 * 86_400)))
+
+        history.trash(item)
+        history.prune(now: now)
+
+        for url in [trashed, expired] {
+            XCTAssertFalse(FileManager.default.fileExists(atPath: EditSidecar.folder(for: url).path), url.lastPathComponent)
+        }
+        XCTAssertTrue(history.items.isEmpty)
+    }
 }

@@ -62,9 +62,10 @@ final class CaptureHistory: ObservableObject {
         save()
     }
 
-    /// Moves the file to the Trash and removes the entry.
+    /// Moves the file to the Trash and removes the entry. Its saved annotations (`EditSidecar`) go with it.
     func trash(_ item: CaptureItem) {
         try? FileManager.default.trashItem(at: item.url, resultingItemURL: nil)
+        EditSidecar.remove(for: item.url)
         remove(item)
     }
 
@@ -77,7 +78,10 @@ final class CaptureHistory: ObservableObject {
         var kept: [CaptureItem] = []
         for item in items {
             if let cutoff, item.date < cutoff {
-                if isOwnCapture(item.url) { try? FileManager.default.trashItem(at: item.url, resultingItemURL: nil) }
+                if isOwnCapture(item.url) {
+                    try? FileManager.default.trashItem(at: item.url, resultingItemURL: nil)
+                    EditSidecar.remove(for: item.url)
+                }
                 continue
             }
             if FileManager.default.fileExists(atPath: item.url.path) { kept.append(item) }

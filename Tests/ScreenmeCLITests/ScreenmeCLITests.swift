@@ -67,6 +67,10 @@ final class CaptureFolderTests: XCTestCase {
         FileManager.default.createFile(atPath: folder.url.appendingPathComponent(".DS_Store").path, contents: Data([1]))
         // The events of a recording, kept next to it by the app.
         FileManager.default.createFile(atPath: folder.url.appendingPathComponent(".b.mp4.events.json").path, contents: Data("{}".utf8))
+        // A capture's saved annotations, a hidden folder the app keeps next to it.
+        let edits = folder.url.appendingPathComponent(".b.png.screenme-edit", isDirectory: true)
+        try FileManager.default.createDirectory(at: edits, withIntermediateDirectories: true)
+        try writePNG(".b.png.screenme-edit/original.png", modified: now.addingTimeInterval(60))
 
         XCTAssertEqual(folder.captures().map(\.url.lastPathComponent), ["b.png", "c.png", "a.png"])
         XCTAssertEqual(folder.latest?.url.lastPathComponent, newest.lastPathComponent)
