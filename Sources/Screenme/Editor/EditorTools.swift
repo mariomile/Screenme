@@ -139,7 +139,7 @@ enum ToolChoice: Hashable, Identifiable {
         }
     }
 
-    var tooltip: String { "\(title) (\(key.uppercased()))" }
+    var tooltip: String { "\(title) (\(key.uppercased()))\n\(help)" }
 }
 
 // MARK: - Style

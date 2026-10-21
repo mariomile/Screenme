@@ -70,7 +70,7 @@ final class RecordingControlBar {
                     .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
-                .help("Stop recording")
+                .help("Stop\nEnds the recording and opens it in Quick Access.")
 
                 TimelineView(.periodic(from: .now, by: 0.1)) { context in
                     Text(Duration.format(clock.elapsed(at: context.date), tenths: true))
@@ -84,9 +84,9 @@ final class RecordingControlBar {
                 PulseDot(paused: clock.isPaused)
                     .padding(.trailing, 6)
 
-                BarButton(symbol: clock.isPaused ? "play.fill" : "pause.fill", help: clock.isPaused ? "Resume" : "Pause", action: togglePause)
-                BarButton(symbol: "arrow.counterclockwise", help: "Restart recording", action: restart)
-                BarButton(symbol: "trash", help: "Discard recording", action: discard)
+                BarButton(symbol: clock.isPaused ? "play.fill" : "pause.fill", help: clock.isPaused ? "Resume\nContinues the same recording." : "Pause\nStops recording for a moment; the paused time is left out of the video.", action: togglePause)
+                BarButton(symbol: "arrow.counterclockwise", help: "Restart\nThrows away what you recorded so far and starts again, without a countdown.", action: restart)
+                BarButton(symbol: "trash", help: "Discard\nStops and deletes the recording.", action: discard)
             }
             .padding(6)
             .background(VisualEffectBackground().clipShape(Capsule()))

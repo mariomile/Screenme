@@ -178,6 +178,7 @@ private final class PinWindowController: NSObject {
         for (action, key) in [(CaptureAction.copy, "c"), (.copyMarkdown, ""), (.copyPath, ""), (.save, "s"), (.edit, "")] where action.isAvailable(for: item.kind) {
             let entry = entry(action.title(for: item.kind), #selector(captureAction(_:)), key: key)
             entry.representedObject = CaptureAction.allCases.firstIndex(of: action)
+            entry.toolTip = action.help(for: item.kind)
             menu.addItem(entry)
         }
         menu.addItem(Share.menuItem(for: item.url))
@@ -299,7 +300,7 @@ private final class PinContentView: NSView {
         closeButton.frame = CGRect(x: 8, y: frame.height - 30, width: 22, height: 22)
         closeButton.autoresizingMask = [.maxXMargin, .minYMargin]
         closeButton.alphaValue = 0
-        closeButton.toolTip = "Close"
+        closeButton.toolTip = "Close\nRemoves this pin from the screen. The capture stays in History."
         addSubview(closeButton)
 
         labelBackground.wantsLayer = true

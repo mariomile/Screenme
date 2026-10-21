@@ -136,7 +136,7 @@ private struct HistoryGridView: View {
                 Button("Stacked") { ImageCombiner.combineAndEdit(images, layout: .stacked) }
             }
             .fixedSize()
-            .help("Join the selected screenshots into one image")
+            .help("Combine\nJoins the selected screenshots into one image, side by side or stacked, and opens it in the editor. ⌘-click to select more than one.")
         }
     }
 
@@ -307,9 +307,9 @@ private struct HistoryGridCell: View {
             LinearGradient(colors: [.clear, .black.opacity(0.55)], startPoint: .center, endPoint: .bottom)
             HStack(spacing: 7) {
                 ForEach([CaptureAction.copy, .save, .pin, .edit, .trash].filter { $0.isAvailable(for: item.kind) }, id: \.self) { action in
-                    HistoryActionButton(symbol: action.symbol(for: item.kind), help: action.title(for: item.kind)) { perform(action) }
+                    HistoryActionButton(symbol: action.symbol(for: item.kind), help: action.tooltip(for: item.kind)) { perform(action) }
                 }
-                HistoryActionButton(symbol: "square.and.arrow.up", help: "Share") { Share.show(item.url) }
+                HistoryActionButton(symbol: "square.and.arrow.up", help: "Share\nSends it with AirDrop, Messages, Mail and more.") { Share.show(item.url) }
             }
             .padding(.bottom, 9)
         }

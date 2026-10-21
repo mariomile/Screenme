@@ -90,7 +90,7 @@ struct VideoEditorView: View {
                     .background(Circle().fill(.primary.opacity(0.1)))
             }
             .buttonStyle(.plain)
-            .help("Play / Pause (Space)")
+            .help("Play / Pause (Space)\nPlays the part between the trim handles.")
 
             Text("\(Duration.format(model.currentTime, tenths: true))  /  \(Duration.format(model.duration, tenths: true))")
                 .font(.system(size: 12, weight: .medium).monospacedDigit())
@@ -113,6 +113,7 @@ struct VideoEditorView: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .frame(width: 110)
+                .help("Format\nMP4 keeps full quality and sound. GIF loops silently and plays anywhere, even in chats.")
             }
             labeled("Size") {
                 Picker("Size", selection: $model.resolution) {
@@ -120,6 +121,7 @@ struct VideoEditorView: View {
                 }
                 .labelsHidden()
                 .frame(width: 100)
+                .help("Size\nSmaller sizes make lighter files, good for chats and email.")
             }
             labeled("Quality") {
                 Picker("Quality", selection: $model.quality) {
@@ -127,6 +129,7 @@ struct VideoEditorView: View {
                 }
                 .labelsHidden()
                 .frame(width: 90)
+                .help("Quality\nHigher looks sharper; lower makes a lighter file.")
             }
             if model.format == .gif {
                 labeled("Frame rate") {
@@ -135,6 +138,7 @@ struct VideoEditorView: View {
                     }
                     .labelsHidden()
                     .frame(width: 90)
+                    .help("Frame rate\nMore frames move more smoothly; fewer make a lighter GIF.")
                 }
             }
             if model.hasAudio && model.format == .mp4 {
@@ -143,6 +147,7 @@ struct VideoEditorView: View {
                         Label(model.mute ? "Muted" : "Sound", systemImage: model.mute ? "speaker.slash.fill" : "speaker.wave.2.fill")
                     }
                     .toggleStyle(.button)
+                    .help("Audio\nKeeps or removes the sound in the exported video.")
                 }
             }
             Spacer()
@@ -160,9 +165,13 @@ struct VideoEditorView: View {
         HStack(spacing: 10) {
             Spacer()
             Button(CaptureAction.copy.title(for: model.item.kind)) { model.perform(.copy) }
+                .help("Copy\nExports with these settings and puts the file on the clipboard.")
             Button(CaptureAction.save.title(for: model.item.kind)) { model.perform(.save) }
+                .help("Save\nExports with these settings into your save folder (Settings > General).")
             Button(CaptureAction.saveAs.title(for: model.item.kind)) { model.perform(.saveAs) }
+                .help("Save As\nExports with these settings where you choose.")
             Button("Done") { model.perform(.done) }
+                .help("Done (Return)\nExports your trim and settings as a new capture in Quick Access and History, then closes.")
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
         }

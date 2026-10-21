@@ -85,7 +85,7 @@ struct QuickAccessCardView: View {
 
             VStack {
                 HStack {
-                    HUDCircle(symbol: "xmark", label: "Close") { card?.dismiss() }
+                    HUDCircle(symbol: "xmark", label: "Close", help: "Close\nHides this card. The capture stays in History.") { card?.dismiss() }
                     Spacer()
                     circle(.pin)
                 }
@@ -93,7 +93,8 @@ struct QuickAccessCardView: View {
                 HStack {
                     circle(.edit)
                     Spacer()
-                    HUDCircle(symbol: "square.and.arrow.up", label: "Share") { Share.show(model.item.url) }
+                    HUDCircle(symbol: "square.and.arrow.up", label: "Share",
+                              help: "Share\nSends it with AirDrop, Messages, Mail and more.") { Share.show(model.item.url) }
                 }
             }
             .padding(8)
@@ -102,13 +103,15 @@ struct QuickAccessCardView: View {
     }
 
     private func pill(_ action: CaptureAction) -> some View {
-        HUDPill(title: action.title(for: model.item.kind), symbol: action.symbol(for: model.item.kind)) { card?.perform(action) }
+        HUDPill(title: action.title(for: model.item.kind), symbol: action.symbol(for: model.item.kind),
+                help: action.tooltip(for: model.item.kind)) { card?.perform(action) }
     }
 
     @ViewBuilder
     private func circle(_ action: CaptureAction) -> some View {
         if action.isAvailable(for: model.item.kind) {
-            HUDCircle(symbol: action.symbol(for: model.item.kind), label: action.title(for: model.item.kind)) { card?.perform(action) }
+            HUDCircle(symbol: action.symbol(for: model.item.kind), label: action.title(for: model.item.kind),
+                      help: action.tooltip(for: model.item.kind)) { card?.perform(action) }
         }
     }
 }
@@ -116,6 +119,7 @@ struct QuickAccessCardView: View {
 private struct HUDPill: View {
     let title: String
     let symbol: String
+    let help: String
     let action: () -> Void
 
     var body: some View {
@@ -128,12 +132,14 @@ private struct HUDPill: View {
                 .shadow(color: .black.opacity(0.25), radius: 3, y: 1)
         }
         .buttonStyle(HUDPressStyle())
+        .help(help)
     }
 }
 
 private struct HUDCircle: View {
     let symbol: String
     let label: String
+    let help: String
     let action: () -> Void
 
     var body: some View {
@@ -146,7 +152,7 @@ private struct HUDCircle: View {
                 .overlay(Circle().strokeBorder(.white.opacity(0.25), lineWidth: 0.5))
         }
         .buttonStyle(HUDPressStyle())
-        .help(label)
+        .help(help)
         .accessibilityLabel(label)
     }
 }

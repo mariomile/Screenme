@@ -107,6 +107,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 item.representedObject = action.rawValue
                 item.target = self
                 item.image = NSImage(systemSymbolName: action.symbol, accessibilityDescription: nil)
+                item.toolTip = action.help
                 if let combo = ShortcutStore.combo(for: action) {
                     item.keyEquivalent = combo.keyEquivalent
                     item.keyEquivalentModifierMask = combo.eventModifiers

@@ -205,7 +205,7 @@ struct ShortcutRow: View {
         HStack(spacing: 12) {
             SymbolTile(symbol: action.symbol, color: .accentColor, size: 28)
             VStack(alignment: .leading, spacing: 2) {
-                Text(action.title).font(.body)
+                Text(action.title).font(.body).help(action.help)
                 if let error = recorder.error {
                     Label(error, systemImage: "xmark.octagon.fill").font(.caption).foregroundStyle(.red)
                 } else {

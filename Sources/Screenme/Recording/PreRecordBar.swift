@@ -174,24 +174,24 @@ private struct PreRecordBar: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            BarButton(symbol: "xmark", help: "Cancel (Esc)", action: cancel)
+            BarButton(symbol: "xmark", help: "Cancel (Esc)\nCloses this bar without recording.", action: cancel)
             divider
             FormatSwitch(format: $model.settings.format)
             divider
             HStack(spacing: 0) {
                 BarButton(symbol: settings.microphone ? "mic.fill" : "mic.slash.fill", active: settings.microphone && audioAvailable,
-                          help: "Microphone: \(settings.microphone ? model.microphoneName : "off")") { model.toggleMicrophone() }
+                          help: "Microphone: \(settings.microphone ? model.microphoneName : "off")\nRecords your voice with the video.") { model.toggleMicrophone() }
                 microphoneMenu
             }
             .opacity(audioAvailable ? 1 : 0.35)
             .disabled(!audioAvailable)
             BarButton(symbol: settings.systemAudio ? "speaker.wave.2.fill" : "speaker.slash.fill", active: settings.systemAudio && audioAvailable,
-                      help: "System audio") { model.settings.systemAudio.toggle() }
+                      help: "System audio: \(settings.systemAudio ? "on" : "off")\nRecords the sound your Mac plays, like a video or a call.") { model.settings.systemAudio.toggle() }
                 .opacity(audioAvailable ? 1 : 0.35)
                 .disabled(!audioAvailable)
             HStack(spacing: 0) {
                 BarButton(symbol: settings.webcam ? "video.fill" : "video.slash.fill", active: settings.webcam,
-                          help: "Camera") { model.toggleWebcam() }
+                          help: "Camera: \(settings.webcam ? "on" : "off")\nShows your face in a bubble you can move and resize; it is part of the video.") { model.toggleWebcam() }
                 cameraMenu
             }
             optionsMenu
@@ -223,7 +223,7 @@ private struct PreRecordBar: View {
         .menuStyle(.button)
         .menuIndicator(.hidden)
         .buttonStyle(.plain)
-        .help("Choose microphone")
+        .help("Choose microphone\nPick which microphone records your voice.")
     }
 
     private var cameraMenu: some View {
@@ -246,7 +246,7 @@ private struct PreRecordBar: View {
         .menuStyle(.button)
         .menuIndicator(.hidden)
         .buttonStyle(.plain)
-        .help("Camera size and device")
+        .help("Camera\nPick the bubble size and which camera to use.")
     }
 
     private var optionsMenu: some View {
@@ -276,7 +276,7 @@ private struct PreRecordBar: View {
         .menuStyle(.button)
         .menuIndicator(.hidden)
         .buttonStyle(.plain)
-        .help("Recording options")
+        .help("Options\nCursor, click highlights, keystrokes, hidden icons and notifications, countdown.")
     }
 }
 
@@ -333,6 +333,6 @@ private struct RecordButton: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .help("Start recording (Return)")
+        .help("Record (Return)\nStarts recording the selected area, after the countdown if one is set.")
     }
 }

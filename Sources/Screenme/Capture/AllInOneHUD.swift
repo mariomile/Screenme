@@ -47,9 +47,7 @@ private struct HUDItem: Identifiable {
             (.recordScreen, "Record", true),
         ]
         return entries.map { action, label, group in
-            var tooltip = action.title
-            if let combo = ShortcutStore.combo(for: action) { tooltip += "  \(combo.display)" }
-            return HUDItem(action: action, label: label, tooltip: tooltip, startsGroup: group)
+            HUDItem(action: action, label: label, tooltip: action.tooltip, startsGroup: group)
         }
     }
 }
