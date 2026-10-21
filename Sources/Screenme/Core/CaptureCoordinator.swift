@@ -1,7 +1,7 @@
 import AppKit
 import ScreenCaptureKit
 
-/// Routes every user action (shortcut, menu, All-in-One, Quick Access) to the module that does it.
+/// Routes every user action (shortcut, menu, `screenme://` link, All-in-One, Quick Access) to the module that does it.
 /// Modules never call each other's selection or capture code directly: they go through here.
 @MainActor
 final class CaptureCoordinator {
@@ -31,7 +31,7 @@ final class CaptureCoordinator {
         case .allInOne:
             // Not over a capture in progress; the shortcut still closes an open bar.
             guard !busy || AllInOneHUD.isOpen else { return }
-            AllInOneHUD.show { [weak self] choice in self?.perform(choice) }
+            AllInOneHUD.show { [weak self] choice, target in self?.perform(choice, target: target) }
             return
         case .pinLastCapture:
             if let lastCapture { PinWindow.pin(lastCapture) }
@@ -46,9 +46,9 @@ final class CaptureCoordinator {
             break
         }
 
-        // A capture shortcut pressed while the All-in-One bar is open picks that capture from the bar.
+        // A capture shortcut or link while the All-in-One bar is open picks that capture from the bar, with the link's target.
         if AllInOneHUD.isOpen {
-            AllInOneHUD.choose(action)
+            AllInOneHUD.choose(action, target: target)
             return
         }
         guard !busy else { return }
@@ -64,15 +64,11 @@ final class CaptureCoordinator {
     }
 
     private func capture(_ action: ShortcutAction, target: ActionLink.Target?) async throws {
-        // Recordings have their own setting; text recognition does not keep a picture;
-        // Pick Color and Measure read the screen as the user sees it.
-        let hidesIcons = Prefs[Pref.hideDesktopIconsInShots] && !DesktopIcons.isHidden
-            && ![.recordScreen, .captureText, .translateText, .pickColor, .measure].contains(action)
-        if hidesIcons {
-            DesktopIcons.setHidden(true)
-            try? await Task.sleep(for: .milliseconds(700))
+        var hidIcons = false
+        if action.writesScreenshot, Prefs[Pref.hideDesktopIconsInShots] {
+            hidIcons = await DesktopIcons.hideForCapture(settle: true)
         }
-        defer { if hidesIcons { DesktopIcons.setHidden(false) } }
+        defer { if hidIcons { DesktopIcons.setHidden(false) } }
 
         switch action {
         case .allInOne, .pinLastCapture, .openHistory, .toggleDesktopIcons:
@@ -101,33 +97,13 @@ final class CaptureCoordinator {
             try await finishScreenshot(SelectionResult(target: result.target, frozenImage: nil))
 
         case .captureText:
-            guard let result = try await select(.text, target) else { return }
-            let image = try await image(for: result)
-            let text = try await TextRecognizer.recognize(image)
-            if text.isEmpty {
-                Toast.show("No text found", symbol: "text.viewfinder")
-            } else {
-                Clipboard.copyText(text)
-                Toast.show("Text copied", symbol: "doc.on.clipboard")
-            }
+            guard let recognized = try await recognizedText(target) else { return }
+            Clipboard.copyText(recognized.text)
+            Toast.show("Text copied", symbol: "doc.on.clipboard")
 
         case .translateText:
-            guard let result = try await select(.text, target) else { return }
-            let text = try await TextRecognizer.recognize(try await image(for: result))
-            guard !text.isEmpty else {
-                Toast.show("No text found", symbol: "text.viewfinder")
-                return
-            }
-            let translation: TextTranslation
-            do {
-                translation = try await TextTranslator.translate(text)
-            } catch TranslateError.sameLanguage(let language) {
-                Clipboard.copyText(text)
-                Toast.show("Already in \(language): text copied", symbol: "doc.on.clipboard")
-                return
-            }
-            Clipboard.copyText(translation.text)
-            TranslationPanel.show(translation, near: result.target.cocoaFrame)
+            guard let recognized = try await recognizedText(target) else { return }
+            try await TranslationPanel.translateAndShow(recognized.text, near: recognized.area)
 
         case .pickColor:
             await ScreenColorPicker.run()
@@ -152,16 +128,29 @@ final class CaptureCoordinator {
         return SelectionResult(target: try await target.captureTarget(), frozenImage: nil)
     }
 
+    /// The text in what the user picks or the link names, and where it was (global Cocoa coordinates).
+    /// Nil when the user cancels or there is no text, which a toast says.
+    private func recognizedText(_ target: ActionLink.Target?) async throws -> (text: String, area: CGRect)? {
+        guard let result = try await select(.text, target) else { return nil }
+        let text = try await TextRecognizer.recognize(try await image(for: result))
+        guard !text.isEmpty else {
+            Toast.show("No text found", symbol: "text.viewfinder")
+            return nil
+        }
+        return (text, result.target.cocoaFrame)
+    }
+
     // MARK: Screenshots
 
     private func finishScreenshot(_ result: SelectionResult) async throws {
         if case .area = result.target { previousArea = result.target }
-        try deliver(try await image(for: result))
+        try deliver(Notch.hidden(in: try await image(for: result), of: result.target))
     }
 
+    /// The frozen picture when the picker had one, otherwise a fresh capture.
     private func image(for result: SelectionResult) async throws -> CGImage {
-        let image = if let frozen = result.frozenImage { frozen } else { try await Capturer.screenshot(result.target) }
-        return Notch.hidden(in: image, of: result.target)
+        if let frozen = result.frozenImage { return frozen }
+        return try await Capturer.screenshot(result.target)
     }
 
     /// Writes an image capture and runs the after-capture actions.

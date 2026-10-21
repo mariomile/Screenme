@@ -7,8 +7,22 @@ import SwiftUI
 enum TranslationPanel {
     private static var current: TranslationPanelController?
 
-    /// Shows `translation` next to `area` (global Cocoa coordinates), where the text was.
-    static func show(_ translation: TextTranslation, near area: CGRect) {
+    /// Translates `text`, copies the translation and shows it next to `area` (global Cocoa coordinates),
+    /// where the text was. Text already in the target language is copied as it is, with a toast.
+    static func translateAndShow(_ text: String, near area: CGRect) async throws {
+        let translation: TextTranslation
+        do {
+            translation = try await TextTranslator.translate(text)
+        } catch TranslateError.sameLanguage(let language) {
+            Clipboard.copyText(text)
+            Toast.show("Already in \(language): text copied", symbol: "doc.on.clipboard")
+            return
+        }
+        Clipboard.copyText(translation.text)
+        show(translation, near: area)
+    }
+
+    private static func show(_ translation: TextTranslation, near area: CGRect) {
         current?.close()
         let controller = TranslationPanelController(translation: translation) { current = nil }
         current = controller

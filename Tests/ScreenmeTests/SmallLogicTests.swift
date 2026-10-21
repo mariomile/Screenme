@@ -66,31 +66,51 @@ final class EditorGeometryTests: XCTestCase {
 }
 
 final class ActionLinkTests: XCTestCase {
+    private func link(_ string: String) -> ActionLink? { ActionLink(url: URL(string: string)!) }
+
+    /// The action and target of a link that runs an action; nil for anything else.
+    private func perform(_ string: String) -> (action: ShortcutAction, target: ActionLink.Target?)? {
+        guard case .perform(let action, let target) = link(string) else { return nil }
+        return (action, target)
+    }
+
     func testEveryActionRoundTripsThroughItsLink() {
         for action in ShortcutAction.allCases {
-            XCTAssertEqual(ActionLink(url: URL(string: "screenme://\(action.urlName)")!)?.action, action)
+            XCTAssertEqual(perform("screenme://\(action.urlName)")?.action, action)
         }
         XCTAssertEqual(ShortcutAction.captureArea.urlName, "capture-area")
         XCTAssertEqual(ShortcutAction.allInOne.urlName, "all-in-one")
     }
 
     func testAreaAndWindowTargets() throws {
-        let area = try XCTUnwrap(ActionLink(url: URL(string: "screenme://capture-area?x=10&y=20&width=300&height=200")!))
+        let area = try XCTUnwrap(perform("screenme://capture-area?x=10&y=20&width=300&height=200"))
         guard case .area(let rect) = area.target else { return XCTFail("expected an area") }
         XCTAssertEqual(rect, CGRect(x: 10, y: 20, width: 300, height: 200))
 
-        let window = try XCTUnwrap(ActionLink(url: URL(string: "screenme://capture-window?app=com.apple.TextEdit")!))
+        let window = try XCTUnwrap(perform("screenme://capture-window?app=com.apple.TextEdit"))
         guard case .window(let app) = window.target else { return XCTFail("expected a window") }
         XCTAssertEqual(app, "com.apple.TextEdit")
     }
 
-    func testIncompleteOrEmptyAreasAreIgnored() {
-        XCTAssertNil(ActionLink(url: URL(string: "screenme://capture-area?x=10&y=20&width=300")!)?.target)
-        XCTAssertNil(ActionLink(url: URL(string: "screenme://capture-area?x=0&y=0&width=0&height=50")!)?.target)
+    func testIncompleteOrEmptyAreasAreIgnored() throws {
+        let incomplete = try XCTUnwrap(perform("screenme://capture-area?x=10&y=20&width=300"))
+        XCTAssertEqual(incomplete.action, .captureArea)
+        XCTAssertNil(incomplete.target)
+        XCTAssertNil(try XCTUnwrap(perform("screenme://capture-area?x=0&y=0&width=0&height=50")).target)
+    }
+
+    func testSettingsLinksNameAKnownTabOrNone() {
+        guard case .settings(let tab) = link("screenme://settings?tab=recording") else { return XCTFail("expected settings") }
+        XCTAssertEqual(tab, .recording)
+        guard case .settings(let unknown) = link("screenme://settings?tab=bogus") else { return XCTFail("expected settings") }
+        XCTAssertNil(unknown)
+        guard case .settings(let none) = link("screenme://settings") else { return XCTFail("expected settings") }
+        XCTAssertNil(none)
     }
 
     func testUnknownLinksDoNothing() {
-        XCTAssertNil(ActionLink(url: URL(string: "screenme://format-disk")!))
-        XCTAssertNil(ActionLink(url: URL(string: "https://capture-area")!))
+        XCTAssertNil(link("screenme://format-disk"))
+        XCTAssertNil(link("https://capture-area"))
+        XCTAssertNil(link("https://settings"))
     }
 }

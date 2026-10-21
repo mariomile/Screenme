@@ -5,17 +5,14 @@ import SwiftUI
 
 @MainActor
 enum SettingsWindow {
-    static func show() {
+    /// Opens Settings, on `tab` when one is given.
+    static func show(tab: SettingsTab? = nil) {
+        if let tab { Prefs[Pref.settingsTab] = tab }
         let window = WindowPresenter.shared.show("settings", title: "Screenme Settings", size: CGSize(width: 800, height: 580),
                                                  style: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]) {
             SettingsView()
         }
         window.contentMinSize = CGSize(width: 720, height: 480)
-    }
-
-    static func show(tab: SettingsTab) {
-        Prefs[Pref.settingsTab] = tab
-        show()
     }
 }
 
