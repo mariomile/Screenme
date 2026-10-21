@@ -90,13 +90,13 @@ final class RecordingControlBar {
                 PulseDot(paused: clock.isPaused)
                     .padding(.trailing, 6)
 
-                BarButton(symbol: clock.isPaused ? "play.fill" : "pause.fill", help: clock.isPaused ? "Resume\nContinues the same recording." : "Pause\nStops recording for a moment; the paused time is left out of the video.", action: togglePause)
-                BarButton(symbol: "pencil.tip.crop.circle", active: drawing.isOn,
-                          help: drawing.isOn ? "Stop Drawing  ⌥⌘D or Esc\nClicks go to your apps again."
-                                             : "Draw  ⌥⌘D\nDraw on the screen to point things out: pen, arrow, rectangle or highlighter. The drawings are part of the video.",
-                          action: toggleDraw)
-                BarButton(symbol: "arrow.counterclockwise", help: "Restart\nThrows away what you recorded so far and starts again, without a countdown.", action: restart)
-                BarButton(symbol: "trash", help: "Discard\nStops and deletes the recording.", action: discard)
+                SymbolButton(symbol: clock.isPaused ? "play.fill" : "pause.fill", help: clock.isPaused ? "Resume\nContinues the same recording." : "Pause\nStops recording for a moment; the paused time is left out of the video.", style: .bar(), action: togglePause)
+                SymbolButton(symbol: "pencil.tip.crop.circle",
+                             help: drawing.isOn ? "Stop Drawing  ⌥⌘D or Esc\nClicks go to your apps again."
+                                                : "Draw  ⌥⌘D\nDraw on the screen to point things out: pen, arrow, rectangle or highlighter. The drawings are part of the video.",
+                             style: .bar(active: drawing.isOn), action: toggleDraw)
+                SymbolButton(symbol: "arrow.counterclockwise", help: "Restart\nThrows away what you recorded so far and starts again, without a countdown.", style: .bar(), action: restart)
+                SymbolButton(symbol: "trash", help: "Discard\nStops and deletes the recording.", style: .bar(), action: discard)
             }
             .padding(6)
             .background(VisualEffectBackground().clipShape(Capsule()))
@@ -118,29 +118,5 @@ final class RecordingControlBar {
                 .animation(paused ? .default : .easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: on)
                 .onAppear { on = true }
         }
-    }
-}
-
-/// A round symbol button for the dark recording bars, before and during a recording.
-struct BarButton: View {
-    let symbol: String
-    var active = false
-    let help: String
-    let action: () -> Void
-    @State private var hovering = false
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.white.opacity(active ? 1 : 0.7))
-                .frame(width: 34, height: 34)
-                .background(Circle().fill(.white.opacity(active ? 0.2 : hovering ? 0.1 : 0)))
-                .contentShape(Circle())
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
-        .help(help)
-        .animation(.easeOut(duration: 0.12), value: active)
     }
 }

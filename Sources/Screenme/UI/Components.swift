@@ -15,6 +15,8 @@ struct HUDButtonStyle: ButtonStyle {
         case circle
         /// Quick Access: a white capsule with a title.
         case pill
+        /// Recording bars (dark): a round symbol, lit when `active`.
+        case bar(active: Bool = false)
     }
 
     var variant: Variant
@@ -60,6 +62,15 @@ private struct HUDButtonBody: View {
                 .frame(width: 24, height: 24)
                 .background(.black.opacity(0.55), in: Circle())
                 .overlay(Circle().strokeBorder(.white.opacity(0.25), lineWidth: 0.5)))
+        case .bar(let active):
+            configuration.label
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.white.opacity(active ? 1 : 0.7))
+                .frame(width: 34, height: 34)
+                .background(Circle().fill(.white.opacity(active ? 0.2 : hovering ? 0.1 : 0)))
+                .contentShape(Circle())
+                .onHover { hovering = $0 }
+                .animation(.easeOut(duration: 0.12), value: active)
         case .pill:
             pressable(configuration.label
                 .font(.system(size: 12, weight: .semibold))
