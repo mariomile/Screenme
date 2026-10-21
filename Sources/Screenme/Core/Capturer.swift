@@ -64,6 +64,21 @@ enum Storage {
         return destination
     }
 
+    /// The copy of `url` that `save` already put in the save folder, if its bytes still match the capture.
+    /// Looks where `save` would have written it: the same name, then "name 2", "name 3" and so on.
+    static func savedCopy(of url: URL) -> URL? {
+        let folder = saveDirectory
+        let base = url.deletingPathExtension().lastPathComponent
+        var candidate = folder.appendingPathComponent(url.lastPathComponent)
+        var n = 2
+        while FileManager.default.fileExists(atPath: candidate.path) {
+            if FileManager.default.contentsEqual(atPath: candidate.path, andPath: url.path) { return candidate }
+            candidate = folder.appendingPathComponent("\(base) \(n).\(url.pathExtension)")
+            n += 1
+        }
+        return nil
+    }
+
     /// Asks where to save a copy of `url`, replacing a file the user chose to overwrite.
     /// Returns nil when cancelled.
     @MainActor

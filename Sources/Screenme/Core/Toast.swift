@@ -8,9 +8,10 @@ enum Toast {
     private static var panel: FloatingPanel?
     private static var hideTask: Task<Void, Never>?
 
-    static func show(_ text: String, symbol: String = "checkmark.circle.fill", duration: Double = 1.6) {
+    /// `swatch` shows a color dot in place of the symbol (Pick Color).
+    static func show(_ text: String, symbol: String = "checkmark.circle.fill", swatch: Color? = nil, duration: Double = 1.6) {
         panel?.orderOut(nil)
-        let panel = makePanel(ToastView(text: text, symbol: symbol))
+        let panel = makePanel(ToastView(text: text, symbol: symbol, swatch: swatch))
         panel.present()
         self.panel = panel
         hideTask?.cancel()
@@ -94,13 +95,22 @@ private struct ProgressToastView: View {
 private struct ToastView: View {
     let text: String
     let symbol: String
+    let swatch: Color?
 
     var body: some View {
-        Label(text, systemImage: symbol)
-            .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(.white)
-            .padding(.horizontal, 16).padding(.vertical, 10)
-            .background(.black.opacity(0.78), in: Capsule())
-            .padding(8)
+        Label {
+            Text(text)
+        } icon: {
+            if let swatch {
+                Circle().fill(swatch).overlay(Circle().strokeBorder(.white.opacity(0.6), lineWidth: 1)).frame(width: 14, height: 14)
+            } else {
+                Image(systemName: symbol)
+            }
+        }
+        .font(.system(size: 13, weight: .semibold))
+        .foregroundStyle(.white)
+        .padding(.horizontal, 16).padding(.vertical, 10)
+        .background(.black.opacity(0.78), in: Capsule())
+        .padding(8)
     }
 }

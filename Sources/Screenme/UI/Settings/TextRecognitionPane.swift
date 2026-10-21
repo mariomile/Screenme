@@ -3,6 +3,8 @@ import SwiftUI
 struct TextRecognitionPane: View {
     @ObservedObject private var shortcuts = ShortcutsModel.shared
     @AppStorage(Pref.ocrLanguage.name) private var language = Pref.ocrLanguage.defaultValue
+    @AppStorage(Pref.translateTarget.name) private var translateTarget = Pref.translateTarget.defaultValue
+    @State private var translationLanguages: [Locale.Language] = []
     private let languages = TextRecognizer.supportedLanguages
 
     var body: some View {
@@ -23,7 +25,25 @@ struct TextRecognitionPane: View {
                     if let combo = shortcuts.combo(for: .captureText) { Text("Shortcut:"); KeyCaps(combo: combo, size: 10) }
                 }
             }
+
+            Section {
+                Picker("Translate into", selection: $translateTarget) {
+                    Text("System language").tag("")
+                    Divider()
+                    ForEach(translationLanguages, id: \.minimalIdentifier) { language in
+                        Text(TextTranslator.name(of: language)).tag(language.minimalIdentifier)
+                    }
+                }
+            } header: {
+                Text("Translation")
+            } footer: {
+                HStack(spacing: 6) {
+                    Text("Capture & Translate Text translates on this Mac. Download languages in System Settings > General > Language & Region > Translation Languages.")
+                    if let combo = shortcuts.combo(for: .translateText) { Text("Shortcut:"); KeyCaps(combo: combo, size: 10) }
+                }
+            }
         }
         .formStyle(.grouped)
+        .task { translationLanguages = await TextTranslator.targetLanguages() }
     }
 }

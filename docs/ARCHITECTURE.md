@@ -16,10 +16,10 @@ Swift 5 language mode on the Swift 6 compiler. All UI types are `@MainActor`. Ap
 | Folder | Owns | Public API other modules call |
 |--------|------|-------------------------------|
 | `Core/` | App delegate and menu bar, `CaptureCoordinator`, `Prefs`/`Pref`, `ShortcutAction`/`KeyCombo`/`ShortcutStore`, `HotKeyCenter`, `AppState`, `CaptureTarget`, `Capturer`, `Storage`, `Clipboard`, `Sounds`, `CaptureItem`, and the shared kit below | see files |
-| `Capture/` | Selection overlay (crosshair, magnifier, window picking, freeze), All-in-One bar | `SelectionOverlay.select(_ mode: SelectionMode) async -> SelectionResult?`, `AllInOneHUD.show(perform:)`, `.isOpen` |
+| `Capture/` | Selection overlay (crosshair, magnifier, window picking, freeze), All-in-One bar, Measure ruler and its edge scanner | `SelectionOverlay.select(_ mode: SelectionMode) async -> SelectionResult?`, `AllInOneHUD.show(perform:)`, `.isOpen`, `MeasureOverlay.run() async throws`, `EdgeScanner.spans(in:x:y:tolerance:)` |
 | `Editor/` | Annotation editor + background tool | `AnnotationEditor.open(_ item: CaptureItem)` |
 | `Recording/` | Screen recording, recording controls, video editor | `RecordingController.shared.start(_:) async throws`, `.stop() async -> CaptureItem?`, `.isRecording`, `VideoEditor.open(_ item:)` |
-| `Utilities/` | OCR + QR, scrolling capture, pin, history, desktop icons | `TextRecognizer.recognize(_:)`, `ScrollingCapture.run(_:)`, `PinWindow.pin(_:)`, `CaptureHistory.shared`, `HistoryWindow.show()`, `DesktopIcons.toggle()/.isHidden/.coverWindowIDs` |
+| `Utilities/` | OCR + QR, sensitive info detection, translation, color picker, scrolling capture, pin, history, desktop icons | `TextRecognizer.recognize(_:)`, `.sensitiveBoxes(in:)`, `SensitiveInfo.matches(in:)`, `TextTranslator.translate(_:) async throws`, `TranslationPanel.show(_:near:)`, `ScreenColorPicker.run()`, `ScrollingCapture.run(_:)`, `PinWindow.pin(_:)`, `CaptureHistory.shared`, `HistoryWindow.show()`, `DesktopIcons.toggle()/.isHidden/.coverWindowIDs` |
 | `UI/` | Quick Access overlay, Settings window, onboarding, shortcut recorder, macOS shortcut takeover | `QuickAccess.shared.show(_:)`, `SettingsWindow.show()`, `OnboardingWindow.show()` |
 | `Resources/` | Asset catalog, app icon, menu bar icon | `NSImage(named: "MenuBarIcon")` |
 
@@ -30,11 +30,11 @@ Use these instead of writing your own. If one does not fit, extend it in Core ra
 | Concept | Where | What it gives you |
 |---------|-------|-------------------|
 | A capture | `Core/CaptureItem.swift` | `CaptureItem` with `Kind` `.image`, `.video`, `.gif`. Switch on the kind; never test the file extension. `Notification.Name.captureUpdated` (object: the file URL) when a file changes on disk. |
-| Capture actions | `Core/CaptureActions.swift` | `CaptureAction` (copy, save, saveAs, reveal, edit, pin, trash): `title(for:)`, `symbol(for:)`, `isAvailable(for:)`, `perform(_:) async`, and `confirm(savedTo:)`, the one toast per action. Every menu and button row over a capture is built from it. |
-| Files | `Core/Capturer.swift` | `Storage.write(_:)`, `newURL(extension:)`, `save(_:)`, `saveAs(_:suggestedName:) async throws -> URL?`, `chooseDestination(suggestedName:) async -> URL?`, `copy(_:to:)`; `Clipboard.copy(_ item:)` (image data, GIF data plus file, or file). |
+| Capture actions | `Core/CaptureActions.swift` | `CaptureAction` (copy, copyMarkdown, copyPath, save, saveAs, reveal, edit, pin, trash): `title(for:)`, `symbol(for:)`, `isAvailable(for:)`, `perform(_:) async`, and `confirm(savedTo:)`, the one toast per action. Every menu and button row over a capture is built from it. |
+| Files | `Core/Capturer.swift` | `Storage.write(_:)`, `newURL(extension:)`, `save(_:)`, `savedCopy(of:)`, `saveAs(_:suggestedName:) async throws -> URL?`, `chooseDestination(suggestedName:) async -> URL?`, `copy(_:to:)`; `Clipboard.copy(_ item:)` (image data, GIF data plus file, or file). |
 | Capture filter | `Core/CaptureTarget.swift` | `CaptureTarget.streamSetup(showsCursor:retina:including:)`, the only place that builds an `SCContentFilter` for Screenme's own content. `NSScreen.at(_:)`, `NSScreen.underMouse`, `CGRect.cocoaFlipped`. |
 | Overlays | `Core/Overlay/` | `FloatingPanel` (borderless, never activates on show, `present(makeKey:from:)` and `dismiss(completion:)` fades), `VisualEffectBackground`, `Placement`, `FocusKeeper` (`frontmostExternal`, `activateSelf`, `restore`), `Countdown.run(seconds:around:cancelsOnClick:)`. |
-| Feedback | `Core/Toast.swift` | `Toast.show(_:symbol:duration:)`, `Toast.progress(_:) -> ToastHandle`. |
+| Feedback | `Core/Toast.swift` | `Toast.show(_:symbol:swatch:duration:)`, `Toast.progress(_:) -> ToastHandle`. |
 | Keys | `Core/HotKeyCenter.swift` | Global shortcuts, plus `registerTemporary(keyCode:modifiers:handler:)` / `unregisterTemporary(_:)` for a key held only for a moment (Esc during a countdown or the pre-record bar). |
 | Permissions | `Core/Permissions.swift` | `Permission` (screen recording, microphone, camera, accessibility): `status`, `isGranted`, `request()`, `ensure() async`, `openSettings()`. `Permissions.shared` for SwiftUI; `PermissionRow(permission:)` in UI. |
 | Preferences | `Core/Prefs.swift` | `PrefKey`, `Prefs[...]` for plain and `RawRepresentable` values, and the value enums `ImageFormat`, `QuickAccessPosition`, `VideoQuality`. |

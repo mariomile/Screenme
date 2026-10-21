@@ -64,9 +64,10 @@ final class CaptureCoordinator {
     }
 
     private func capture(_ action: ShortcutAction, target: ActionLink.Target?) async throws {
-        // Recordings have their own setting; text recognition does not keep a picture.
+        // Recordings have their own setting; text recognition does not keep a picture;
+        // Pick Color and Measure read the screen as the user sees it.
         let hidesIcons = Prefs[Pref.hideDesktopIconsInShots] && !DesktopIcons.isHidden
-            && action != .recordScreen && action != .captureText
+            && ![.recordScreen, .captureText, .translateText, .pickColor, .measure].contains(action)
         if hidesIcons {
             DesktopIcons.setHidden(true)
             try? await Task.sleep(for: .milliseconds(700))
@@ -109,6 +110,30 @@ final class CaptureCoordinator {
                 Clipboard.copyText(text)
                 Toast.show("Text copied", symbol: "doc.on.clipboard")
             }
+
+        case .translateText:
+            guard let result = try await select(.text, target) else { return }
+            let text = try await TextRecognizer.recognize(try await image(for: result))
+            guard !text.isEmpty else {
+                Toast.show("No text found", symbol: "text.viewfinder")
+                return
+            }
+            let translation: TextTranslation
+            do {
+                translation = try await TextTranslator.translate(text)
+            } catch TranslateError.sameLanguage(let language) {
+                Clipboard.copyText(text)
+                Toast.show("Already in \(language): text copied", symbol: "doc.on.clipboard")
+                return
+            }
+            Clipboard.copyText(translation.text)
+            TranslationPanel.show(translation, near: result.target.cocoaFrame)
+
+        case .pickColor:
+            await ScreenColorPicker.run()
+
+        case .measure:
+            try await MeasureOverlay.run()
 
         case .scrollingCapture:
             guard let result = try await select(.scrolling, target) else { return }

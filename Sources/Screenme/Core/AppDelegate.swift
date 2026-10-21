@@ -90,7 +90,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let groups: [[ShortcutAction]] = [
             [.allInOne],
             [.captureArea, .captureWindow, .captureFullscreen, .capturePreviousArea, .selfTimer],
-            [.scrollingCapture, .captureText],
+            [.scrollingCapture, .captureText, .translateText],
+            [.pickColor, .measure],
             [.recordScreen],
             [.pinLastCapture, .openHistory, .toggleDesktopIcons],
         ]
