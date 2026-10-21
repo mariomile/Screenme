@@ -113,6 +113,9 @@ struct ToolbarTrailing: View {
 
     var body: some View {
         HStack(spacing: 8) {
+            IconButton(symbol: "eye.slash", help: "Redact Sensitive Info: pixelate emails, phone numbers, cards, IBANs, keys and IPs",
+                       enabled: !c.isRedacting) { c.redactSensitiveInfo() }
+
             Button {
                 c.toggleBackground()
             } label: {
@@ -132,6 +135,9 @@ struct ToolbarTrailing: View {
 
             Menu {
                 Button("Save As…") { c.saveAs() }
+                Divider()
+                Button("Redact Sensitive Info") { c.redactSensitiveInfo() }
+                    .disabled(c.isRedacting)
                 Divider()
                 Button("Resize Image…") { c.sheet = .resizeImage }
                 Button("Resize Canvas…") { c.sheet = .resizeCanvas }

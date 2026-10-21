@@ -15,6 +15,14 @@ enum TextRecognizer {
         }.value
     }
 
+    /// Boxes around the text `SensitiveInfo` flags, in image pixels with a top-left origin, one per match.
+    static func sensitiveBoxes(in image: CGImage) async throws -> [CGRect] {
+        let language = Prefs[Pref.ocrLanguage]
+        return try await Task.detached(priority: .userInitiated) {
+            try findSensitive(image, language: language)
+        }.value
+    }
+
     // MARK: Pipeline
 
     /// Languages Vision reads, as identifiers ("it-IT") for `Pref.ocrLanguage`.
@@ -53,6 +61,29 @@ enum TextRecognizer {
         // Text first, then the code, unless the text already contains it.
         let unique = payloads.filter { !text.contains($0) }
         return unique.isEmpty ? text : text + "\n" + unique.joined(separator: "\n")
+    }
+
+    /// Language correction stays off: it "fixes" keys, card numbers and addresses into words.
+    private static func findSensitive(_ image: CGImage, language: String) throws -> [CGRect] {
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        request.usesLanguageCorrection = false
+        if language.isEmpty {
+            request.automaticallyDetectsLanguage = true
+        } else {
+            request.recognitionLanguages = [language]
+        }
+        try VNImageRequestHandler(cgImage: image, options: [:]).perform([request])
+
+        let width = CGFloat(image.width), height = CGFloat(image.height)
+        return (request.results ?? []).flatMap { observation -> [CGRect] in
+            guard let candidate = observation.topCandidates(1).first else { return [] }
+            return SensitiveInfo.matches(in: candidate.string).compactMap { match in
+                // Normalized, bottom-left origin.
+                guard let box = try? candidate.boundingBox(for: match.range)?.boundingBox else { return nil }
+                return CGRect(x: box.minX * width, y: (1 - box.maxY) * height, width: box.width * width, height: box.height * height)
+            }
+        }
     }
 
     // MARK: Barcodes

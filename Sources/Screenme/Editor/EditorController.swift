@@ -32,6 +32,8 @@ final class EditorController: ObservableObject {
     @Published var zoomPercent = 100
     @Published var sheet: EditorSheet?
     @Published var presets: [BackgroundPreset]
+    /// True while Redact Sensitive Info reads the image.
+    @Published var isRedacting = false
 
     weak var canvas: CanvasView?
     weak var window: NSWindow?
