@@ -26,6 +26,19 @@ final class SensitiveInfoTests: XCTestCase {
         assertFinds("+393331234567", [(.phone, "+393331234567")])
     }
 
+    func testEuropeanPhoneFormats() {
+        for number in ["+39 333 1234567", "+39 3331234567", "333 1234567", "06 12345678", "+49 30 12345678", "+33 6 12 34 56 78"] {
+            assertFinds("Tel. \(number)", [(.phone, number)])
+        }
+    }
+
+    func testFiguresInGroupsAreNotPhoneNumbers() {
+        assertFinds("From 2023 2024", [])
+        assertFinds("Revenue 1200 3400 5600", [])
+        assertFinds("12 500 000 EUR", [])
+        assertFinds("21 10 2026", [])
+    }
+
     func testPhoneLeavesDatesTimesAndShortNumbersAlone() {
         assertFinds("Due 2026-10-21 at 10:30", [])
         assertFinds("21-10-2026", [])

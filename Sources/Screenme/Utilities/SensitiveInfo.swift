@@ -55,9 +55,10 @@ enum SensitiveInfo {
 
     private static let ipv4 = regex(#"(?<![0-9.])(?:(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(?![0-9]|\.[0-9])"#)
 
-    /// An optional +country code and area code in parentheses, then groups of digits split by spaces or dashes,
-    /// or one run of digits after a +. Dots are left out: they are versions, amounts and addresses.
-    private static let phone = regex(#"(?<![\w+])(?:\+[0-9]{1,3}[ -]?)?(?:\([0-9]{1,4}\)[ -]?)?[0-9]{2,5}(?:[ -][0-9]{2,5}){1,4}(?![\w-])|(?<![\w+])\+[0-9]{8,15}(?!\w)"#)
+    /// An optional +country code and area code in parentheses, then groups of digits split by spaces or dashes
+    /// (a long last group too: "333 1234567"), or one run of digits after a +. Dots are left out: they are
+    /// versions, amounts and addresses.
+    private static let phone = regex(#"(?<![\w+])(?:\+[0-9]{1,3}[ -]?)?(?:\([0-9]{1,4}\)[ -]?)?[0-9]{1,5}(?:[ -][0-9]{2,10}){1,4}(?![\w-])|(?<![\w+])\+[0-9]{8,15}(?!\w)"#)
 
     /// Long runs of key-like characters, judged by `isHighEntropy`.
     private static let longToken = regex(#"(?<![A-Za-z0-9_+/=-])[A-Za-z0-9_+/=-]{32,}(?![A-Za-z0-9_+/=-])"#)
@@ -92,13 +93,17 @@ enum SensitiveInfo {
         return remainder == 1
     }
 
-    /// 8 to 15 digits, and not a date such as 2026-10-21 or 21-10-2026.
+    /// 8 to 15 digits. A + or an area code in parentheses settles it; otherwise the groups must not read as
+    /// something else: a date (2026-10-21, 21 10 2026), years or figures in fours (2023 2024), or thousands (12 500 000).
     private static func isPhoneNumber(_ text: String) -> Bool {
         let digits = text.filter(\.isASCIIDigit).count
         guard (8...15).contains(digits) else { return false }
-        let groups = text.split(separator: "-").map(\.count)
+        if text.hasPrefix("+") || text.hasPrefix("(") { return true }
+        let groups = text.split(whereSeparator: { $0 == "-" || $0 == " " }).map(\.count)
         let isDate = groups.count == 3 && groups[1] <= 2 && ((groups[0] == 4 && groups[2] <= 2) || (groups[0] <= 2 && groups[2] == 4))
-        return !isDate
+        let isFours = groups.allSatisfy { $0 == 4 }
+        let isThousands = groups[0] <= 3 && groups.dropFirst().allSatisfy { $0 == 3 }
+        return !isDate && !isFours && !isThousands
     }
 
     /// A random-looking string with letters and digits mixed. Random hex runs about 3.8 bits of entropy per character
