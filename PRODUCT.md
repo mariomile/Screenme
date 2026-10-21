@@ -1,8 +1,8 @@
 # PRODUCT.md: Screenme
 
-**Stage:** idea
-**Last amended:** 2026-10-20
-**Amendment count:** 2
+**Stage:** in use
+**Last amended:** 2026-10-21
+**Amendment count:** 4
 
 ## Purpose
 
@@ -38,7 +38,7 @@ Order is Mario's stated frequency ranking (A, B, C), not an observed one. `[assu
 
 ## Non-Goals
 
-- Cloud upload, share links, teams, SSO: because it is a personal tool. `[doc:user-2026-10-20-screenme]`
+- A shared cloud service, teams, SSO: because it is a personal tool. `[doc:user-2026-10-20-screenme]` Upload & Copy Link to the user's own S3-compatible bucket is not this: it shipped on 2026-10-21 (see the amendment log).
 - Selling it, or shaping the roadmap around other users: Mario is the primary user; the code is open source so others can use and fork it as is. `[doc:user-2026-10-20-screenme]`
 - Cross-platform (Windows, Linux, web): because native macOS is the requirement. `[doc:user-2026-10-20-screenme]`
 - Feature parity with CleanShot: because "leggero" beats complete; each capability enters only when used.
@@ -83,3 +83,4 @@ Order is Mario's stated frequency ranking (A, B, C), not an observed one. `[assu
 | 2026-10-20 | Created | n/a | n/a |
 | 2026-10-20 | The Problem, How they solve it today, What that costs them, Jobs To Be Done rewritten; non-goal added for a Screen Studio-style video editor (Later) | Phase 0 round 1 answers settle the problem (fragmentation plus no further subscriptions), the three frequent flows, and the video editor deferral | `[doc:user-2026-10-20-screenme]` `[doc:observed-2026-10-20-installed-tools]` `[doc:web-2026-10-20-prior-art-pricing]` |
 | 2026-10-20 | Non-goal on distribution replaced: open source on GitHub, still not sold | Mario: "è un tool che io voglio costruire e rendere opensource" | `[doc:user-2026-10-20-screenme]` |
+| 2026-10-21 | Stage set from idea to in use. Non-goal "Cloud upload, share links" superseded: Upload & Copy Link to the user's own S3-compatible bucket (R2, B2, AWS) shipped on 2026-10-21; a shared cloud service, teams and SSO remain non-goals | Screenme is built and in daily use; the upload goes to a bucket the user owns, so no Screenme service holds anyone's captures | `[observed:2026-10-21-git-41147d5]` |
