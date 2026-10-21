@@ -151,6 +151,8 @@ enum AIClipboard {
                 if let result = try await Redaction.hidingSensitive(in: image, unit: unit),
                    let data = NSBitmapImageRep(cgImage: result.image).representation(using: .png, properties: [:]),
                    let file = Redaction.write(result.image, like: path.deletingPathExtension().appendingPathExtension("png")) {
+                    // The editor's unredacted temporary file must not stay behind; a capture file stays.
+                    if path != captureURL { try? FileManager.default.removeItem(at: path) }
                     (image, png, path, hidden) = (result.image, data, file, result.count)
                 }
             } catch {

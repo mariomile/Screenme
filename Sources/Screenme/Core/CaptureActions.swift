@@ -60,7 +60,10 @@ enum CaptureAction: CaseIterable {
             Clipboard.copy(item)
             confirm()
         case .copyForAI:
-            guard let hidden = await AIClipboard.copy(item) else { return failed() }
+            guard let hidden = await AIClipboard.copy(item) else {
+                Toast.show("Could not copy", symbol: "exclamationmark.triangle.fill")
+                return false
+            }
             confirm(hidden: hidden)
         case .copyMarkdown:
             // The link points at the copy in the save folder: the capture itself may be pruned from History.
