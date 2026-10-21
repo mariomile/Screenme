@@ -48,7 +48,7 @@ enum ImageCombiner {
             return
         }
         let item = CaptureItem(url: url, kind: .image)
-        CaptureHistory.shared.add(item)
+        CaptureCoordinator.shared.record(item)
         AnnotationEditor.open(item)
     }
 }

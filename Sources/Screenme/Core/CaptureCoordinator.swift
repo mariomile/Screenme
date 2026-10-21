@@ -174,10 +174,16 @@ final class CaptureCoordinator {
 
     // MARK: After capture
 
-    /// Runs the user's after-capture actions. Editors call this too when they save a new version.
-    func afterCapture(_ item: CaptureItem) {
+    /// Makes `item` the last capture (for Pin Last Capture) and adds it to History, without the after-capture
+    /// actions. For a new file that opens somewhere itself, like a combined image.
+    func record(_ item: CaptureItem) {
         lastCapture = item
         CaptureHistory.shared.add(item)
+    }
+
+    /// Records `item` and runs the user's after-capture actions. Editors call this too when they save a new version.
+    func afterCapture(_ item: CaptureItem) {
+        record(item)
         switch item.kind {
         case .image:
             if Prefs[Pref.afterShotCopy] { Clipboard.copy(item) }
