@@ -387,6 +387,31 @@ final class AIReportTests: XCTestCase {
         XCTAssertEqual(again.keyframes.map(\.time), [0.3])
     }
 
+    func testCropsKeyframesOfAScreenRecordingAndKeepsTheFullFrames() async throws {
+        let directory = try Self.temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let video = directory.appendingPathComponent("input.mp4")
+        try await Self.writeSilentVideo(to: video, seconds: 3)
+        let events = RecordingEvents(width: 320, height: 240, events: [.click(at: CGPoint(x: 50, y: 50), right: false, time: 1)],
+                                     windows: [WindowSnapshot(time: 0, windows: [
+                                         WindowSnapshot.Window(app: "Notes", title: "Ideas", x: 10, y: 10, width: 100, height: 80),
+                                     ])])
+
+        let report = try await AIReporter.write(video, context: CaptureContext(), events: events, recordedAt: Date(), in: directory)
+        XCTAssertEqual(report.crops, [nil, AutoCrop.Crop(rect: CGRect(x: 0, y: 0, width: 320, height: 114), apps: ["Notes"])])
+        func size(_ name: String) throws -> CGSize { try XCTUnwrap(NSImage(contentsOf: report.folder.appendingPathComponent(name))).size }
+        XCTAssertEqual(try size("frames/02.png"), CGSize(width: 320, height: 114))
+        XCTAssertEqual(try size("frames-full/02.png"), CGSize(width: 320, height: 240))
+        XCTAssertEqual(try size("frames/01.png"), CGSize(width: 320, height: 240))
+        XCTAssertEqual(try size("contact-sheet-full.png"), ContactSheet.layout(count: 2, boxHeight: 480).size)
+        let markdown = report.markdown(absoluteLinks: false)
+        XCTAssertTrue(markdown.contains("\nCropped to: Notes (full frames in frames-full/)\n"))
+
+        let whole = try await AIReporter.write(video, context: CaptureContext(), events: events, recordedAt: Date(), autoCrop: false, in: directory)
+        XCTAssertFalse(whole.isCropped)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: whole.folder.appendingPathComponent("frames-full").path))
+    }
+
     static func temporaryDirectory() throws -> URL {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("AIReportTests-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

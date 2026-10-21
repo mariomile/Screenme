@@ -14,7 +14,8 @@ enum AIReporter {
         do {
             let context = await CaptureContexts.context(for: item.url)
             let report = try await write(item.url, context: context, events: RecordingEvents.events(for: item.url),
-                                         recordedAt: item.date, screen: screenDescription(), in: Storage.saveDirectory) { value in
+                                         recordedAt: item.date, screen: screenDescription(), autoCrop: Prefs[Pref.reportAutoCrop],
+                                         in: Storage.saveDirectory) { value in
                 Task { @MainActor in toast.update(value) }
             }
             Clipboard.copyText(report.markdown(absoluteLinks: true))
@@ -35,7 +36,7 @@ enum AIReporter {
     /// Writes the report folder for `video` inside `parent` and returns the report. Asks for speech recognition
     /// only when the video has sound. Not on the main actor: copying, decoding and writing PNGs take a while.
     static func write(_ video: URL, context: CaptureContext, events: RecordingEvents?, recordedAt date: Date,
-                      screen: String? = nil, in parent: URL,
+                      screen: String? = nil, autoCrop: Bool = true, in parent: URL,
                       progress: @escaping @Sendable (Double) -> Void = { _ in }) async throws -> AIReport {
         let asset = AVURLAsset(url: video)
         let duration = try await asset.load(.duration).seconds
@@ -78,27 +79,69 @@ enum AIReporter {
             date: dateFormatter.string(from: date))
         var report = AIReport(folder: folder, environment: environment, transcript: transcript, noNarration: noNarration, events: events)
         report.makeKeyframes(duration: duration, samples: samples)
+        if autoCrop, let events { report.crops = AutoCrop.crops(for: report.keyframes, events: events) }
 
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
-        // Large enough to read any text on screen, small enough for an agent to look at a dozen of them.
-        generator.maximumSize = CGSize(width: 1920, height: 1920)
+        // Cropped frames are cut from the full-size picture, so their text stays sharp.
+        generator.maximumSize = report.isCropped ? .zero : CGSize(width: maxFrameSide, height: maxFrameSide)
         generator.requestedTimeToleranceBefore = .zero
         generator.requestedTimeToleranceAfter = .zero
-        var cells: [ContactSheet.Cell] = []
+        if report.isCropped {
+            try FileManager.default.createDirectory(at: folder.appendingPathComponent("frames-full"), withIntermediateDirectories: true)
+        }
+        var cells: [ContactSheet.Cell] = [], fullCells: [ContactSheet.Cell] = []
         for (index, keyframe) in report.keyframes.enumerated() {
-            let image = try await generator.image(at: CMTime(seconds: keyframe.time, preferredTimescale: 600)).image
-            try writePNG(image, to: folder.appendingPathComponent(AIReport.frameName(index)))
-            cells.append(ContactSheet.Cell(image: ContactSheet.thumbnail(image), number: index + 1, time: keyframe.time,
+            let decoded = try await generator.image(at: CMTime(seconds: keyframe.time, preferredTimescale: 600)).image
+            let full = fitted(decoded, maxSide: maxFrameSide)
+            var frame = full
+            if report.isCropped {
+                try writePNG(full, to: folder.appendingPathComponent(AIReport.fullFrameName(index)))
+                fullCells.append(ContactSheet.Cell(image: ContactSheet.thumbnail(full), number: index + 1, time: keyframe.time,
+                                                   caption: report.caption(index)))
+                if let crop = report.crops[index], let events,
+                   let cut = cropped(decoded, to: crop.rect, area: CGSize(width: events.width, height: events.height)) {
+                    frame = fitted(cut, maxSide: maxFrameSide)
+                }
+            }
+            try writePNG(frame, to: folder.appendingPathComponent(AIReport.frameName(index)))
+            cells.append(ContactSheet.Cell(image: ContactSheet.thumbnail(frame), number: index + 1, time: keyframe.time,
                                            caption: report.caption(index)))
             progress(0.75 + 0.2 * Double(index + 1) / Double(report.keyframes.count))
         }
         if let sheet = ContactSheet.render(cells) {
             try writePNG(sheet, to: folder.appendingPathComponent(AIReport.contactSheetName))
         }
+        if let sheet = ContactSheet.render(fullCells) {
+            try writePNG(sheet, to: folder.appendingPathComponent(AIReport.fullContactSheetName))
+        }
 
         try report.markdown(absoluteLinks: false).write(to: folder.appendingPathComponent("report.md"), atomically: true, encoding: .utf8)
         return report
+    }
+
+    /// Frames are large enough to read any text on screen, small enough for an agent to look at a couple of dozen.
+    static let maxFrameSide = 1920
+
+    /// `image` scaled down so its long side is at most `maxSide` pixels, or as it is.
+    static func fitted(_ image: CGImage, maxSide: Int) -> CGImage {
+        let long = max(image.width, image.height)
+        guard long > maxSide else { return image }
+        let scale = Double(maxSide) / Double(long)
+        let width = max(Int((Double(image.width) * scale).rounded()), 1), height = max(Int((Double(image.height) * scale).rounded()), 1)
+        return CGImage.drawn(width: width, height: height, colorSpace: image.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!) { context in
+            context.interpolationQuality = .high
+            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        } ?? image
+    }
+
+    /// The part of a frame of a recorded `area` (points) inside `rect` (points from its top-left corner).
+    static func cropped(_ image: CGImage, to rect: CGRect, area: CGSize) -> CGImage? {
+        guard area.width > 0, area.height > 0 else { return nil }
+        let sx = CGFloat(image.width) / area.width, sy = CGFloat(image.height) / area.height
+        let pixels = CGRect(x: rect.minX * sx, y: rect.minY * sy, width: rect.width * sx, height: rect.height * sy).integral
+            .intersection(CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        return pixels.isEmpty ? nil : image.cropping(to: pixels)
     }
 
     /// `Report 2026-10-21 at 10.22.33`, with a number when that name is taken.

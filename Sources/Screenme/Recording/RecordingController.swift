@@ -259,7 +259,7 @@ private final class Session {
         if !overlays.isEmpty { try? await Task.sleep(for: .milliseconds(200)) }
         recorder = try await makeRecorder(CaptureSetup.make(for: target, settings: settings, overlays: overlays))
         effects?.start()
-        let events = RecordingEventRecorder(area: frame) { [weak self] in self?.recorder?.videoTime() }
+        let events = RecordingEventRecorder(area: frame, recordsWindows: !isWindow) { [weak self] in self?.recorder?.videoTime() }
         events.start()
         self.events = events
         drawing.onDrawing = { [weak events] tool, color, box, tip in events?.addDrawing(tool, color: color, box: box, tip: tip) }

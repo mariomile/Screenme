@@ -76,6 +76,7 @@ struct AIReport {
     static let videoName = "recording.mp4"
     static let eventsName = "events.json"
     static let contactSheetName = "contact-sheet.png"
+    static let fullContactSheetName = "contact-sheet-full.png"
 
     /// The report folder.
     var folder: URL
@@ -88,9 +89,18 @@ struct AIReport {
     var events: RecordingEvents?
     /// The keyframes in time order, `frames/01.png` first, each with what was said and done while it was on screen.
     var keyframes: [Keyframe] = []
+    /// Each keyframe's auto-crop, nil for one that stays whole. Empty when the recording is not cropped.
+    var crops: [AutoCrop.Crop?] = []
+
+    var isCropped: Bool { crops.contains { $0 != nil } }
 
     static func frameName(_ index: Int) -> String {
         String(format: "frames/%02d.png", index + 1)
+    }
+
+    /// The uncropped keyframe, when the report is cropped.
+    static func fullFrameName(_ index: Int) -> String {
+        String(format: "frames-full/%02d.png", index + 1)
     }
 
     /// Fills `keyframes` for a video of `duration` seconds, sampled as `samples`.
@@ -226,6 +236,9 @@ struct AIReport {
         lines.append("- Recording: \(environment.video)")
         if let events { lines.append("- Recorded area: \(Int(events.width))×\(Int(events.height)) points") }
         lines.append("- Date: \(environment.date)")
+        if isCropped {
+            lines += ["", "Cropped to: \(AutoCrop.appNames(crops)) (full frames in frames-full/)"]
+        }
 
         heading("Keyframes")
         lines.append("Each keyframe `#N [time]` has what was said while it was on screen, then what happened, with the time of each event."
@@ -258,6 +271,9 @@ struct AIReport {
         if events != nil { lines.append("- Events: `\(path(Self.eventsName))`") }
         for (index, keyframe) in keyframes.enumerated() {
             lines.append("- #\(index + 1) at \(time(keyframe.time)): `\(path(Self.frameName(index)))`")
+        }
+        if isCropped {
+            lines.append("- Uncropped frames: `\(path("frames-full"))`, and their contact sheet: `\(path(Self.fullContactSheetName))`")
         }
         return lines.joined(separator: "\n") + "\n"
     }

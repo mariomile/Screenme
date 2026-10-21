@@ -64,12 +64,35 @@ struct RecordingEvent: Codable, Equatable {
     }
 }
 
+/// The on-screen windows over the recorded area at one time, front to back, for cropping keyframes.
+struct WindowSnapshot: Codable, Equatable {
+    struct Window: Codable, Equatable {
+        var app: String
+        var title: String?
+        /// Points from the top-left corner of the recorded area; may reach outside it.
+        var x: Double
+        var y: Double
+        var width: Double
+        var height: Double
+
+        var frame: CGRect { CGRect(x: x, y: y, width: width, height: height) }
+    }
+
+    var time: Double
+    var windows: [Window]
+}
+
 /// Everything recorded during one recording: the size of the recorded area and the events in time order.
 /// Kept in memory by recording file, and next to it as a hidden JSON file so a report made later still finds it.
 struct RecordingEvents: Codable, Equatable {
     var width: Double
     var height: Double
     var events: [RecordingEvent]
+    /// Display and area recordings: the windows over the area, stored when they changed, about once a second.
+    var windows: [WindowSnapshot]?
+    /// Where the pointer was, `[time, x, y]` in points from the top-left corner of the area, about 20 times a second
+    /// while it moves inside the area.
+    var cursor: [[Double]]?
 
     /// `.Screenme 2026-10-21 at 10.22.33.mp4.events.json` next to the recording. Hidden, so neither History
     /// nor the command line's capture list ever shows it as a capture.
@@ -125,22 +148,29 @@ struct RecordingEvents: Codable, Equatable {
 @MainActor
 final class RecordingEventRecorder {
     private let area: CGRect
+    private let recordsWindows: Bool
     private let time: () -> Double?
     private(set) var events: [RecordingEvent] = []
+    private var windows: [WindowSnapshot] = []
+    private var cursor: [[Double]] = []
     private var monitors: [Any] = []
     private var poll: Timer?
+    private var cursorPoll: Timer?
     private var lastApp: (app: String, window: String?)?
     /// Bumped by `reset`, so an element name looked up for a thrown-away take is not added to the new one.
     private var take = 0
 
-    /// `area` is the recorded area in global Cocoa coordinates.
-    init(area: CGRect, time: @escaping () -> Double?) {
+    /// `area` is the recorded area in global Cocoa coordinates. `recordsWindows` (display and area recordings) also
+    /// records the windows over it and the pointer, so the report can crop each keyframe to where things happened.
+    init(area: CGRect, recordsWindows: Bool, time: @escaping () -> Double?) {
         self.area = area
+        self.recordsWindows = recordsWindows
         self.time = time
     }
 
     var recorded: RecordingEvents {
-        RecordingEvents(width: area.width, height: area.height, events: events.sorted { $0.time < $1.time })
+        RecordingEvents(width: area.width, height: area.height, events: events.sorted { $0.time < $1.time },
+                        windows: recordsWindows ? windows : nil, cursor: recordsWindows ? cursor : nil)
     }
 
     func start() {
@@ -161,8 +191,17 @@ final class RecordingEventRecorder {
             MainActor.assumeIsolated { if let keys { self?.add { .shortcut(keys, time: $0) } } }
         }) { monitors.append(monitor) }
         checkFrontApp()
+        checkWindows()
         poll = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.checkFrontApp() }
+            MainActor.assumeIsolated {
+                self?.checkFrontApp()
+                self?.checkWindows()
+            }
+        }
+        if recordsWindows {
+            cursorPoll = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated { self?.checkCursor() }
+            }
         }
     }
 
@@ -171,15 +210,20 @@ final class RecordingEventRecorder {
         monitors.removeAll()
         poll?.invalidate()
         poll = nil
+        cursorPoll?.invalidate()
+        cursorPoll = nil
     }
 
     /// A restart: the events so far belong to the take that was thrown away.
     func reset() {
         events.removeAll()
+        windows.removeAll()
+        cursor.removeAll()
         pressed = nil
         lastApp = nil
         take += 1
         checkFrontApp()
+        checkWindows()
     }
 
     func addDrawing(_ tool: LiveDrawTool, color: LiveDrawColor, box: CGRect, tip: CGPoint?) {
@@ -284,6 +328,42 @@ final class RecordingEventRecorder {
         guard let now = time() else { return }
         lastApp = (name, window)
         events.append(.app(name, window: window, time: now))
+    }
+
+    // MARK: Windows and pointer
+
+    /// Stores the windows over the area when they changed since the last look.
+    private func checkWindows() {
+        guard recordsWindows, let now = time() else { return }
+        let found = Self.windows(over: area)
+        if found == windows.last?.windows { return }
+        windows.append(WindowSnapshot(time: now, windows: found))
+    }
+
+    /// The normal windows of other apps that overlap `area`, front to back, in points from its top-left corner.
+    private static func windows(over area: CGRect) -> [WindowSnapshot.Window] {
+        let own = ProcessInfo.processInfo.processIdentifier
+        let top = area.cocoaFlipped
+        let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[CFString: Any]] ?? []
+        return list.compactMap { info in
+            guard info[kCGWindowLayer] as? Int == 0, info[kCGWindowOwnerPID] as? pid_t != own,
+                  let boundsInfo = info[kCGWindowBounds] as? NSDictionary,
+                  let bounds = CGRect(dictionaryRepresentation: boundsInfo),
+                  bounds.width >= 50, bounds.height >= 50, bounds.intersects(top) else { return nil }
+            let title = info[kCGWindowName] as? String
+            return WindowSnapshot.Window(app: info[kCGWindowOwnerName] as? String ?? "an app", title: title?.isEmpty == false ? title : nil,
+                                         x: (bounds.minX - top.minX).rounded(), y: (bounds.minY - top.minY).rounded(),
+                                         width: bounds.width.rounded(), height: bounds.height.rounded())
+        }
+    }
+
+    /// Adds the pointer when it moved inside the area.
+    private func checkCursor() {
+        let location = NSEvent.mouseLocation
+        guard area.contains(location), let now = time() else { return }
+        let point = local(location)
+        if let last = cursor.last, abs(last[1] - point.x) < 1, abs(last[2] - point.y) < 1 { return }
+        cursor.append([(now * 100).rounded() / 100, point.x.rounded(), point.y.rounded()])
     }
 
     private static func frontWindowTitle(of pid: pid_t) -> String? {

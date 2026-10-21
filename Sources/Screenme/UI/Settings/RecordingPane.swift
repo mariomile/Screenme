@@ -20,7 +20,10 @@ struct RecordingPane: View {
                 PrefToggle("Open in video editor", Pref.afterRecordingOpenEditor)
                 PrefToggle("Create report for AI", Pref.afterRecordingAIReport,
                            detail: "Transcribes what you said and writes the report folder, as Report for AI does.")
-                    .help("Create report for AI\nWhen a video recording stops, Screenme makes its Report for AI on its own: the moment by moment timeline, frames and a prompt, saved to your save folder and copied.")
+                    .help("Create report for AI\nWhen a video recording stops, Screenme makes its Report for AI on its own: the keyframes, the contact sheet and a prompt, saved to your save folder and copied.")
+                PrefToggle("Auto-crop frames", Pref.reportAutoCrop,
+                           detail: "Reports of a screen or area recording cut each keyframe down to the window you were working in.")
+                    .help("Auto-crop frames\nIn a Report for AI of a screen or area recording, each keyframe is cropped to the window where you clicked, drew or rested the pointer, so an agent reads it without searching the whole screen. The uncropped frames stay in frames-full.")
             } header: {
                 Text("After recording")
             } footer: {
