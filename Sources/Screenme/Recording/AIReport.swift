@@ -58,12 +58,13 @@ struct Transcript: Equatable {
 }
 
 
-/// A report for an AI agent made from a recording: a folder with the video, keyframes, the events and `report.md`,
-/// which tells keyframe by keyframe what was said, clicked, pressed, switched to and drawn.
+/// A report for an AI agent made from a recording: a folder with the contact sheet, the keyframes, the video,
+/// `summary.md`, which tells keyframe by keyframe what was said, clicked, pressed, switched to and drawn, and
+/// `report.json`, the manifest with every word, event, mark and window.
 /// Everything here is plain data; `AIReporter` does the transcription, the frames and the files.
 struct AIReport {
     /// What the recording shows and where it was made.
-    struct Environment {
+    struct Environment: Codable, Equatable {
         var app: String?
         var window: String?
         var page: String?
@@ -74,7 +75,8 @@ struct AIReport {
     }
 
     static let videoName = "recording.mp4"
-    static let eventsName = "events.json"
+    static let summaryName = "summary.md"
+    static let manifestName = "report.json"
     static let contactSheetName = "contact-sheet.png"
     static let fullContactSheetName = "contact-sheet-full.png"
 
@@ -85,26 +87,30 @@ struct AIReport {
     var transcript: Transcript
     /// Why there is no transcript ("The recording has no audio."), when it is empty.
     var noNarration: String
-    /// What happened during the recording. Nil for a recording made without them; `events.json` is written only then.
+    /// What happened during the recording. Nil for a recording made without them.
     var events: RecordingEvents?
-    /// The keyframes in time order, `frames/01.png` first, each with what was said and done while it was on screen.
+    /// The length of the video in seconds.
+    var duration: Double = 0
+    /// The keyframes in time order, `frames/frame-01.png` first, each with what was said and done while it was on screen.
     var keyframes: [Keyframe] = []
     /// Each keyframe's auto-crop, nil for one that stays whole. Empty when the recording is not cropped.
     var crops: [AutoCrop.Crop?] = []
 
     var isCropped: Bool { crops.contains { $0 != nil } }
 
+    /// `frames/frame-03.png` is keyframe #3 (index 2).
     static func frameName(_ index: Int) -> String {
-        String(format: "frames/%02d.png", index + 1)
+        String(format: "frames/frame-%02d.png", index + 1)
     }
 
     /// The uncropped keyframe, when the report is cropped.
     static func fullFrameName(_ index: Int) -> String {
-        String(format: "frames-full/%02d.png", index + 1)
+        String(format: "frames-full/frame-%02d.png", index + 1)
     }
 
     /// Fills `keyframes` for a video of `duration` seconds, sampled as `samples`.
     mutating func makeKeyframes(duration: Double, samples: [FrameSample]) {
+        self.duration = duration
         keyframes = Keyframes.select(words: transcript.words, events: events, samples: samples, duration: duration)
     }
 
@@ -115,11 +121,13 @@ struct AIReport {
         Self.describe(events)
     }
 
-    /// "Clicked button "Pay" at 412, 300", "Switched to Safari": a line for each event, in order.
+    /// "Clicked button "Pay" at 412, 300", "Switched to Safari": a line for each event, in order. Drawings carry their
+    /// mark number, as in `marks`.
     static func describe(_ events: RecordingEvents?) -> [String] {
         guard let events else { return [] }
         let area = CGSize(width: events.width, height: events.height)
         var lastApp: String?
+        var marks = 0
         return events.events.map { event in
             switch event.kind {
             case .click:
@@ -135,9 +143,15 @@ struct AIReport {
                 defer { lastApp = event.app }
                 return appText(event, previous: lastApp)
             case .drawing:
-                return drawingText(event, area: area)
+                marks += 1
+                return drawingText(event, area: area) + " (mark \(marks))"
             }
         }
+    }
+
+    /// The drawings, numbered from 1 in the order they were finished: `screenme zoom --mark N` looks at mark N.
+    var marks: [(number: Int, event: Int)] {
+        (events?.events ?? []).indices.filter { events?.events[$0].kind == .drawing }.enumerated().map { ($0.offset + 1, $0.element) }
     }
 
     private static func clickText(_ event: RecordingEvent) -> String {
@@ -201,7 +215,7 @@ struct AIReport {
         return Self.silentText(keyframe.reason)
     }
 
-    // MARK: Markdown
+    // MARK: Summary
 
     var title: String {
         guard let first = transcript.segments.first?.text else {
@@ -212,22 +226,18 @@ struct AIReport {
         return "Report: " + (words.count > 14 ? short + "…" : short)
     }
 
-    /// `report.md`. With `absoluteLinks`, images and the video link to their full paths, so the text works on its own
-    /// when pasted into an agent; otherwise they link inside the folder, for GitHub, Linear or the folder itself.
-    func markdown(absoluteLinks: Bool) -> String {
-        func link(_ relative: String) -> String {
-            absoluteLinks ? "<\(folder.appendingPathComponent(relative).path)>" : relative
-        }
+    /// `summary.md`, also what is copied: the environment, the keyframes with what was said and done on each,
+    /// and what an agent should do, with absolute paths so the text works on its own when pasted.
+    var summary: String {
         func time(_ seconds: Double) -> String { Duration.format(seconds) }
         func path(_ relative: String) -> String { folder.appendingPathComponent(relative).path }
 
-        var lines = ["# \(title)"]
+        var lines = ["# \(title)", ""]
         func heading(_ name: String) {
             while lines.last == "" { lines.removeLast() }
             lines += ["", "## \(name)", ""]
         }
 
-        heading("Environment")
         if let app = environment.app { lines.append("- App: \(app)") }
         if let window = environment.window, !window.isEmpty { lines.append("- Window: \(window)") }
         if let page = environment.page { lines.append("- Page: \(page)") }
@@ -251,9 +261,6 @@ struct AIReport {
             let said = keyframe.text.isEmpty ? Self.silentText(keyframe.reason) : "\"\(keyframe.text)\""
             lines.append("- #\(index + 1) [\(time(keyframe.time))] \(said)")
             for event in keyframe.events { lines.append("  - \(time(recorded[event].time)) \(texts[event])") }
-            lines.append("")
-            lines.append("  ![#\(index + 1) at \(time(keyframe.time))](\(link(Self.frameName(index))))")
-            lines.append("")
         }
 
         heading("For an AI agent")
@@ -262,19 +269,17 @@ struct AIReport {
         } else {
             lines.append("The user recorded the screen while talking, to show you something and ask for something. What they said is the request; the clicks, shortcuts and app switches are what they did; the drawings mark what they are pointing at.")
         }
-        lines.append("Look at the contact sheet first: every keyframe in one picture, numbered as below. Then read the keyframes in order and open the frames you need by number (they are PNG files your Read tool can open)."
-            + (events == nil ? "" : " The events file has the exact time and position of every click, drag, scroll, shortcut, app switch and drawing.")
-            + " If the request is still unclear, ask the user before you change anything.")
+        lines.append("Look at the contact sheet first: every keyframe in one picture, numbered #N as above. Then open the frames you need by number: `frames/frame-03.png` is #3 (PNG files your Read tool can open). Red strokes, arrows, boxes and highlights are the user's drawings and point at what matters. "
+            + "For a closer look at a moment (something that moves, or happens between keyframes), run `screenme zoom \"\(folder.path)\" --at 0:12` (or `--phrase \"words they said\"`, or `--mark N`): it prints the path of a grid of frames around it. "
+            + "If the request is still unclear, ask the user before you change anything.")
         lines.append("")
         lines.append("- Contact sheet: `\(path(Self.contactSheetName))`")
-        lines.append("- Video: `\(path(Self.videoName))`")
-        if events != nil { lines.append("- Events: `\(path(Self.eventsName))`") }
-        for (index, keyframe) in keyframes.enumerated() {
-            lines.append("- #\(index + 1) at \(time(keyframe.time)): `\(path(Self.frameName(index)))`")
-        }
+        lines.append("- Frames: `\(path("frames"))`" + (keyframes.isEmpty ? "" : " (`frame-01.png` to `\(String(format: "frame-%02d.png", keyframes.count))`)"))
         if isCropped {
             lines.append("- Uncropped frames: `\(path("frames-full"))`, and their contact sheet: `\(path(Self.fullContactSheetName))`")
         }
+        lines.append("- Video: `\(path(Self.videoName))`")
+        lines.append("- Manifest: `\(path(Self.manifestName))` (every word with its time, the events, marks and windows)")
         return lines.joined(separator: "\n") + "\n"
     }
 }

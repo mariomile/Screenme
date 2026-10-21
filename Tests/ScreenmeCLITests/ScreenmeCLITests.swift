@@ -221,16 +221,16 @@ final class MCPServerTests: XCTestCase {
         XCTAssertThrowsError(try MCPServer.request(from: [:]))
     }
 
-    /// A report folder as Report for AI writes it, with `frames` PNG frames and report.md last modified at `modified`.
+    /// A report folder as Report for AI writes it, with `frames` PNG frames and summary.md last modified at `modified`.
     @discardableResult
     func writeReport(_ name: String, frames: Int, modified: Date) throws -> URL {
         let report = folder.url.appendingPathComponent(name, isDirectory: true)
         try FileManager.default.createDirectory(at: report.appendingPathComponent("frames"), withIntermediateDirectories: true)
         for index in 0..<frames {
             let image = try writeImage(width: 64, height: 40)
-            try FileManager.default.moveItem(at: image, to: report.appendingPathComponent(String(format: "frames/%02d.png", index + 1)))
+            try FileManager.default.moveItem(at: image, to: report.appendingPathComponent(String(format: "frames/frame-%02d.png", index + 1)))
         }
-        let markdown = report.appendingPathComponent("report.md")
+        let markdown = report.appendingPathComponent("summary.md")
         try "# \(name)\n".write(to: markdown, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.modificationDate: modified], ofItemAtPath: markdown.path)
         return report
@@ -243,7 +243,7 @@ final class MCPServerTests: XCTestCase {
         let now = Date()
         try writeReport("Report 2026-10-21 at 10.00.00", frames: 2, modified: now.addingTimeInterval(-60))
         try writeReport("Report 2026-10-21 at 11.00.00", frames: 9, modified: now)
-        // Not reports: another folder, and a report folder still being written (no report.md yet).
+        // Not reports: another folder, and a report folder still being written (no summary.md yet).
         try FileManager.default.createDirectory(at: folder.url.appendingPathComponent("Screens"), withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: folder.url.appendingPathComponent("Report 2026-10-21 at 12.00.00"), withIntermediateDirectories: true)
 
@@ -258,7 +258,7 @@ final class MCPServerTests: XCTestCase {
         XCTAssertTrue(images.allSatisfy { $0["mimeType"] as? String == "image/png" })
         // Spread over the recording, not just the first six.
         let paths = content.compactMap { $0["text"] as? String }.filter { $0.hasSuffix(".png") }.map { URL(fileURLWithPath: $0).lastPathComponent }
-        XCTAssertEqual(paths, ["01.png", "02.png", "04.png", "05.png", "07.png", "08.png"])
+        XCTAssertEqual(paths, ["frame-01.png", "frame-02.png", "frame-04.png", "frame-05.png", "frame-07.png", "frame-08.png"])
         XCTAssertTrue((content.last?["text"] as? String)?.hasSuffix("Report 2026-10-21 at 11.00.00") == true)
     }
 }

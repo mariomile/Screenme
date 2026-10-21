@@ -3,7 +3,7 @@ import AVFoundation
 import XCTest
 @testable import Screenme
 
-/// Report for AI: the words of the narration, where the keyframes go and what each one owns, report.md,
+/// Report for AI: the words of the narration, where the keyframes go and what each one owns, summary.md, report.json,
 /// the events sidecar, and the folder made from a real (silent) video.
 @MainActor
 final class AIReportTests: XCTestCase {
@@ -195,20 +195,18 @@ final class AIReportTests: XCTestCase {
         ])
         XCTAssertEqual(AIReport.describe(events), [
             "In Notes", "Right-clicked at 10, 21", "Switched to Safari, window \"Docs\"", "Switched to window \"Docs 2\" in Safari",
-            "Drew a blue rectangle at the bottom left (10, 400, 100×50)",
-            "Highlighted in yellow in the middle (400, 250, 100×20)",
-            "Drew in green on the right (800, 280, 50×40)",
+            "Drew a blue rectangle at the bottom left (10, 400, 100×50) (mark 1)",
+            "Highlighted in yellow in the middle (400, 250, 100×20) (mark 2)",
+            "Drew in green on the right (800, 280, 50×40) (mark 3)",
         ])
     }
 
-    // MARK: report.md
+    // MARK: summary.md
 
-    func testReportWithNarrationAndEvents() {
+    func testSummaryWithNarrationAndEvents() {
         let report = report(transcript: [segment(1, "Look at this total."), segment(6, "It should be 42.")], events: sampleEvents)
-        XCTAssertEqual(report.markdown(absoluteLinks: false), """
+        XCTAssertEqual(report.summary, """
         # Report: Look at this total.
-
-        ## Environment
 
         - App: Safari
         - Window: Checkout
@@ -225,54 +223,58 @@ final class AIReportTests: XCTestCase {
 
         - #1 [0:00] "Look at this total."
           - 0:00 In Safari, window "Checkout"
-
-          ![#1 at 0:00](frames/01.png)
-
         - #2 [0:02] (nothing said)
           - 0:02 Clicked button "Pay" at 412, 300
           - 0:03 Pressed ⌘R
-
-          ![#2 at 0:02](frames/02.png)
-
         - #3 [0:04] "It should be 42."
-          - 0:04 Drew a red arrow at the top right, pointing at 790, 50
-
-          ![#3 at 0:04](frames/03.png)
-
+          - 0:04 Drew a red arrow at the top right, pointing at 790, 50 (mark 1)
         - #4 [0:08] (nothing said)
           - 0:08 Switched to window "Receipt" in Safari
-
-          ![#4 at 0:08](frames/04.png)
 
         ## For an AI agent
 
         The user recorded the screen while talking, to show you something and ask for something. What they said is the request; the clicks, shortcuts and app switches are what they did; the drawings mark what they are pointing at.
-        Look at the contact sheet first: every keyframe in one picture, numbered as below. Then read the keyframes in order and open the frames you need by number (they are PNG files your Read tool can open). The events file has the exact time and position of every click, drag, scroll, shortcut, app switch and drawing. If the request is still unclear, ask the user before you change anything.
+        Look at the contact sheet first: every keyframe in one picture, numbered #N as above. Then open the frames you need by number: `frames/frame-03.png` is #3 (PNG files your Read tool can open). Red strokes, arrows, boxes and highlights are the user's drawings and point at what matters. For a closer look at a moment (something that moves, or happens between keyframes), run `screenme zoom "/Users/me/Desktop/Report 1" --at 0:12` (or `--phrase "words they said"`, or `--mark N`): it prints the path of a grid of frames around it. If the request is still unclear, ask the user before you change anything.
 
         - Contact sheet: `/Users/me/Desktop/Report 1/contact-sheet.png`
+        - Frames: `/Users/me/Desktop/Report 1/frames` (`frame-01.png` to `frame-04.png`)
         - Video: `/Users/me/Desktop/Report 1/recording.mp4`
-        - Events: `/Users/me/Desktop/Report 1/events.json`
-        - #1 at 0:00: `/Users/me/Desktop/Report 1/frames/01.png`
-        - #2 at 0:02: `/Users/me/Desktop/Report 1/frames/02.png`
-        - #3 at 0:04: `/Users/me/Desktop/Report 1/frames/03.png`
-        - #4 at 0:08: `/Users/me/Desktop/Report 1/frames/04.png`
+        - Manifest: `/Users/me/Desktop/Report 1/report.json` (every word with its time, the events, marks and windows)
 
         """)
     }
 
-    func testClipboardVersionLinksAbsolutePaths() {
-        let markdown = report(transcript: [segment(2, "It breaks.")], events: nil).markdown(absoluteLinks: true)
-        XCTAssertTrue(markdown.contains("![#1 at 0:00](</Users/me/Desktop/Report 1/frames/01.png>)"))
-        XCTAssertFalse(markdown.contains("](frames/"))
+    func testSummaryWithoutEventsOrNarrationSaysWhy() {
+        let summary = report(transcript: [], events: nil, duration: 4).summary
+        XCTAssertTrue(summary.hasPrefix("# Report: Safari\n"))
+        XCTAssertTrue(summary.contains("No narration. The recording has no audio.\n\n- #1 [0:00] (the start)\n"))
+        XCTAssertTrue(summary.contains("without narration"))
+        XCTAssertFalse(summary.contains("Recorded area"))
+        XCTAssertFalse(summary.contains("Cropped to"))
     }
 
-    func testReportWithoutEventsOrNarrationSaysWhy() {
-        let markdown = report(transcript: [], events: nil, duration: 4).markdown(absoluteLinks: false)
-        XCTAssertTrue(markdown.hasPrefix("# Report: Safari\n"))
-        XCTAssertTrue(markdown.contains("No narration. The recording has no audio.\n\n- #1 [0:00] (the start)\n"))
-        XCTAssertTrue(markdown.contains("without narration"))
-        XCTAssertFalse(markdown.contains("events.json"))
-        XCTAssertFalse(markdown.contains("Recorded area"))
+    func testManifestHasKeyframesMarksWordsAndEvents() throws {
+        var report = report(transcript: [segment(1, "Look at this total."), segment(6, "It should be 42.")], events: sampleEvents)
+        report.crops = [nil, AutoCrop.Crop(rect: CGRect(x: 0, y: 0, width: 600, height: 400), apps: ["Safari"]), nil, nil]
+        let manifest = report.manifest
+        XCTAssertEqual(manifest.keyframes.map(\.number), [1, 2, 3, 4])
+        XCTAssertEqual(manifest.keyframes.map(\.file), ["frames/frame-01.png", "frames/frame-02.png", "frames/frame-03.png", "frames/frame-04.png"])
+        XCTAssertEqual(manifest.keyframes[1].fullFile, "frames-full/frame-02.png")
+        XCTAssertEqual(manifest.keyframes[1].crop, ReportManifest.Crop(rect: ReportManifest.Rect(x: 0, y: 0, width: 600, height: 400), apps: ["Safari"]))
+        XCTAssertNil(manifest.keyframes[0].crop)
+        XCTAssertEqual(manifest.keyframes[1].events.map(\.text), ["Clicked button \"Pay\" at 412, 300", "Pressed ⌘R"])
+        XCTAssertEqual(manifest.keyframes[2].text, "It should be 42.")
+        XCTAssertEqual(manifest.marks, [ReportManifest.Mark(number: 1, time: 4, kind: .drawing, tool: "arrow", color: "red",
+                                                            box: RecordingEvent.Box(x: 600, y: 40, width: 200, height: 100),
+                                                            x: 790, y: 50, keyframe: 3)])
+        XCTAssertEqual(manifest.transcript.words.count, 8)
+        XCTAssertEqual(manifest.transcript.segments.count, 2)
+        XCTAssertNil(manifest.transcript.noNarration)
+        XCTAssertEqual(manifest.events.count, 5)
+        XCTAssertEqual(manifest.croppedTo, "Safari")
+        XCTAssertEqual(manifest.contactSheetFull, "contact-sheet-full.png")
+        XCTAssertEqual(manifest.area, ReportManifest.Size(width: 1000, height: 600))
+        XCTAssertEqual(try JSONDecoder().decode(ReportManifest.self, from: manifest.json()), manifest)
     }
 
     func testLongFirstSentenceIsShortenedForTheTitle() {
@@ -367,23 +369,35 @@ final class AIReportTests: XCTestCase {
         XCTAssertEqual(report.keyframes[1].time, 1.2, accuracy: 0.001)
         let files = FileManager.default
         XCTAssertTrue(files.fileExists(atPath: report.folder.appendingPathComponent("recording.mp4").path))
-        let image = try XCTUnwrap(NSImage(contentsOf: report.folder.appendingPathComponent("frames/02.png")))
+        let image = try XCTUnwrap(NSImage(contentsOf: report.folder.appendingPathComponent("frames/frame-02.png")))
         XCTAssertEqual(image.size, CGSize(width: 320, height: 240))
         let sheet = try XCTUnwrap(NSImage(contentsOf: report.folder.appendingPathComponent("contact-sheet.png")))
         XCTAssertEqual(sheet.size, ContactSheet.layout(count: 2, boxHeight: 480).size)
-        let written = try JSONDecoder().decode(RecordingEvents.self, from: Data(contentsOf: report.folder.appendingPathComponent("events.json")))
-        XCTAssertEqual(written, events)
-        let markdown = try String(contentsOf: report.folder.appendingPathComponent("report.md"), encoding: .utf8)
-        XCTAssertEqual(markdown, report.markdown(absoluteLinks: false))
-        XCTAssertTrue(markdown.contains("No narration. The recording has no audio."))
-        XCTAssertTrue(markdown.contains("- App: Notes\n- Window: Ideas\n"))
-        XCTAssertTrue(markdown.contains("- Recording: 320×240 px, 0:03"))
-        XCTAssertTrue(markdown.contains("- #2 [0:01] (nothing said)\n  - 0:01 Drew a red rectangle at the top left (10, 10, 100×50)"))
+        let manifest = try JSONDecoder().decode(ReportManifest.self, from: Data(contentsOf: report.folder.appendingPathComponent("report.json")))
+        XCTAssertEqual(manifest, report.manifest)
+        XCTAssertEqual(manifest.events, events.events)
+        XCTAssertEqual(manifest.duration, 3, accuracy: 0.01)
+        let summary = try String(contentsOf: report.folder.appendingPathComponent("summary.md"), encoding: .utf8)
+        XCTAssertEqual(summary, report.summary)
+        XCTAssertTrue(summary.contains("No narration. The recording has no audio."))
+        XCTAssertTrue(summary.contains("- App: Notes\n- Window: Ideas\n"))
+        XCTAssertTrue(summary.contains("- Recording: 320×240 px, 0:03"))
+        XCTAssertTrue(summary.contains("- #2 [0:01] (nothing said)\n  - 0:01 Drew a red rectangle at the top left (10, 10, 100×50) (mark 1)"))
+        let listed = try FileManager.default.contentsOfDirectory(atPath: report.folder.path).sorted()
+        XCTAssertEqual(listed, ["contact-sheet.png", "frames", "recording.mp4", "report.json", "summary.md"])
 
-        // A second report from the same second gets its own folder; without events there is no events.json.
+        // Pasted into a chat it is the contact sheet; into a terminal, the summary.
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name("AIReportTests-\(UUID().uuidString)"))
+        defer { pasteboard.releaseGlobally() }
+        AIReporter.copy(report, to: pasteboard)
+        XCTAssertEqual(pasteboard.pasteboardItems?.count, 1)
+        XCTAssertEqual(pasteboard.string(forType: .string), report.summary)
+        XCTAssertEqual(pasteboard.data(forType: .png), try Data(contentsOf: report.folder.appendingPathComponent("contact-sheet.png")))
+
+        // A second report from the same second gets its own folder.
         let again = try await AIReporter.write(video, context: CaptureContext(), events: nil, recordedAt: Date(), in: directory)
         XCTAssertNotEqual(again.folder, report.folder)
-        XCTAssertFalse(files.fileExists(atPath: again.folder.appendingPathComponent("events.json").path))
+        XCTAssertNil(again.manifest.area)
         XCTAssertEqual(again.keyframes.map(\.time), [0.3])
     }
 
@@ -400,12 +414,12 @@ final class AIReportTests: XCTestCase {
         let report = try await AIReporter.write(video, context: CaptureContext(), events: events, recordedAt: Date(), in: directory)
         XCTAssertEqual(report.crops, [nil, AutoCrop.Crop(rect: CGRect(x: 0, y: 0, width: 320, height: 114), apps: ["Notes"])])
         func size(_ name: String) throws -> CGSize { try XCTUnwrap(NSImage(contentsOf: report.folder.appendingPathComponent(name))).size }
-        XCTAssertEqual(try size("frames/02.png"), CGSize(width: 320, height: 114))
-        XCTAssertEqual(try size("frames-full/02.png"), CGSize(width: 320, height: 240))
-        XCTAssertEqual(try size("frames/01.png"), CGSize(width: 320, height: 240))
+        XCTAssertEqual(try size("frames/frame-02.png"), CGSize(width: 320, height: 114))
+        XCTAssertEqual(try size("frames-full/frame-02.png"), CGSize(width: 320, height: 240))
+        XCTAssertEqual(try size("frames/frame-01.png"), CGSize(width: 320, height: 240))
         XCTAssertEqual(try size("contact-sheet-full.png"), ContactSheet.layout(count: 2, boxHeight: 480).size)
-        let markdown = report.markdown(absoluteLinks: false)
-        XCTAssertTrue(markdown.contains("\nCropped to: Notes (full frames in frames-full/)\n"))
+        XCTAssertTrue(report.summary.contains("\nCropped to: Notes (full frames in frames-full/)\n"))
+        XCTAssertTrue(report.summary.contains("- Uncropped frames: `\(report.folder.path)/frames-full`"))
 
         let whole = try await AIReporter.write(video, context: CaptureContext(), events: events, recordedAt: Date(), autoCrop: false, in: directory)
         XCTAssertFalse(whole.isCropped)

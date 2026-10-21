@@ -82,7 +82,7 @@ struct MCPServer {
         [
             "name": "get_latest_report",
             "description": "Return the newest Screenme Report for AI: a screen recording the user narrated and drew on, "
-                + "as report.md (a moment by moment timeline of what they said, clicked, pressed, switched to and drew, "
+                + "as summary.md (a moment by moment timeline of what they said, clicked, pressed, switched to and drew, "
                 + "with the paths of the video, frames and events.json) plus up to \(MCPServer.maxReportFrames) of its frames as images.",
             "inputSchema": ["type": "object", "properties": [String: Any]()],
         ],
@@ -152,21 +152,21 @@ struct MCPServer {
         return FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask)[0]
     }
 
-    /// The newest `Report …` folder in `parent` that has a `report.md`, by the date of that file.
+    /// The newest `Report …` folder in `parent` that has a `summary.md`, by the date of that file.
     static func latestReport(in parent: URL) -> URL? {
         let folders = (try? FileManager.default.contentsOfDirectory(at: parent, includingPropertiesForKeys: nil, options: .skipsHiddenFiles)) ?? []
         let reports: [(URL, Date)] = folders.compactMap { folder in
             guard folder.lastPathComponent.hasPrefix("Report ") else { return nil }
-            let file = folder.appendingPathComponent("report.md")
+            let file = folder.appendingPathComponent("summary.md")
             guard let date = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate else { return nil }
             return (folder, date)
         }
         return reports.max { $0.1 < $1.1 }?.0
     }
 
-    /// report.md, then up to `maxReportFrames` frames spread over the recording, then the folder's path.
+    /// summary.md, then up to `maxReportFrames` frames spread over the recording, then the folder's path.
     private func reportResult(_ folder: URL) throws -> [String: Any] {
-        let markdown = try String(contentsOf: folder.appendingPathComponent("report.md"), encoding: .utf8)
+        let markdown = try String(contentsOf: folder.appendingPathComponent("summary.md"), encoding: .utf8)
         let frames = ((try? FileManager.default.contentsOfDirectory(at: folder.appendingPathComponent("frames"), includingPropertiesForKeys: nil)) ?? [])
             .filter { $0.pathExtension.lowercased() == "png" }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }

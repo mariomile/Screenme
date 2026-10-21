@@ -3,8 +3,8 @@ import AVFoundation
 import UniformTypeIdentifiers
 
 /// Report for AI: turns a recording, what was said and what happened during it into a folder in the save folder
-/// (the video, keyframes, `events.json` and `report.md`) and copies the report, with absolute paths, ready to paste
-/// into an agent, GitHub or Linear. The work runs off the main thread; only the toast and the pasteboard are on it.
+/// (the contact sheet, keyframes, video, `summary.md` and `report.json`) and copies the summary, with absolute paths,
+/// and the contact sheet, ready to paste into an agent, GitHub or Linear. The work runs off the main thread; only the toast and the pasteboard are on it.
 enum AIReporter {
     /// Makes the report, copies it and shows the folder. Returns false when it failed, which an alert says.
     @MainActor
@@ -18,13 +18,26 @@ enum AIReporter {
                                          in: Storage.saveDirectory) { value in
                 Task { @MainActor in toast.update(value) }
             }
-            Clipboard.copyText(report.markdown(absoluteLinks: true))
-            NSWorkspace.shared.activateFileViewerSelecting([report.folder.appendingPathComponent("report.md")])
+            copy(report)
+            NSWorkspace.shared.activateFileViewerSelecting([report.folder.appendingPathComponent(AIReport.summaryName)])
             return true
         } catch {
             CaptureCoordinator.shared.report(error)
             return false
         }
+    }
+
+    /// The summary as text and the contact sheet as an image in one pasteboard item: a chat gets the sheet,
+    /// a terminal or a text field the summary.
+    @MainActor
+    static func copy(_ report: AIReport, to pasteboard: NSPasteboard = .general) {
+        let entry = NSPasteboardItem()
+        entry.setString(report.summary, forType: .string)
+        if let sheet = try? Data(contentsOf: report.folder.appendingPathComponent(AIReport.contactSheetName)) {
+            entry.setData(sheet, forType: .png)
+        }
+        pasteboard.clearContents()
+        pasteboard.writeObjects([entry])
     }
 
     /// "1512×982 points at 2x": the main screen, for the report's environment.
@@ -48,7 +61,6 @@ enum AIReporter {
         let folder = newFolder(in: parent)
         try FileManager.default.createDirectory(at: folder.appendingPathComponent("frames"), withIntermediateDirectories: true)
         try FileManager.default.copyItem(at: video, to: folder.appendingPathComponent(AIReport.videoName))
-        if let events { try events.json().write(to: folder.appendingPathComponent(AIReport.eventsName)) }
         progress(0.1)
 
         var transcript = Transcript()
@@ -116,7 +128,8 @@ enum AIReporter {
             try writePNG(sheet, to: folder.appendingPathComponent(AIReport.fullContactSheetName))
         }
 
-        try report.markdown(absoluteLinks: false).write(to: folder.appendingPathComponent("report.md"), atomically: true, encoding: .utf8)
+        try report.manifest.json().write(to: folder.appendingPathComponent(AIReport.manifestName))
+        try report.summary.write(to: folder.appendingPathComponent(AIReport.summaryName), atomically: true, encoding: .utf8)
         return report
     }
 
