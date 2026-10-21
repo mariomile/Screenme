@@ -42,15 +42,19 @@ extension EditorController {
     }
 
     /// Copy for AI: the edited image, with the notes on annotations in the text. The text names a file
-    /// holding exactly what was copied. With "Close editor after copying" it also saves and closes.
+    /// holding exactly what was copied (redacted with "Hide sensitive info when sharing"). With "Close editor after copying" it also saves and closes.
     func copyForAI() {
         canvas?.finishTextEditing()
         guard let image = EditorRenderer.flatten(state: state, source: source, opaque: false),
               let png = encode(image, as: .png), let file = dragFile() else { return }
         CaptureContexts.setNotes(notes, for: item.url)
         Task {
-            await AIClipboard.copy(image: image, png: png, path: file, captureURL: item.url)
-            CaptureAction.copyForAI.confirm()
+            guard let hidden = await AIClipboard.copy(image: image, png: png, path: file, captureURL: item.url,
+                                                      unit: source.unit * state.outputScale) else {
+                Toast.show("Could not read the text", symbol: "exclamationmark.triangle.fill")
+                return
+            }
+            CaptureAction.copyForAI.confirm(hidden: hidden)
             if Prefs[Pref.editorCloseAfterCopy], writeToCapture() { window?.close() }
         }
     }

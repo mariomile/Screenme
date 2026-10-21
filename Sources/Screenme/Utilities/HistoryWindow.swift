@@ -329,7 +329,7 @@ private struct HistoryGridCell: View {
     private var menu: some View {
         ForEach(CaptureAction.allCases.filter { $0.isAvailable(for: item.kind) }, id: \.self) { action in
             if action == .edit || action == .trash { Divider() }
-            if action == .share {
+            if action == .share, !Prefs[Pref.hideSensitiveWhenSharing] {
                 ShareLink(item: item.url)
             } else {
                 Button(action.title(for: item.kind), systemImage: action.symbol(for: item.kind),

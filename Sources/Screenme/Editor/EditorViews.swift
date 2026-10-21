@@ -113,7 +113,7 @@ struct ToolbarTrailing: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            IconButton(symbol: "eye.slash", help: "Redact Sensitive Info: pixelate emails, phone numbers, cards, IBANs, keys and IPs",
+            IconButton(symbol: "eye.slash", help: "Redact Sensitive Info: pixelate emails, phone numbers, cards, IBANs, keys, IPs and faces",
                        enabled: !c.isRedacting) { c.redactSensitiveInfo() }
 
             Button {
@@ -161,8 +161,8 @@ struct ToolbarTrailing: View {
                 .frame(width: 44, height: 30)
 
             IconButton(symbol: "doc.on.doc", help: Prefs[Pref.editorCloseAfterCopy] ? "Copy (⌘C)\nPuts the edited image on the clipboard, saves it and closes the editor." : "Copy (⌘C)\nPuts the edited image on the clipboard without closing the editor.", enabled: true) { c.copyImage() }
-            IconButton(symbol: "sparkles", help: "Copy for AI (⇧⌘C)\nCopies the edited image with its context for Claude, ChatGPT or Cursor: the app and page it came from, your notes on annotations and the text in it.", enabled: true) { c.copyForAI() }
-            IconButton(symbol: "square.and.arrow.up", help: "Share\nSends the edited image with AirDrop, Messages, Mail and more.", enabled: true) { if let url = c.dragFile() { Share.show(url) } }
+            IconButton(symbol: "sparkles", help: "Copy for AI (⇧⌘C)\nCopies the edited image with its context for Claude, ChatGPT or Cursor: the app and page it came from, your notes on annotations and the text in it. Hides sensitive info first if Settings > Screenshots says so.", enabled: true) { c.copyForAI() }
+            IconButton(symbol: "square.and.arrow.up", help: "Share\nSends the edited image with AirDrop, Messages, Mail and more. Hides sensitive info first if Settings > Screenshots says so.", enabled: true) { if let url = c.dragFile() { Share.show(url) } }
 
             Button("Done") { c.save() }
                 .buttonStyle(.borderedProminent)

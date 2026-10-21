@@ -1,7 +1,7 @@
 import Foundation
 
 /// Finds what should not be shared in a line of recognized text: emails, phone numbers, card numbers,
-/// IBANs, API keys and tokens, IPv4 addresses. Pure, so the editor's Redact Sensitive Info can be tested
+/// IBANs, API keys and tokens, IPv4 addresses. Pure, so Redact Sensitive Info and sharing can be tested
 /// without Vision.
 enum SensitiveInfo {
     enum Kind: String, CaseIterable {
@@ -32,6 +32,14 @@ enum SensitiveInfo {
         return found.sorted { $0.range.lowerBound < $1.range.lowerBound }
     }
 
+    /// `text` with every match replaced by "[redacted]", and how many were replaced.
+    static func mask(_ text: String) -> (text: String, count: Int) {
+        let found = matches(in: text)
+        var masked = text
+        for match in found.reversed() { masked.replaceSubrange(match.range, with: "[redacted]") }
+        return (masked, found.count)
+    }
+
     // MARK: Patterns
 
     private static let email = regex(#"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}"#, caseInsensitive: true)
@@ -40,10 +48,15 @@ enum SensitiveInfo {
         #"sk-[A-Za-z0-9_-]{16,}"#,
         #"(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9]{10,}"#,
         #"pk_[A-Za-z0-9_]{16,}"#,
-        #"gh[po]_[A-Za-z0-9]{20,}"#,
+        #"gh[pousr]_[A-Za-z0-9]{20,}"#,
         #"github_pat_[A-Za-z0-9_]{20,}"#,
+        #"glpat-[A-Za-z0-9_-]{20,}"#,
+        #"npm_[A-Za-z0-9]{30,}"#,
+        #"hf_[A-Za-z0-9]{30,}"#,
+        #"whsec_[A-Za-z0-9]{20,}"#,
+        #"SG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}"#,
+        #"(?:AKIA|ASIA)[0-9A-Z]{16}"#,
         #"xox[bpas]-[A-Za-z0-9-]{10,}"#,
-        #"AKIA[0-9A-Z]{16}"#,
         #"AIza[0-9A-Za-z_-]{30,}"#,
         #"eyJ[A-Za-z0-9_-]{8,}(?:\.[A-Za-z0-9_-]{8,}){1,2}"#,
     ].map { "(?<![A-Za-z0-9_])" + $0 }.joined(separator: "|"))

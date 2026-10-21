@@ -35,17 +35,22 @@ extension CaptureAction {
         let noun = kind == .image ? "image" : kind == .gif ? "GIF" : "video"
         switch self {
         case .copy: return "Puts the \(noun) on the clipboard, ready to paste into any app."
-        case .copyForAI: return "Copies the image with its context for Claude, ChatGPT or Cursor: the app, window and page it came from, your notes on annotations and the text in it."
+        case .copyForAI: return "Copies the image with its context for Claude, ChatGPT or Cursor: the app, window and page it came from, your notes on annotations and the text in it." + Self.hidingNote
         case .copyMarkdown: return "Saves the \(noun) to your save folder and copies a Markdown image link to it, for notes and docs."
         case .copyPath: return "Copies the file path of the \(noun), for scripts or the terminal."
         case .save: return "Saves a copy to your save folder (Settings > General)."
         case .saveAs: return "Saves a copy where you choose, with the name you choose."
         case .reveal: return "Shows the file in Finder."
-        case .share: return "Sends it with AirDrop, Messages, Mail and more."
+        case .share: return "Sends it with AirDrop, Messages, Mail and more." + (kind == .image ? Self.hidingNote : "")
         case .edit: return kind == .image ? "Opens the editor: arrows, text, blur, highlights, crop and backgrounds." : "Opens the video editor: trim, mute, and export as video or GIF."
         case .pin: return "Keeps the image floating above all windows, as a reference while you work."
         case .trash: return "Moves the file to the Trash and removes it from History."
         }
+    }
+
+    /// Added to the tooltips of the actions the setting applies to, while it is on.
+    private static var hidingNote: String {
+        Prefs[Pref.hideSensitiveWhenSharing] ? " Sensitive info and faces are hidden in the copy." : ""
     }
 
     /// Title and what it does, for a tooltip.
