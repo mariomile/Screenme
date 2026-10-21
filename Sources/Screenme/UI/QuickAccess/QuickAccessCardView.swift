@@ -87,6 +87,8 @@ struct QuickAccessCardView: View {
                 HStack {
                     HUDCircle(symbol: "xmark", label: "Close", help: "Close\nHides this card. The capture stays in History.") { card?.dismiss() }
                     Spacer()
+                    circle(.copyForAI)
+                    Spacer()
                     circle(.pin)
                 }
                 Spacer()

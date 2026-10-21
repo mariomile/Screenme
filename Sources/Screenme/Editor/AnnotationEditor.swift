@@ -124,6 +124,7 @@ private final class EditorWindow: NSObject, NSWindowDelegate, NSToolbarDelegate 
         switch event.charactersIgnoringModifiers?.lowercased() ?? "" {
         case "z": return typing ? send(shift ? Selector(("redo:")) : Selector(("undo:"))) : (shift ? c.redo : c.undo)
         case "x": return typing ? send(#selector(NSText.cut(_:))) : nil
+        case "c" where shift && !typing: return c.copyForAI
         case "c": return typing ? send(#selector(NSText.copy(_:))) : { if !c.copySelection() { c.copyImage() } }
         case "v": return typing ? send(#selector(NSText.paste(_:))) : { _ = c.pasteAnnotations() }
         case "a": return typing ? send(#selector(NSText.selectAll(_:))) : c.selectAll

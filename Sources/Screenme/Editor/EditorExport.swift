@@ -41,6 +41,37 @@ extension EditorController {
         if Prefs[Pref.editorCloseAfterCopy], writeToCapture() { window?.close() }
     }
 
+    /// Copy for AI: the edited image, with the notes on annotations in the text. The text names a file
+    /// holding exactly what was copied. With "Close editor after copying" it also saves and closes.
+    func copyForAI() {
+        canvas?.finishTextEditing()
+        guard let image = EditorRenderer.flatten(state: state, source: source, opaque: false),
+              let png = encode(image, as: .png), let file = dragFile() else { return }
+        CaptureContexts.setNotes(notes, for: item.url)
+        Task {
+            await AIClipboard.copy(image: image, png: png, path: file, captureURL: item.url)
+            CaptureAction.copyForAI.confirm()
+            if Prefs[Pref.editorCloseAfterCopy], writeToCapture() { window?.close() }
+        }
+    }
+
+    /// The notes on annotations, in drawing order, each naming what it points at for an AI reading the image.
+    var notes: [String] {
+        var counter = 0
+        let crop = state.cropRect
+        return state.annotations.compactMap { a in
+            if a.kind == .counter { counter += 1 }
+            let note = a.note.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !note.isEmpty else { return nil }
+            if a.kind == .counter { return "Marker \(counter): \(note)" }
+            let box = a.bounds(unit: unit)
+            let column = ["left", "center", "right"][min(2, max(0, Int((box.midX - crop.minX) / crop.width * 3)))]
+            let row = ["top", "middle", "bottom"][min(2, max(0, Int((box.midY - crop.minY) / crop.height * 3)))]
+            let place = row == "middle" && column == "center" ? "center" : "\(row) \(column)"
+            return "\(a.kind.traits.title) at the \(place): \(note)"
+        }
+    }
+
     /// Overwrites the capture file with the document and tells the rest of the app. False on failure, after an alert.
     private func writeToCapture() -> Bool {
         canvas?.finishTextEditing()
@@ -56,6 +87,7 @@ extension EditorController {
             return false
         }
         markSaved()
+        CaptureContexts.setNotes(notes, for: item.url)
         NotificationCenter.default.post(name: .captureUpdated, object: item.url)
         return true
     }

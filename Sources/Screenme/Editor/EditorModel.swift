@@ -70,6 +70,8 @@ struct Annotation: Identifiable, Equatable {
     var kind: ToolKind
     var style: ToolStyle
     var shape: Shape
+    /// What the user wants done here, for Copy for AI. Not drawn.
+    var note = ""
 
     /// A new annotation of `kind` started at `p`.
     init(kind: ToolKind, style: ToolStyle, at p: CGPoint) {

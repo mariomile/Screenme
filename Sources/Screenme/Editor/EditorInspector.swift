@@ -27,11 +27,39 @@ struct InspectorBar: View {
                 }
             }
             Spacer(minLength: 12)
+            if c.mode.crop == nil, c.selection.count == 1, let annotation = c.selectedAnnotations.first {
+                NoteField(c: c, annotation: annotation)
+            }
             if !c.selection.isEmpty && c.mode.crop == nil { SelectionActions(c: c) }
         }
         .padding(.horizontal, 14)
         .frame(height: 52)
         .background(.bar)
+    }
+}
+
+/// The note on the selected annotation: what the user wants done there. Copy for AI lists it; it is not drawn.
+private struct NoteField: View {
+    @ObservedObject var c: EditorController
+    let annotation: Annotation
+
+    var body: some View {
+        TextField("Note for AI", text: Binding(get: { annotation.note }, set: setNote))
+            .textFieldStyle(.roundedBorder)
+            .font(.system(size: 12))
+            .frame(width: 200)
+            .onSubmit { c.focusCanvas() }
+            .help("Note for AI\nWhat you want changed here. Copy for AI lists every note with what it points at; the note is not drawn on the image.")
+    }
+
+    /// Typing in one note is one undo step.
+    private func setNote(_ note: String) {
+        let id = annotation.id
+        let before = c.checkpoint()
+        c.update { s in
+            if let i = s.annotations.firstIndex(where: { $0.id == id }) { s.annotations[i].note = note }
+        }
+        c.commit(since: before, coalesce: "note \(id)")
     }
 }
 

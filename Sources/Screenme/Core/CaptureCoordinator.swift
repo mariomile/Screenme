@@ -144,7 +144,8 @@ final class CaptureCoordinator {
 
     private func finishScreenshot(_ result: SelectionResult) async throws {
         if case .area = result.target { previousArea = result.target }
-        try deliver(Notch.hidden(in: try await image(for: result), of: result.target))
+        let image = Notch.hidden(in: try await image(for: result), of: result.target)
+        try deliver(image) { CaptureContexts.record(result.target, for: $0) }
     }
 
     /// The frozen picture when the picker had one, otherwise a fresh capture.
@@ -154,8 +155,10 @@ final class CaptureCoordinator {
     }
 
     /// Writes an image capture and runs the after-capture actions.
-    func deliver(_ image: CGImage) throws {
+    /// `written` runs on the new file before the after-capture actions.
+    func deliver(_ image: CGImage, written: (URL) -> Void = { _ in }) throws {
         let item = CaptureItem(url: try Storage.write(Watermark.applied(to: image)), kind: .image)
+        written(item.url)
         Sounds.shutter()
         afterCapture(item)
     }

@@ -4,11 +4,12 @@ import SwiftUI
 /// What the user can do with a finished capture, from Quick Access, History, pins and the editors.
 /// Every surface takes its titles, symbols, availability and confirmation toasts from here.
 enum CaptureAction: CaseIterable {
-    case copy, copyMarkdown, copyPath, save, saveAs, reveal, share, edit, pin, trash
+    case copy, copyForAI, copyMarkdown, copyPath, save, saveAs, reveal, share, edit, pin, trash
 
     func title(for kind: CaptureItem.Kind) -> String {
         switch self {
         case .copy: "Copy"
+        case .copyForAI: "Copy for AI"
         case .copyMarkdown: "Copy as Markdown"
         case .copyPath: "Copy Path"
         case .save: "Save"
@@ -24,6 +25,7 @@ enum CaptureAction: CaseIterable {
     func symbol(for kind: CaptureItem.Kind) -> String {
         switch self {
         case .copy: "doc.on.doc"
+        case .copyForAI: "sparkles"
         case .copyMarkdown: "doc.text"
         case .copyPath: "link"
         case .save: "square.and.arrow.down"
@@ -38,9 +40,10 @@ enum CaptureAction: CaseIterable {
 
     /// Images open in the annotation editor and videos in the video editor. GIFs have no editor:
     /// AVFoundation cannot read them and the annotation editor would flatten the animation.
-    /// Only images pin. A Markdown image link does not play a video.
+    /// Only images pin or go to an AI. A Markdown image link does not play a video.
     func isAvailable(for kind: CaptureItem.Kind) -> Bool {
         switch self {
+        case .copyForAI: kind == .image
         case .copyMarkdown: kind != .video
         case .edit: kind != .gif
         case .pin: kind == .image
@@ -55,6 +58,9 @@ enum CaptureAction: CaseIterable {
         switch self {
         case .copy:
             Clipboard.copy(item)
+            confirm()
+        case .copyForAI:
+            guard await AIClipboard.copy(item) else { return failed() }
             confirm()
         case .copyMarkdown:
             // The link points at the copy in the save folder: the capture itself may be pruned from History.
@@ -84,6 +90,7 @@ enum CaptureAction: CaseIterable {
             PinWindow.pin(item)
         case .trash:
             withAnimation(.snappy) { CaptureHistory.shared.trash(item) }
+            CaptureContexts.forget(item.url)
             CaptureCoordinator.shared.forget(item)
             confirm()
         }
@@ -96,6 +103,8 @@ enum CaptureAction: CaseIterable {
         switch self {
         case .copy:
             Toast.show("Copied to clipboard", symbol: "doc.on.doc.fill")
+        case .copyForAI:
+            Toast.show("Copied for AI", symbol: "sparkles")
         case .copyMarkdown:
             Toast.show("Markdown copied", symbol: "doc.text.fill")
         case .copyPath:
