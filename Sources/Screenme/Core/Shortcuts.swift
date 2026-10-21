@@ -9,6 +9,7 @@ enum ShortcutAction: String, CaseIterable, Codable, Identifiable {
     case captureWindow
     case capturePreviousArea
     case captureText
+    case translateText
     case scrollingCapture
     case selfTimer
     case recordScreen
@@ -26,6 +27,7 @@ enum ShortcutAction: String, CaseIterable, Codable, Identifiable {
         case .captureWindow: "Capture Window"
         case .capturePreviousArea: "Capture Previous Area"
         case .captureText: "Capture Text (OCR)"
+        case .translateText: "Capture & Translate Text"
         case .scrollingCapture: "Scrolling Capture"
         case .selfTimer: "Self-Timer"
         case .recordScreen: "Record Screen"
@@ -43,6 +45,7 @@ enum ShortcutAction: String, CaseIterable, Codable, Identifiable {
         case .captureWindow: "macwindow"
         case .capturePreviousArea: "arrow.counterclockwise.rectangle"
         case .captureText: "text.viewfinder"
+        case .translateText: "translate"
         case .scrollingCapture: "arrow.up.and.down.text.horizontal"
         case .selfTimer: "timer"
         case .recordScreen: "record.circle"

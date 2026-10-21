@@ -65,7 +65,7 @@ final class CaptureCoordinator {
     private func capture(_ action: ShortcutAction) async throws {
         // Recordings have their own setting; text recognition does not keep a picture.
         let hidesIcons = Prefs[Pref.hideDesktopIconsInShots] && !DesktopIcons.isHidden
-            && action != .recordScreen && action != .captureText
+            && ![.recordScreen, .captureText, .translateText].contains(action)
         if hidesIcons {
             DesktopIcons.setHidden(true)
             try? await Task.sleep(for: .milliseconds(700))
@@ -108,6 +108,24 @@ final class CaptureCoordinator {
                 Clipboard.copyText(text)
                 Toast.show("Text copied", symbol: "doc.on.clipboard")
             }
+
+        case .translateText:
+            guard let result = await SelectionOverlay.select(.text) else { return }
+            let text = try await TextRecognizer.recognize(try await image(for: result))
+            guard !text.isEmpty else {
+                Toast.show("No text found", symbol: "text.viewfinder")
+                return
+            }
+            let translation: TextTranslation
+            do {
+                translation = try await TextTranslator.translate(text)
+            } catch TranslateError.sameLanguage(let language) {
+                Clipboard.copyText(text)
+                Toast.show("Already in \(language): text copied", symbol: "doc.on.clipboard")
+                return
+            }
+            Clipboard.copyText(translation.text)
+            TranslationPanel.show(translation, near: result.target.cocoaFrame)
 
         case .scrollingCapture:
             guard let result = await SelectionOverlay.select(.scrolling) else { return }
