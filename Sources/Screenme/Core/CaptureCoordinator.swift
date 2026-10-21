@@ -64,15 +64,11 @@ final class CaptureCoordinator {
     }
 
     private func capture(_ action: ShortcutAction, target: ActionLink.Target?) async throws {
-        // Recordings have their own setting; text recognition does not keep a picture;
-        // Pick Color and Measure read the screen as the user sees it.
-        let hidesIcons = Prefs[Pref.hideDesktopIconsInShots] && !DesktopIcons.isHidden
-            && ![.recordScreen, .captureText, .translateText, .pickColor, .measure].contains(action)
-        if hidesIcons {
-            DesktopIcons.setHidden(true)
-            try? await Task.sleep(for: .milliseconds(700))
+        var hidIcons = false
+        if action.writesScreenshot, Prefs[Pref.hideDesktopIconsInShots] {
+            hidIcons = await DesktopIcons.hideForCapture(settle: true)
         }
-        defer { if hidesIcons { DesktopIcons.setHidden(false) } }
+        defer { if hidIcons { DesktopIcons.setHidden(false) } }
 
         switch action {
         case .allInOne, .pinLastCapture, .openHistory, .toggleDesktopIcons:

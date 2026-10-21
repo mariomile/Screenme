@@ -69,6 +69,17 @@ enum ShortcutAction: String, CaseIterable, Codable, Identifiable {
         }
     }
 
+    /// True for actions that save a screenshot, which hide the desktop icons when Settings ask for it.
+    /// Recordings have their own setting, text recognition keeps no picture, and Pick Color and Measure
+    /// read the screen as the user sees it.
+    var writesScreenshot: Bool {
+        switch self {
+        case .captureArea, .captureWindow, .captureFullscreen, .capturePreviousArea, .selfTimer, .scrollingCapture: true
+        case .allInOne, .captureText, .translateText, .pickColor, .measure, .recordScreen,
+             .pinLastCapture, .openHistory, .toggleDesktopIcons: false
+        }
+    }
+
     /// CleanShot-style defaults: Screenme takes over the macOS screenshot shortcuts.
     var defaultCombo: KeyCombo? {
         let cmdShift = UInt32(cmdKey | shiftKey)

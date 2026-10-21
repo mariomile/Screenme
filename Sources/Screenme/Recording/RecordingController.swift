@@ -218,10 +218,9 @@ private final class Session {
 
     /// Hides the desktop icons for the duration when the settings ask for it.
     func hideDesktopIcons() async {
-        guard settings.hideDesktopIcons, !DesktopIcons.isHidden else { return }
-        DesktopIcons.setHidden(true)
-        hidIcons = true
-        if settings.countdown == 0 { try? await Task.sleep(for: .milliseconds(700)) }
+        guard settings.hideDesktopIcons else { return }
+        // A countdown gives the covers time to fade in.
+        hidIcons = await DesktopIcons.hideForCapture(settle: settings.countdown == 0)
     }
 
     /// Puts up the filmed overlays, starts capturing, then shows the outline and the controls.

@@ -37,6 +37,15 @@ enum DesktopIcons {
         }
     }
 
+    /// Hides the icons for a capture or recording, which shows them again when it ends. Returns false when they
+    /// were already hidden, so they stay that way. `settle` waits for the covers to fade in before the screen is read.
+    static func hideForCapture(settle: Bool) async -> Bool {
+        guard !isHidden else { return false }
+        setHidden(true)
+        if settle { try? await Task.sleep(for: .milliseconds(700)) }
+        return true
+    }
+
     // MARK: Screens
 
     private static func observe() {
