@@ -11,6 +11,7 @@ enum ShortcutAction: String, CaseIterable, Codable, Identifiable {
     case captureText
     case translateText
     case pickColor
+    case measure
     case scrollingCapture
     case selfTimer
     case recordScreen
@@ -30,6 +31,7 @@ enum ShortcutAction: String, CaseIterable, Codable, Identifiable {
         case .captureText: "Capture Text (OCR)"
         case .translateText: "Capture & Translate Text"
         case .pickColor: "Pick Color"
+        case .measure: "Measure"
         case .scrollingCapture: "Scrolling Capture"
         case .selfTimer: "Self-Timer"
         case .recordScreen: "Record Screen"
@@ -49,6 +51,7 @@ enum ShortcutAction: String, CaseIterable, Codable, Identifiable {
         case .captureText: "text.viewfinder"
         case .translateText: "translate"
         case .pickColor: "eyedropper"
+        case .measure: "ruler"
         case .scrollingCapture: "arrow.up.and.down.text.horizontal"
         case .selfTimer: "timer"
         case .recordScreen: "record.circle"
