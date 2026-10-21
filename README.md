@@ -47,15 +47,24 @@ screenme list --limit 5                  # recent captures, newest first
 
 `capture` waits up to 20 seconds for the file and exits with an error if none appears (Screenme not allowed to record the screen, another capture in progress, no such window). Your after-capture settings still apply: a capture is also copied, shown in Quick Access, and so on.
 
-### Claude Code (MCP)
+### MCP server for AI agents
 
-`screenme mcp` is an MCP server over stdio. Register it once:
+`screenme mcp` is a standard MCP server over stdio, so any MCP client can use it: Claude Code, Claude Desktop, Cursor, Codex, VS Code, Windsurf, Zed and others. Use the full path, because apps started from the Dock do not see your shell's PATH:
 
-```bash
-claude mcp add screenme -- screenme mcp
+```json
+{
+  "mcpServers": {
+    "screenme": {
+      "command": "/Applications/Screenme.app/Contents/Helpers/screenme",
+      "args": ["mcp"]
+    }
+  }
+}
 ```
 
-Claude then has three tools: `take_screenshot` (mode `fullscreen`, `area` with `x`, `y`, `width`, `height`, or `window` with `app`), `get_latest_capture` and `list_captures`. Screenshots come back as an image (scaled to at most 1568 pixels on the long side) plus the path of the full-size file.
+That block goes in the client's MCP config (Claude Desktop: `~/Library/Application Support/Claude/claude_desktop_config.json`; Cursor: `~/.cursor/mcp.json`). In Claude Code: `claude mcp add screenme -- /Applications/Screenme.app/Contents/Helpers/screenme mcp`. In Codex: `codex mcp add screenme -- /Applications/Screenme.app/Contents/Helpers/screenme mcp`.
+
+The agent then has three tools: `take_screenshot` (mode `fullscreen`, `area` with `x`, `y`, `width`, `height`, or `window` with `app`), `get_latest_capture` and `list_captures`. Screenshots come back as an image (scaled to at most 1568 pixels on the long side) plus the path of the full-size file.
 
 ## Where files go
 
