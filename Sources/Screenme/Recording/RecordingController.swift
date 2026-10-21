@@ -206,6 +206,7 @@ private final class Session {
     private var outline: RecordingOutline?
     private var bar: RecordingControlBar?
     private var events: RecordingEventRecorder?
+    private var cursor: CursorRecorder?
     private var palette: DrawPalette?
     private var drawKey: TemporaryHotKey?
     private var escapeKey: TemporaryHotKey?
@@ -258,6 +259,7 @@ private final class Session {
         events.start()
         self.events = events
         drawing.onDrawing = { [weak events] tool, color, box, tip in events?.addDrawing(tool, color: color, box: box, tip: tip) }
+        startCursor()
 
         let insideFrame = if case .display = target { true } else { false }
         let outline = RecordingOutline(frame: frame, insideFrame: insideFrame)
@@ -280,8 +282,21 @@ private final class Session {
         }
     }
 
-    /// What happened during the recording, for Report for AI.
-    var recordedEvents: RecordingEvents? { events?.recorded }
+    /// What happened during the recording, for Report for AI, with the cursor track for the video editor.
+    var recordedEvents: RecordingEvents? {
+        guard var recorded = events?.recorded else { return nil }
+        recorded.cursor = cursor?.track
+        return recorded
+    }
+
+    /// Samples the pointer against the current recorder's clock. A restart makes a new recorder, so a new track.
+    private func startCursor() {
+        cursor?.stop()
+        guard let recorder else { return }
+        let cursor = CursorRecorder(area: target.cocoaFrame, hidden: settings.rendersCursorLater) { [weak recorder] in recorder?.videoTime() }
+        cursor.start()
+        self.cursor = cursor
+    }
 
     /// Draw mode: the overlay takes the mouse, the palette shows, and Esc leaves it.
     func setDrawing(_ on: Bool) {
@@ -352,6 +367,7 @@ private final class Session {
         clock.reset()
         outline?.setPaused(false)
         events?.reset()
+        startCursor()
         effects?.clearDrawings()
     }
 
@@ -363,6 +379,7 @@ private final class Session {
         HotKeyCenter.shared.unregisterTemporary(drawKey)
         drawKey = nil
         events?.stop()
+        cursor?.stop()
         bar?.close()
         bar = nil
         outline?.close()

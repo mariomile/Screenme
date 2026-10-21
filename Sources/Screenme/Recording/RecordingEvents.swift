@@ -59,6 +59,8 @@ struct RecordingEvents: Codable, Equatable {
     var width: Double
     var height: Double
     var events: [RecordingEvent]
+    /// The pointer's path and button presses, for the video editor's zoom and Smooth cursor. Nil in older recordings.
+    var cursor: CursorTrack? = nil
 
     /// `.Screenme 2026-10-21 at 10.22.33.mp4.events.json` next to the recording. Hidden, so neither History
     /// nor the command line's capture list ever shows it as a capture.

@@ -17,6 +17,8 @@ struct RecordingSettings {
     var fps: Int
     var quality: VideoQuality
     var showCursor: Bool
+    /// Settings > Recording > Smooth cursor: the video is filmed without the cursor and the editor draws it.
+    var smoothCursor: Bool
     var highlightClicks: Bool
     var showKeystrokes: Bool
     var microphone: Bool
@@ -37,6 +39,7 @@ struct RecordingSettings {
             fps: Prefs[Pref.recordingFPS] >= 60 ? 60 : 30,
             quality: Prefs[Pref.recordingQuality],
             showCursor: Prefs[Pref.recordingShowCursor],
+            smoothCursor: Prefs[Pref.recordingSmoothCursor],
             highlightClicks: Prefs[Pref.recordingHighlightClicks],
             showKeystrokes: Prefs[Pref.recordingShowKeystrokes],
             microphone: Prefs[Pref.recordingMicrophone],
@@ -66,6 +69,13 @@ struct RecordingSettings {
         Prefs[Pref.recordingHideDesktopIcons] = hideDesktopIcons
         Prefs[Pref.recordingHideNotifications] = hideNotifications
     }
+
+    /// The cursor is left out of the video and drawn later by the video editor. GIF recordings have no editor,
+    /// so they keep the filmed cursor.
+    var rendersCursorLater: Bool { showCursor && smoothCursor && format == .video }
+
+    /// Whether ScreenCaptureKit films the cursor.
+    var filmsCursor: Bool { showCursor && !rendersCursorLater }
 
     /// How the stream is filmed for the chosen format. GIFs are filmed at 1x, at most 30 fps and without sound:
     /// they end up small and silent anyway.
