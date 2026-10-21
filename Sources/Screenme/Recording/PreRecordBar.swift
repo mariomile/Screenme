@@ -29,9 +29,34 @@ final class PreRecordUI: ObservableObject {
     init(target: CaptureTarget) {
         self.target = target
         refreshDevices()
-        // A permission revoked since last time must not leave the toggle on.
+        settings = Self.sanitized(settings)
+    }
+
+    /// `settings` with the microphone and camera off when their permission was revoked since last time.
+    static func sanitized(_ settings: RecordingSettings) -> RecordingSettings {
+        var settings = settings
         if settings.microphone, !Permission.microphone.isGranted { settings.microphone = false }
         if settings.webcam, !Permission.camera.isGranted { settings.webcam = false }
+        return settings
+    }
+
+    /// What the bar would record with if the user pressed Record at once, for a recording started by a link:
+    /// the saved settings and, when they ask for it, the camera bubble, already showing. The caller owns the bubble.
+    static func savedChoice(for target: CaptureTarget) -> (RecordingSettings, WebcamBubble?) {
+        var settings = sanitized(.saved)
+        let webcam = settings.webcam ? showWebcam(near: target, settings: settings) : nil
+        if webcam == nil { settings.webcam = false }
+        return (settings, webcam)
+    }
+
+    /// The camera bubble next to the area, showing. Nil, with a toast, when there is no camera.
+    private static func showWebcam(near target: CaptureTarget, settings: RecordingSettings) -> WebcamBubble? {
+        guard let bubble = WebcamBubble(near: target.cocoaFrame, size: settings.webcamSize, deviceID: settings.webcamID) else {
+            Toast.show("No camera found", symbol: "video.slash.fill")
+            return nil
+        }
+        bubble.show()
+        return bubble
     }
 
     /// Shows the bar until the user records or cancels, then removes it. Returns the settings to record with and
@@ -125,13 +150,11 @@ final class PreRecordUI: ObservableObject {
         guard barPanel != nil else { return }
         if on, webcam == nil {
             guard Permission.camera.isGranted else { return }
-            if let bubble = WebcamBubble(near: target.cocoaFrame, size: settings.webcamSize, deviceID: settings.webcamID) {
+            if let bubble = Self.showWebcam(near: target, settings: settings) {
                 bubble.onResize = { [weak self] size in self?.settings.webcamSize = size }
-                bubble.show()
                 webcam = bubble
             } else {
                 settings.webcam = false
-                Toast.show("No camera found", symbol: "video.slash.fill")
             }
         } else if !on {
             webcam?.close()

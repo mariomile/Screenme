@@ -118,7 +118,7 @@ final class CaptureCoordinator {
 
         case .recordScreen:
             guard let result = try await select(.recording, target) else { return }
-            try await RecordingController.shared.start(result.target, asksForSettings: target == nil)
+            try await RecordingController.shared.start(result.target, usingSavedSettings: target != nil)
         }
     }
 
