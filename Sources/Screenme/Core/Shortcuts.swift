@@ -10,6 +10,7 @@ enum ShortcutAction: String, CaseIterable, Codable, Identifiable {
     case capturePreviousArea
     case captureText
     case translateText
+    case pickColor
     case scrollingCapture
     case selfTimer
     case recordScreen
@@ -28,6 +29,7 @@ enum ShortcutAction: String, CaseIterable, Codable, Identifiable {
         case .capturePreviousArea: "Capture Previous Area"
         case .captureText: "Capture Text (OCR)"
         case .translateText: "Capture & Translate Text"
+        case .pickColor: "Pick Color"
         case .scrollingCapture: "Scrolling Capture"
         case .selfTimer: "Self-Timer"
         case .recordScreen: "Record Screen"
@@ -46,6 +48,7 @@ enum ShortcutAction: String, CaseIterable, Codable, Identifiable {
         case .capturePreviousArea: "arrow.counterclockwise.rectangle"
         case .captureText: "text.viewfinder"
         case .translateText: "translate"
+        case .pickColor: "eyedropper"
         case .scrollingCapture: "arrow.up.and.down.text.horizontal"
         case .selfTimer: "timer"
         case .recordScreen: "record.circle"
@@ -55,10 +58,10 @@ enum ShortcutAction: String, CaseIterable, Codable, Identifiable {
         }
     }
 
-    /// False for actions that only show what Screenme already has.
+    /// False for actions that only show what Screenme already has, and for Pick Color, whose system loupe needs no permission.
     var requiresScreenRecording: Bool {
         switch self {
-        case .pinLastCapture, .openHistory, .toggleDesktopIcons: false
+        case .pinLastCapture, .openHistory, .toggleDesktopIcons, .pickColor: false
         default: true
         }
     }

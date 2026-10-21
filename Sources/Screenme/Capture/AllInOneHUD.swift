@@ -42,6 +42,7 @@ private struct HUDItem: Identifiable {
             (.capturePreviousArea, "Previous Area", false),
             (.scrollingCapture, "Scrolling", true),
             (.captureText, "Text (OCR)", false),
+            (.pickColor, "Pick Color", false),
             (.selfTimer, "Self-Timer", true),
             (.recordScreen, "Record", true),
         ]

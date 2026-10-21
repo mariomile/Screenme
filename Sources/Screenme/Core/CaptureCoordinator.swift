@@ -63,9 +63,10 @@ final class CaptureCoordinator {
     }
 
     private func capture(_ action: ShortcutAction) async throws {
-        // Recordings have their own setting; text recognition does not keep a picture.
+        // Recordings have their own setting; text recognition does not keep a picture;
+        // Pick Color reads the screen as the user sees it.
         let hidesIcons = Prefs[Pref.hideDesktopIconsInShots] && !DesktopIcons.isHidden
-            && ![.recordScreen, .captureText, .translateText].contains(action)
+            && ![.recordScreen, .captureText, .translateText, .pickColor].contains(action)
         if hidesIcons {
             DesktopIcons.setHidden(true)
             try? await Task.sleep(for: .milliseconds(700))
@@ -126,6 +127,9 @@ final class CaptureCoordinator {
             }
             Clipboard.copyText(translation.text)
             TranslationPanel.show(translation, near: result.target.cocoaFrame)
+
+        case .pickColor:
+            await ScreenColorPicker.run()
 
         case .scrollingCapture:
             guard let result = await SelectionOverlay.select(.scrolling) else { return }

@@ -83,6 +83,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             [.allInOne],
             [.captureArea, .captureWindow, .captureFullscreen, .capturePreviousArea, .selfTimer],
             [.scrollingCapture, .captureText, .translateText],
+            [.pickColor],
             [.recordScreen],
             [.pinLastCapture, .openHistory, .toggleDesktopIcons],
         ]

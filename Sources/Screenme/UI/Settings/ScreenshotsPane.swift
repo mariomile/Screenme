@@ -6,6 +6,7 @@ struct ScreenshotsPane: View {
     @AppStorage(Pref.watermarkEnabled.name) private var watermarkEnabled = Pref.watermarkEnabled.defaultValue
     @AppStorage(Pref.watermarkText.name) private var watermarkText = Pref.watermarkText.defaultValue
     @AppStorage(Pref.watermarkCorner.name) private var watermarkCorner = Pref.watermarkCorner.defaultValue
+    @AppStorage(Pref.colorFormat.name) private var colorFormat = Pref.colorFormat.defaultValue
 
     var body: some View {
         Form {
@@ -37,6 +38,9 @@ struct ScreenshotsPane: View {
                 PrefToggle("Show crosshair", Pref.showCrosshair)
                 PrefToggle("Show magnifier", Pref.showMagnifier)
                 PrefIntPicker("Self-timer", Pref.selfTimerSeconds, options: [("3 seconds", 3), ("5 seconds", 5), ("10 seconds", 10), ("15 seconds", 15)])
+                Picker("Color picker", selection: $colorFormat) {
+                    ForEach(ColorFormat.allCases) { Text($0.title).tag($0) }
+                }
             }
 
             Section {
