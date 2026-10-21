@@ -33,6 +33,30 @@ Every action has a `screenme://` link, for Shortcuts, Raycast or scripts:
 - `screenme://capture-window?app=Safari`: the frontmost window of an app (name or bundle ID)
 - `screenme://settings?tab=recording`: open Settings
 
+### Command line
+
+`scripts/install.sh` links a `screenme` command into `/opt/homebrew/bin` (or `~/.local/bin`). It asks the running app for the capture through those links, without bringing Screenme forward, and prints the new file's path.
+
+```bash
+screenme capture fullscreen
+screenme capture area 100 100 640 400    # x y width height, screen points, top-left origin
+screenme capture window Safari           # app name or bundle ID
+screenme latest                          # path of the newest capture
+screenme list --limit 5                  # recent captures, newest first
+```
+
+`capture` waits up to 20 seconds for the file and exits with an error if none appears (Screenme not allowed to record the screen, another capture in progress, no such window). Your after-capture settings still apply: a capture is also copied, shown in Quick Access, and so on.
+
+### Claude Code (MCP)
+
+`screenme mcp` is an MCP server over stdio. Register it once:
+
+```bash
+claude mcp add screenme -- screenme mcp
+```
+
+Claude then has three tools: `take_screenshot` (mode `fullscreen`, `area` with `x`, `y`, `width`, `height`, or `window` with `app`), `get_latest_capture` and `list_captures`. Screenshots come back as an image (scaled to at most 1568 pixels on the long side) plus the path of the full-size file.
+
 ## Where files go
 
 Captures are kept in `~/Library/Application Support/Screenme/Captures` until you save them. Save copies to your save folder (the Desktop by default).

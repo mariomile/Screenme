@@ -45,3 +45,13 @@ rm -rf /Applications/Screenme.app
 cp -R "$APP" /Applications/
 open /Applications/Screenme.app
 echo "Installed: $(codesign -d -r- /Applications/Screenme.app 2>&1 | grep designated)"
+
+# The `screenme` command line tool (captures for scripts and the MCP server) lives in the app; link it onto PATH.
+BIN=/opt/homebrew/bin
+if [[ ! -w "$BIN" ]]; then
+  BIN="$HOME/.local/bin"
+  mkdir -p "$BIN"
+  [[ ":$PATH:" == *":$BIN:"* ]] || echo "Add $BIN to your PATH to run screenme."
+fi
+ln -sf /Applications/Screenme.app/Contents/Helpers/screenme "$BIN/screenme"
+echo "Command line tool: $BIN/screenme"
