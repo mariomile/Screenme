@@ -51,9 +51,10 @@ enum Palette {
 
 // MARK: - Annotation
 
-struct Annotation: Identifiable, Equatable {
+struct Annotation: Identifiable, Equatable, Codable {
     /// The geometry, in document pixels. Which case an annotation has follows from its kind (`ToolKind.Traits.shape`).
-    enum Shape: Equatable {
+    /// Saved in a capture's edit sidecar: the case names and payload keys below are its JSON, keep them stable.
+    enum Shape: Equatable, Codable {
         /// Arrow and line: the endpoints, and the arrow's curvature as a fraction of its length.
         case segment(p0: CGPoint, p1: CGPoint, bend: CGFloat)
         /// Rectangle, ellipse, redactions and spotlight.
@@ -64,6 +65,10 @@ struct Annotation: Identifiable, Equatable {
         case marker(CGPoint)
         /// Text: the top-left of its box, and the text.
         case label(origin: CGPoint, text: String)
+
+        enum BoxCodingKeys: String, CodingKey { case _0 = "rect" }
+        enum StrokeCodingKeys: String, CodingKey { case _0 = "points" }
+        enum MarkerCodingKeys: String, CodingKey { case _0 = "center" }
     }
 
     var id = UUID()
@@ -199,7 +204,8 @@ enum SolidSwatches {
 
 /// Everything that is undoable. The image itself is never modified: crop, resize and
 /// background are all applied only when the picture is flattened.
-struct EditState: Equatable {
+/// Codable for the edit sidecar next to a saved capture (`EditSidecar`): property names are its JSON, keep them stable.
+struct EditState: Equatable, Codable {
     var annotations: [Annotation] = []
     /// The visible part of the image, in image pixels. May extend past the image (Resize Canvas).
     var cropRect: CGRect
