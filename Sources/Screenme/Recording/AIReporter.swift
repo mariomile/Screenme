@@ -85,10 +85,16 @@ enum AIReporter {
         generator.maximumSize = CGSize(width: 1920, height: 1920)
         generator.requestedTimeToleranceBefore = .zero
         generator.requestedTimeToleranceAfter = .zero
+        var cells: [ContactSheet.Cell] = []
         for (index, keyframe) in report.keyframes.enumerated() {
             let image = try await generator.image(at: CMTime(seconds: keyframe.time, preferredTimescale: 600)).image
             try writePNG(image, to: folder.appendingPathComponent(AIReport.frameName(index)))
-            progress(0.75 + 0.25 * Double(index + 1) / Double(report.keyframes.count))
+            cells.append(ContactSheet.Cell(image: ContactSheet.thumbnail(image), number: index + 1, time: keyframe.time,
+                                           caption: report.caption(index)))
+            progress(0.75 + 0.2 * Double(index + 1) / Double(report.keyframes.count))
+        }
+        if let sheet = ContactSheet.render(cells) {
+            try writePNG(sheet, to: folder.appendingPathComponent(AIReport.contactSheetName))
         }
 
         try report.markdown(absoluteLinks: false).write(to: folder.appendingPathComponent("report.md"), atomically: true, encoding: .utf8)
@@ -118,7 +124,7 @@ enum AIReporter {
         return url
     }
 
-    private static func writePNG(_ image: CGImage, to url: URL) throws {
+    static func writePNG(_ image: CGImage, to url: URL) throws {
         guard let destination = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil) else {
             throw CocoaError(.fileWriteUnknown)
         }

@@ -247,8 +247,9 @@ final class AIReportTests: XCTestCase {
         ## For an AI agent
 
         The user recorded the screen while talking, to show you something and ask for something. What they said is the request; the clicks, shortcuts and app switches are what they did; the drawings mark what they are pointing at.
-        Read the keyframes in order and look at every frame before you act (they are PNG files your Read tool can open). The events file has the exact time and position of every click, drag, scroll, shortcut, app switch and drawing. If the request is still unclear, ask the user before you change anything.
+        Look at the contact sheet first: every keyframe in one picture, numbered as below. Then read the keyframes in order and open the frames you need by number (they are PNG files your Read tool can open). The events file has the exact time and position of every click, drag, scroll, shortcut, app switch and drawing. If the request is still unclear, ask the user before you change anything.
 
+        - Contact sheet: `/Users/me/Desktop/Report 1/contact-sheet.png`
         - Video: `/Users/me/Desktop/Report 1/recording.mp4`
         - Events: `/Users/me/Desktop/Report 1/events.json`
         - #1 at 0:00: `/Users/me/Desktop/Report 1/frames/01.png`
@@ -368,6 +369,8 @@ final class AIReportTests: XCTestCase {
         XCTAssertTrue(files.fileExists(atPath: report.folder.appendingPathComponent("recording.mp4").path))
         let image = try XCTUnwrap(NSImage(contentsOf: report.folder.appendingPathComponent("frames/02.png")))
         XCTAssertEqual(image.size, CGSize(width: 320, height: 240))
+        let sheet = try XCTUnwrap(NSImage(contentsOf: report.folder.appendingPathComponent("contact-sheet.png")))
+        XCTAssertEqual(sheet.size, ContactSheet.layout(count: 2, boxHeight: 480).size)
         let written = try JSONDecoder().decode(RecordingEvents.self, from: Data(contentsOf: report.folder.appendingPathComponent("events.json")))
         XCTAssertEqual(written, events)
         let markdown = try String(contentsOf: report.folder.appendingPathComponent("report.md"), encoding: .utf8)

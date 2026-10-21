@@ -75,6 +75,7 @@ struct AIReport {
 
     static let videoName = "recording.mp4"
     static let eventsName = "events.json"
+    static let contactSheetName = "contact-sheet.png"
 
     /// The report folder.
     var folder: URL
@@ -182,6 +183,14 @@ struct AIReport {
         }
     }
 
+    /// The line under a keyframe on the contact sheet: what was said, else what happened, else why it is there.
+    func caption(_ index: Int) -> String {
+        let keyframe = keyframes[index]
+        if !keyframe.text.isEmpty { return "\u{201C}\(keyframe.text)\u{201D}" }
+        if let first = keyframe.events.first { return eventTexts[first] }
+        return Self.silentText(keyframe.reason)
+    }
+
     // MARK: Markdown
 
     var title: String {
@@ -240,10 +249,11 @@ struct AIReport {
         } else {
             lines.append("The user recorded the screen while talking, to show you something and ask for something. What they said is the request; the clicks, shortcuts and app switches are what they did; the drawings mark what they are pointing at.")
         }
-        lines.append("Read the keyframes in order and look at every frame before you act (they are PNG files your Read tool can open)."
+        lines.append("Look at the contact sheet first: every keyframe in one picture, numbered as below. Then read the keyframes in order and open the frames you need by number (they are PNG files your Read tool can open)."
             + (events == nil ? "" : " The events file has the exact time and position of every click, drag, scroll, shortcut, app switch and drawing.")
             + " If the request is still unclear, ask the user before you change anything.")
         lines.append("")
+        lines.append("- Contact sheet: `\(path(Self.contactSheetName))`")
         lines.append("- Video: `\(path(Self.videoName))`")
         if events != nil { lines.append("- Events: `\(path(Self.eventsName))`") }
         for (index, keyframe) in keyframes.enumerated() {
