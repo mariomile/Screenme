@@ -114,7 +114,7 @@ final class CaptureCoordinator {
         case .scrollingCapture:
             guard let result = try await select(.scrolling, target) else { return }
             guard let image = try await ScrollingCapture.run(result.target) else { return }
-            try deliver(image)
+            try await deliver(image)
 
         case .recordScreen:
             guard let result = try await select(.recording, target) else { return }
@@ -144,8 +144,8 @@ final class CaptureCoordinator {
 
     private func finishScreenshot(_ result: SelectionResult) async throws {
         if case .area = result.target { previousArea = result.target }
-        let image = Notch.hidden(in: try await image(for: result), of: result.target)
-        try deliver(image) { CaptureContexts.record(result.target, for: $0) }
+        let image = try await image(for: result)
+        try await deliver(image, cover: Notch.cover(for: result.target)) { CaptureContexts.record(result.target, for: $0) }
     }
 
     /// The frozen picture when the picker had one, otherwise a fresh capture.
@@ -154,13 +154,26 @@ final class CaptureCoordinator {
         return try await Capturer.screenshot(result.target)
     }
 
-    /// Writes an image capture and runs the after-capture actions.
+    /// Writes an image capture and runs the after-capture actions. The notch cover, the watermark and the encoding
+    /// run off the main thread; meanwhile a Quick Access card already shows `image` from memory and gets the
+    /// file when it is written. Copy, Save, Pin and the editor need the file, so they run after the write.
     /// `written` runs on the new file before the after-capture actions.
-    func deliver(_ image: CGImage, written: (URL) -> Void = { _ in }) throws {
-        let item = CaptureItem(url: try Storage.write(Watermark.applied(to: image)), kind: .image)
-        written(item.url)
+    func deliver(_ image: CGImage, cover: Notch.Cover? = nil, written: (URL) -> Void = { _ in }) async throws {
+        let item = CaptureItem(url: Storage.newURL(extension: Prefs[Pref.imageFormat].fileExtension), kind: .image)
         Sounds.shutter()
-        afterCapture(item)
+        let cardFirst = !Prefs[Pref.afterShotOpenEditor] && Prefs[Pref.afterShotQuickAccess]
+        if cardFirst { QuickAccess.shared.show(item, preview: image) }
+        do {
+            try await Task.detached(priority: .userInitiated) {
+                try Storage.write(Watermark.applied(to: cover?.applied(to: image) ?? image), to: item.url)
+            }.value
+        } catch {
+            if cardFirst { QuickAccess.shared.fileFailed(item.url) }
+            throw error
+        }
+        written(item.url)
+        if cardFirst { QuickAccess.shared.fileWritten(item.url) }
+        afterCapture(item, quickAccessShown: cardFirst)
     }
 
     // MARK: Recordings
@@ -189,7 +202,8 @@ final class CaptureCoordinator {
     }
 
     /// Records `item` and runs the user's after-capture actions. Editors call this too when they save a new version.
-    func afterCapture(_ item: CaptureItem) {
+    /// `quickAccessShown`: `deliver` already put the card on screen while the file was written.
+    func afterCapture(_ item: CaptureItem, quickAccessShown: Bool = false) {
         record(item)
         switch item.kind {
         case .image:
@@ -198,7 +212,7 @@ final class CaptureCoordinator {
             if Prefs[Pref.afterShotPin] { PinWindow.pin(item) }
             if Prefs[Pref.afterShotOpenEditor] {
                 AnnotationEditor.open(item)
-            } else if Prefs[Pref.afterShotQuickAccess] {
+            } else if Prefs[Pref.afterShotQuickAccess], !quickAccessShown {
                 QuickAccess.shared.show(item)
             }
         case .video, .gif:

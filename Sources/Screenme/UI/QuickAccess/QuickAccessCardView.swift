@@ -9,8 +9,27 @@ final class CardModel: ObservableObject {
     @Published var duration: String?
     @Published var hovering = false
     @Published var dragging = false
+    /// False while the capture file is still being written. The card shows the in-memory preview meanwhile,
+    /// actions wait for the file and a drag out starts once it is there.
+    private(set) var isWritten: Bool
+    private var waiting: [CheckedContinuation<Void, Never>] = []
 
-    init(item: CaptureItem) { self.item = item }
+    init(item: CaptureItem, preview: CGImage? = nil) {
+        self.item = item
+        isWritten = preview == nil
+        thumbnail = preview.map { NSImage(cgImage: $0, size: .zero) }
+    }
+
+    func untilWritten() async {
+        guard !isWritten else { return }
+        await withCheckedContinuation { waiting.append($0) }
+    }
+
+    func fileWritten() {
+        isWritten = true
+        waiting.forEach { $0.resume() }
+        waiting.removeAll()
+    }
 
     func reload() async {
         let preview = await Thumbnails.make(for: item, maxPixelSize: 720)

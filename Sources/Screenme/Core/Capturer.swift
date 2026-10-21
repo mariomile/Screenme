@@ -37,15 +37,20 @@ enum Storage {
 
     /// Writes in the user's chosen format (PNG or JPEG).
     static func write(_ image: CGImage) throws -> URL {
-        let format = Prefs[Pref.imageFormat]
-        let url = newURL(extension: format.fileExtension)
+        let url = newURL(extension: Prefs[Pref.imageFormat].fileExtension)
+        try write(image, to: url)
+        return url
+    }
+
+    /// Encodes `image` into `url` in the format its extension names. Safe off the main thread.
+    static func write(_ image: CGImage, to url: URL) throws {
+        let format = ImageFormat(of: url)
         guard let destination = CGImageDestinationCreateWithURL(url as CFURL, format.type.identifier as CFString, 1, nil) else {
             throw CocoaError(.fileWriteUnknown)
         }
         let options = format == .jpg ? [kCGImageDestinationLossyCompressionQuality: Prefs[Pref.jpegQuality]] as CFDictionary : nil
         CGImageDestinationAddImage(destination, image, options)
         guard CGImageDestinationFinalize(destination) else { throw CocoaError(.fileWriteUnknown) }
-        return url
     }
 
     /// Copies a capture to the save folder, never overwriting an existing file.
