@@ -42,13 +42,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// `screenme://capture-area` and the like run that action, for Shortcuts, Raycast or scripts.
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
-            if url.scheme == "screenme", url.host() == "settings" {
-                let tab = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "tab" }?.value
-                if let tab = tab.flatMap(SettingsTab.init(rawValue:)) { SettingsWindow.show(tab: tab) } else { SettingsWindow.show() }
-                continue
+            switch ActionLink(url: url) {
+            case .perform(let action, let target): coordinator.perform(action, target: target)
+            case .settings(let tab): SettingsWindow.show(tab: tab)
+            case nil: continue
             }
-            guard let link = ActionLink(url: url) else { continue }
-            coordinator.perform(link.action, target: link.target)
         }
     }
 

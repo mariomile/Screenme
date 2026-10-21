@@ -9,7 +9,8 @@ enum AllInOneHUD {
     static var isOpen: Bool { controller != nil }
 
     /// Shows the bar. Showing it again while it is open closes it, so the shortcut toggles.
-    static func show(perform: @escaping (ShortcutAction) -> Void) {
+    /// `perform` gets the chosen action and, when a link chose it, the link's target.
+    static func show(perform: @escaping (ShortcutAction, ActionLink.Target?) -> Void) {
         if let controller {
             controller.dismiss()
             return
@@ -20,8 +21,9 @@ enum AllInOneHUD {
     }
 
     /// Closes the bar and runs `action` as if it had been picked from the bar, e.g. when its shortcut is pressed.
-    static func choose(_ action: ShortcutAction) {
-        controller?.choose(action)
+    /// `target` comes from a `screenme://` link and is passed on to `perform`.
+    static func choose(_ action: ShortcutAction, target: ActionLink.Target?) {
+        controller?.choose(action, target: target)
     }
 }
 
@@ -70,7 +72,7 @@ private final class HUDModel: ObservableObject {
 
 @MainActor
 private final class HUDController {
-    private let perform: (ShortcutAction) -> Void
+    private let perform: (ShortcutAction, ActionLink.Target?) -> Void
     private let released: () -> Void
     private let model = HUDModel()
     private let panel: FloatingPanel
@@ -79,7 +81,7 @@ private final class HUDController {
     private var resignObserver: NSObjectProtocol?
     private var closing = false
 
-    init(perform: @escaping (ShortcutAction) -> Void, released: @escaping () -> Void) {
+    init(perform: @escaping (ShortcutAction, ActionLink.Target?) -> Void, released: @escaping () -> Void) {
         self.perform = perform
         self.released = released
         panel = FloatingPanel(frame: .zero, level: .statusBar, canBeKey: true, collectionBehavior: [.canJoinAllSpaces, .fullScreenAuxiliary])
@@ -141,7 +143,7 @@ private final class HUDController {
 
     // `close` drops the last strong reference to this controller (`released`), so the completions
     // capture what they need by value instead of reaching back through a weak self.
-    func choose(_ action: ShortcutAction) {
+    func choose(_ action: ShortcutAction, target: ActionLink.Target? = nil) {
         guard !closing else { return }
         let previousApp = previousApp
         let perform = perform
@@ -149,7 +151,7 @@ private final class HUDController {
             Task { @MainActor in
                 // Hand focus back first so the capture sees the app the user was in.
                 await FocusKeeper.restore(previousApp)
-                perform(action)
+                perform(action, target)
             }
         }
     }

@@ -1,7 +1,7 @@
 import AppKit
 import ScreenCaptureKit
 
-/// Routes every user action (shortcut, menu, All-in-One, Quick Access) to the module that does it.
+/// Routes every user action (shortcut, menu, `screenme://` link, All-in-One, Quick Access) to the module that does it.
 /// Modules never call each other's selection or capture code directly: they go through here.
 @MainActor
 final class CaptureCoordinator {
@@ -31,7 +31,7 @@ final class CaptureCoordinator {
         case .allInOne:
             // Not over a capture in progress; the shortcut still closes an open bar.
             guard !busy || AllInOneHUD.isOpen else { return }
-            AllInOneHUD.show { [weak self] choice in self?.perform(choice) }
+            AllInOneHUD.show { [weak self] choice, target in self?.perform(choice, target: target) }
             return
         case .pinLastCapture:
             if let lastCapture { PinWindow.pin(lastCapture) }
@@ -46,9 +46,9 @@ final class CaptureCoordinator {
             break
         }
 
-        // A capture shortcut pressed while the All-in-One bar is open picks that capture from the bar.
+        // A capture shortcut or link while the All-in-One bar is open picks that capture from the bar, with the link's target.
         if AllInOneHUD.isOpen {
-            AllInOneHUD.choose(action)
+            AllInOneHUD.choose(action, target: target)
             return
         }
         guard !busy else { return }

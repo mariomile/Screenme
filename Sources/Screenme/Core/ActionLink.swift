@@ -7,22 +7,26 @@ import ScreenCaptureKit
 /// - `screenme://capture-area?x=100&y=80&width=640&height=400`: actions that select something capture that rectangle
 ///   instead of asking. Global screen points, top-left origin. Recordings then start at once with the saved settings.
 /// - `screenme://capture-window?app=com.apple.TextEdit`: the frontmost window of that app (bundle ID or name).
-/// - `screenme://settings?tab=recording`: opens Settings, on a tab when one is named (`AppDelegate` handles it).
-struct ActionLink {
+/// - `screenme://settings?tab=recording`: opens Settings, on a tab when one is named.
+enum ActionLink {
     enum Target {
         case area(CGRect)
         case window(app: String)
     }
 
-    let action: ShortcutAction
-    let target: Target?
+    case perform(ShortcutAction, Target?)
+    case settings(SettingsTab?)
 
     init?(url: URL) {
-        guard url.scheme == "screenme", let host = url.host(),
-              let action = ShortcutAction.allCases.first(where: { $0.urlName == host }) else { return nil }
-        self.action = action
+        guard url.scheme == "screenme", let host = url.host() else { return nil }
         let query = Dictionary(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.map { ($0.name, $0.value ?? "") } ?? [],
                                uniquingKeysWith: { _, last in last })
+        if host == "settings" {
+            self = .settings(query["tab"].flatMap(SettingsTab.init(rawValue:)))
+            return
+        }
+        guard let action = ShortcutAction.allCases.first(where: { $0.urlName == host }) else { return nil }
+        let target: Target?
         if let app = query["app"], !app.isEmpty {
             target = .window(app: app)
         } else if let x = query["x"].flatMap(Double.init), let y = query["y"].flatMap(Double.init),
@@ -32,6 +36,7 @@ struct ActionLink {
         } else {
             target = nil
         }
+        self = .perform(action, target)
     }
 }
 
@@ -46,13 +51,16 @@ extension ShortcutAction {
 }
 
 extension ActionLink.Target {
-    /// What to capture, as the selection overlay would have returned it.
+    /// What to capture, as the selection overlay would have returned it. An area is cut to the screen it is on.
     @MainActor
     func captureTarget() async throws -> CaptureTarget {
         switch self {
         case .area(let rect):
             let cocoa = rect.cocoaFlipped
-            return .area(cocoa, NSScreen.at(CGPoint(x: cocoa.midX, y: cocoa.midY)))
+            let screen = NSScreen.at(CGPoint(x: cocoa.midX, y: cocoa.midY))
+            let visible = cocoa.intersection(screen.frame)
+            guard !visible.isEmpty else { throw ScreenmeError.nothingToCapture }
+            return .area(visible, screen)
         case .window(let app):
             let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
             // Front to back, normal windows only.
