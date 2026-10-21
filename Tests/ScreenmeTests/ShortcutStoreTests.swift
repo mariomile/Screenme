@@ -3,23 +3,7 @@ import Carbon.HIToolbox
 import XCTest
 @testable import Screenme
 
-final class ShortcutStoreTests: XCTestCase {
-    private var realStore: UserDefaults!
-    private var suiteName: String!
-
-    override func setUp() {
-        super.setUp()
-        realStore = Prefs.store
-        suiteName = "dev.mariomiletta.ScreenmeTests.\(UUID().uuidString)"
-        Prefs.store = UserDefaults(suiteName: suiteName)!
-    }
-
-    override func tearDown() {
-        Prefs.store.removePersistentDomain(forName: suiteName)
-        Prefs.store = realStore
-        super.tearDown()
-    }
-
+final class ShortcutStoreTests: PrefsSandboxTestCase {
     private let cmdShift = UInt32(cmdKey | shiftKey)
     private func combo(_ key: Int, _ modifiers: Int) -> KeyCombo { KeyCombo(keyCode: UInt32(key), modifiers: UInt32(modifiers)) }
 

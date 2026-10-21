@@ -2,23 +2,17 @@ import XCTest
 @testable import Screenme
 
 /// Copy as Markdown and Copy Path: the link text, and finding the copy Save already made.
-final class CopyActionsTests: XCTestCase {
-    private var realStore: UserDefaults!
-    private let suiteName = "ScreenmeTests.CopyActions"
+final class CopyActionsTests: PrefsSandboxTestCase {
     private var folder: URL!
 
     override func setUp() {
         super.setUp()
-        realStore = Prefs.store
-        Prefs.store = UserDefaults(suiteName: suiteName)!
         folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try? FileManager.default.createDirectory(at: folder.appendingPathComponent("Saved"), withIntermediateDirectories: true)
         Prefs[Pref.saveDirectory] = folder.appendingPathComponent("Saved").path
     }
 
     override func tearDown() {
-        Prefs.store.removePersistentDomain(forName: suiteName)
-        Prefs.store = realStore
         try? FileManager.default.removeItem(at: folder)
         super.tearDown()
     }

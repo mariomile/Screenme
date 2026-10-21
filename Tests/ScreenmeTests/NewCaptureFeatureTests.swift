@@ -2,22 +2,16 @@ import XCTest
 @testable import Screenme
 
 /// Combine, watermark and hide-notch: the pure image work behind them.
-final class NewCaptureFeatureTests: XCTestCase {
-    private var realStore: UserDefaults!
-    private let suiteName = "ScreenmeTests.NewCaptureFeatures"
+final class NewCaptureFeatureTests: PrefsSandboxTestCase {
     private var folder: URL!
 
     override func setUp() {
         super.setUp()
-        realStore = Prefs.store
-        Prefs.store = UserDefaults(suiteName: suiteName)!
         folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
     }
 
     override func tearDown() {
-        Prefs.store.removePersistentDomain(forName: suiteName)
-        Prefs.store = realStore
         try? FileManager.default.removeItem(at: folder)
         super.tearDown()
     }

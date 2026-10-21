@@ -14,10 +14,9 @@ final class ToolsUITests: ScreenmeUITestCase {
         launch()
         NSPasteboard.general.clearContents()
         run("translate-text", area: window)
-        var text = ""
-        let copied = eventually(timeout: 20) { text = NSPasteboard.general.string(forType: .string) ?? ""; return !text.isEmpty }
-        if !copied { add(XCTAttachment(screenshot: XCUIScreen.main.screenshot())) }
-        XCTAssertTrue(copied, "a translation should be copied")
+        let text = waitForClipboardText(timeout: 20)
+        if text.isEmpty { add(XCTAttachment(screenshot: XCUIScreen.main.screenshot())) }
+        XCTAssertFalse(text.isEmpty, "a translation should be copied")
         XCTAssertTrue(text.lowercased().contains("sea") || text.lowercased().contains("weather"), "translation: \(text)")
         XCTAssertTrue(newCaptures().isEmpty, "translation keeps no file")
     }
@@ -25,11 +24,12 @@ final class ToolsUITests: ScreenmeUITestCase {
     func testMeasureCopiesASizeAndEscapeCloses() {
         launch()
         NSPasteboard.general.clearContents()
+        let before = app.windows.count + app.dialogs.count
         run("measure")
-        sleep(1)
+        XCTAssertTrue(eventually { self.app.windows.count + self.app.dialogs.count > before }, "the ruler should open")
         app.typeKey("c", modifierFlags: .command)
-        var text = ""
-        XCTAssertTrue(eventually { text = NSPasteboard.general.string(forType: .string) ?? ""; return !text.isEmpty })
+        let text = waitForClipboardText()
+        XCTAssertFalse(text.isEmpty, "a size should be copied")
         XCTAssertNotNil(text.range(of: #"^\d+ × \d+$"#, options: .regularExpression), "copied: \(text)")
         XCTAssertTrue(newCaptures().isEmpty, "measuring keeps no file")
     }
@@ -37,8 +37,9 @@ final class ToolsUITests: ScreenmeUITestCase {
     func testMeasureClosesOnEscapeWithoutCopying() {
         launch()
         NSPasteboard.general.clearContents()
+        let before = app.windows.count + app.dialogs.count
         run("measure")
-        sleep(1)
+        XCTAssertTrue(eventually { self.app.windows.count + self.app.dialogs.count > before }, "the ruler should open")
         app.typeKey(.escape, modifierFlags: [])
         sleep(1)
         XCTAssertNil(NSPasteboard.general.string(forType: .string))
