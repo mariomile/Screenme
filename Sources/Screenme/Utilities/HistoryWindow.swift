@@ -116,6 +116,7 @@ private struct HistoryGridView: View {
             .labelsHidden()
             .frame(width: 270)
             Spacer(minLength: 8)
+            beforeAfterButton
             combineMenu
             searchField
         }
@@ -137,6 +138,15 @@ private struct HistoryGridView: View {
             }
             .fixedSize()
             .help("Combine\nJoins the selected screenshots into one image, side by side or stacked, and opens it in the editor. ⌘-click to select more than one.")
+        }
+    }
+
+    @ViewBuilder
+    private var beforeAfterButton: some View {
+        let images = selectedImages.sorted { $0.date < $1.date }
+        if images.count == 2 {
+            Button("Before & After") { ImageCombiner.beforeAfterAndEdit(before: images[0], after: images[1]) }
+                .help("Before & After\nPuts the two selected screenshots in one image labelled Before (the older) and After, and opens it in the editor. Good for a fix, a bug report or feedback.")
         }
     }
 

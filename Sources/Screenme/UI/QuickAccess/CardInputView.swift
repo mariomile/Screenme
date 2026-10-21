@@ -136,7 +136,20 @@ final class CardInputView: NSView, NSDraggingSource {
             item.toolTip = action.help(for: kind)
             menu.addItem(item)
         }
+        if kind == .image, CaptureHistory.shared.previousImage(before: model.item) != nil {
+            let compare = NSMenuItem(title: "Compare with Previous", action: #selector(compareWithPrevious), keyEquivalent: "")
+            compare.target = self
+            compare.image = NSImage(systemSymbolName: "rectangle.split.2x1", accessibilityDescription: nil)
+            compare.toolTip = "Puts the previous screenshot (Before) and this one (After) in one image and opens it in the editor. Good for a fix, a bug report or feedback."
+            // Before the separator that sets Trash apart.
+            menu.insertItem(compare, at: menu.items.count - 2)
+        }
         return menu
+    }
+
+    @objc private func compareWithPrevious() {
+        guard let before = CaptureHistory.shared.previousImage(before: model.item) else { return }
+        ImageCombiner.beforeAfterAndEdit(before: before, after: model.item)
     }
 
     @objc private func menuAction(_ sender: NSMenuItem) {

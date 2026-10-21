@@ -62,6 +62,29 @@ final class NewCaptureFeatureTests: PrefsSandboxTestCase {
         XCTAssertNil(ImageCombiner.combine([png(solid(10, 10, gray: 0), "a")], layout: .stacked))
     }
 
+    func testBeforeAfterPlacesTallImagesSideBySideWithAGap() throws {
+        let before = png(solid(100, 200, gray: 0), "before"), after = png(solid(100, 200, gray: 1), "after")
+        let result = try XCTUnwrap(ImageCombiner.beforeAfter(before: before, after: after))
+        XCTAssertEqual(result.height, 200)
+        XCTAssertGreaterThan(result.width, 200)
+        XCTAssertEqual(result.width, 200 + 4)
+        XCTAssertEqual(gray(result, 102, 150), 128, accuracy: 2)
+        XCTAssertGreaterThan(gray(result, 150, 150), 225)
+    }
+
+    func testBeforeAfterStacksWideImagesAndDrawsLabels() throws {
+        let before = png(solid(400, 200, gray: 0), "before"), after = png(solid(400, 200, gray: 1), "after")
+        let result = try XCTUnwrap(ImageCombiner.beforeAfter(before: before, after: after))
+        XCTAssertEqual(result.width, 400)
+        XCTAssertEqual(result.height, 200 + 200 + 5)
+        // The pill makes the corner of the white image darker than the rest of it.
+        XCTAssertLessThan(gray(result, 30, 215), gray(result, 300, 380))
+    }
+
+    func testBeforeAfterNeedsBothImages() {
+        XCTAssertNil(ImageCombiner.beforeAfter(before: png(solid(10, 10, gray: 0), "a"), after: folder.appendingPathComponent("none.png")))
+    }
+
     func testWatermarkIsOffByDefaultAndWhenTextIsBlank() {
         XCTAssertNil(Watermark.text)
         Prefs[Pref.watermarkEnabled] = true

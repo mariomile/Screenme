@@ -4,6 +4,7 @@ A lightweight, native macOS capture tool. Capture, drop it where it goes, move o
 
 - **Capture area or window** (`⌘⇧1`): drag to select an area, or click to grab the highlighted window. The capture is copied to the clipboard right away.
 - **Quick Access overlay**: every capture shows up bottom-left. Drag it into any app, or hover for Copy and Save.
+- **Before & After**: select two screenshots in History, or right-click a Quick Access card and choose Compare with Previous, to get one image labelled Before and After for PRs, bug reports and feedback.
 - **Record area or window** (`⌘⇧2`, press again or click the red menu bar icon to stop): MP4 at 30 fps, with a native trim bar and GIF export from Quick Access.
 - **Capture screen**: from the menu bar.
 - **Copy for AI** (Quick Access, History, pins, editor `⇧⌘C`): copies the image plus a text block for Claude, ChatGPT or Cursor: the app, window and browser page it came from, the text in it, and the notes you wrote on annotations in the editor (select an annotation, type in Note for AI). Paste into a chat for the image, or into a terminal for the text with the file path.

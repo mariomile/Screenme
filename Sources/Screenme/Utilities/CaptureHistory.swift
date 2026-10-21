@@ -43,6 +43,11 @@ final class CaptureHistory: ObservableObject {
         save()
     }
 
+    /// The newest image capture older than `item`, for "Compare with Previous".
+    func previousImage(before item: CaptureItem) -> CaptureItem? {
+        items.first { $0.kind == .image && $0.id != item.id && $0.date < item.date }
+    }
+
     /// Removes the entry only; the file stays where it is.
     func remove(_ item: CaptureItem) {
         items.removeAll { $0.id == item.id }
