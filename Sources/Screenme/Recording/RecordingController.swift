@@ -45,7 +45,8 @@ final class RecordingController {
     // MARK: Start
 
     /// Only `CaptureCoordinator` calls this, inside its busy window, so there is never a second start.
-    func start(_ target: CaptureTarget) async throws {
+    /// Without `asksForSettings` (a `screenme://` link) it skips the pre-record bar and uses the saved settings.
+    func start(_ target: CaptureTarget, asksForSettings: Bool = true) async throws {
         guard case .idle = phase else { return }
         phase = .preparing
         // The pre-record bar activates Screenme to receive Return and Esc; the user's app gets focus back after.
@@ -59,7 +60,8 @@ final class RecordingController {
             }
         }
 
-        guard let (settings, webcam) = await PreRecordUI(target: target).run() else { return }
+        let chosen = asksForSettings ? await PreRecordUI(target: target).run() : (RecordingSettings.saved, Self.savedWebcam(near: target))
+        guard let (settings, webcam) = chosen else { return }
         let preparing = Session(target: target, settings: settings, webcam: webcam)
         session = preparing
 
@@ -73,6 +75,15 @@ final class RecordingController {
         try await preparing.begin()
         phase = .running(preparing)
         if Prefs[Pref.playSounds] { NSSound(named: "Pop")?.play() }
+    }
+
+    /// The webcam bubble the saved settings ask for, as the pre-record bar would show it.
+    private static func savedWebcam(near target: CaptureTarget) -> WebcamBubble? {
+        let settings = RecordingSettings.saved
+        guard settings.webcam, Permission.camera.isGranted,
+              let bubble = WebcamBubble(near: target.cocoaFrame, size: settings.webcamSize, deviceID: settings.webcamID) else { return nil }
+        bubble.show()
+        return bubble
     }
 
     // MARK: Stop

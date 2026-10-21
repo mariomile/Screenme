@@ -64,3 +64,33 @@ final class EditorGeometryTests: XCTestCase {
         XCTAssertNil(Handle.hitHandle(handles, at: CGPoint(x: 30, y: 30), radius: 5))
     }
 }
+
+final class ActionLinkTests: XCTestCase {
+    func testEveryActionRoundTripsThroughItsLink() {
+        for action in ShortcutAction.allCases {
+            XCTAssertEqual(ActionLink(url: URL(string: "screenme://\(action.urlName)")!)?.action, action)
+        }
+        XCTAssertEqual(ShortcutAction.captureArea.urlName, "capture-area")
+        XCTAssertEqual(ShortcutAction.allInOne.urlName, "all-in-one")
+    }
+
+    func testAreaAndWindowTargets() throws {
+        let area = try XCTUnwrap(ActionLink(url: URL(string: "screenme://capture-area?x=10&y=20&width=300&height=200")!))
+        guard case .area(let rect) = area.target else { return XCTFail("expected an area") }
+        XCTAssertEqual(rect, CGRect(x: 10, y: 20, width: 300, height: 200))
+
+        let window = try XCTUnwrap(ActionLink(url: URL(string: "screenme://capture-window?app=com.apple.TextEdit")!))
+        guard case .window(let app) = window.target else { return XCTFail("expected a window") }
+        XCTAssertEqual(app, "com.apple.TextEdit")
+    }
+
+    func testIncompleteOrEmptyAreasAreIgnored() {
+        XCTAssertNil(ActionLink(url: URL(string: "screenme://capture-area?x=10&y=20&width=300")!)?.target)
+        XCTAssertNil(ActionLink(url: URL(string: "screenme://capture-area?x=0&y=0&width=0&height=50")!)?.target)
+    }
+
+    func testUnknownLinksDoNothing() {
+        XCTAssertNil(ActionLink(url: URL(string: "screenme://format-disk")!))
+        XCTAssertNil(ActionLink(url: URL(string: "https://capture-area")!))
+    }
+}

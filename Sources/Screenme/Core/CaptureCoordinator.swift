@@ -14,7 +14,8 @@ final class CaptureCoordinator {
     private var previousArea: CaptureTarget?
     private(set) var lastCapture: CaptureItem?
 
-    func perform(_ action: ShortcutAction) {
+    /// `target` comes from a `screenme://` link and replaces the selection overlay.
+    func perform(_ action: ShortcutAction, target: ActionLink.Target? = nil) {
         if action == .recordScreen, RecordingController.shared.isRecording {
             Task { await stopRecording() }
             return
@@ -55,14 +56,14 @@ final class CaptureCoordinator {
         Task {
             defer { busy = false }
             do {
-                try await capture(action)
+                try await capture(action, target: target)
             } catch {
                 report(error)
             }
         }
     }
 
-    private func capture(_ action: ShortcutAction) async throws {
+    private func capture(_ action: ShortcutAction, target: ActionLink.Target?) async throws {
         // Recordings have their own setting; text recognition does not keep a picture.
         let hidesIcons = Prefs[Pref.hideDesktopIconsInShots] && !DesktopIcons.isHidden
             && action != .recordScreen && action != .captureText
@@ -77,11 +78,11 @@ final class CaptureCoordinator {
             return // handled in `perform`
 
         case .captureArea:
-            guard let result = await SelectionOverlay.select(.screenshot) else { return }
+            guard let result = try await select(.screenshot, target) else { return }
             try await finishScreenshot(result)
 
         case .captureWindow:
-            guard let result = await SelectionOverlay.select(.window) else { return }
+            guard let result = try await select(.window, target) else { return }
             try await finishScreenshot(result)
 
         case .captureFullscreen:
@@ -92,14 +93,14 @@ final class CaptureCoordinator {
             try await finishScreenshot(SelectionResult(target: previousArea, frozenImage: nil))
 
         case .selfTimer:
-            guard let result = await SelectionOverlay.select(.screenshot) else { return }
+            guard let result = try await select(.screenshot, target) else { return }
             // Clicks go through the ring: the user may be opening the menu or hover state to capture.
             guard await Countdown.run(seconds: Prefs[Pref.selfTimerSeconds], around: result.target.cocoaFrame,
                                       cancelsOnClick: false) else { return }
             try await finishScreenshot(SelectionResult(target: result.target, frozenImage: nil))
 
         case .captureText:
-            guard let result = await SelectionOverlay.select(.text) else { return }
+            guard let result = try await select(.text, target) else { return }
             let image = try await image(for: result)
             let text = try await TextRecognizer.recognize(image)
             if text.isEmpty {
@@ -110,14 +111,20 @@ final class CaptureCoordinator {
             }
 
         case .scrollingCapture:
-            guard let result = await SelectionOverlay.select(.scrolling) else { return }
+            guard let result = try await select(.scrolling, target) else { return }
             guard let image = try await ScrollingCapture.run(result.target) else { return }
             try deliver(image)
 
         case .recordScreen:
-            guard let result = await SelectionOverlay.select(.recording) else { return }
-            try await RecordingController.shared.start(result.target)
+            guard let result = try await select(.recording, target) else { return }
+            try await RecordingController.shared.start(result.target, asksForSettings: target == nil)
         }
+    }
+
+    /// What the user picks in the overlay, or what a link names.
+    private func select(_ mode: SelectionMode, _ target: ActionLink.Target?) async throws -> SelectionResult? {
+        guard let target else { return await SelectionOverlay.select(mode) }
+        return SelectionResult(target: try await target.captureTarget(), frozenImage: nil)
     }
 
     // MARK: Screenshots

@@ -38,12 +38,14 @@ enum ScreenmeError: LocalizedError {
     case displayNotFound
     case recordingFailed
     case nothingToCapture
+    case windowNotFound(String)
 
     var errorDescription: String? {
         switch self {
         case .displayNotFound: "Screenme could not find the display to capture."
         case .recordingFailed: "The recording could not be saved."
         case .nothingToCapture: "There is no previous area to capture yet."
+        case .windowNotFound(let app): "Screenme could not find a window of \(app) on screen."
         }
     }
 }

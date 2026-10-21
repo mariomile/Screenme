@@ -24,6 +24,9 @@ targets:
         NSHumanReadableCopyright: "MIT License"
         NSMicrophoneUsageDescription: "Screenme records your voice with screen recordings when you turn the microphone on."
         NSCameraUsageDescription: "Screenme shows your camera in a bubble on screen recordings when you turn the camera on."
+        CFBundleURLTypes:
+          - CFBundleURLName: dev.mariomiletta.Screenme
+            CFBundleURLSchemes: [screenme]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.mariomiletta.Screenme
@@ -33,7 +36,7 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     scheme:
-      testTargets: [ScreenmeTests]
+      testTargets: [ScreenmeTests, ScreenmeUITests]
   ScreenmeTests:
     type: bundle.unit-test
     platform: macOS
@@ -46,3 +49,16 @@ targets:
         CODE_SIGN_IDENTITY: "-"
         CODE_SIGN_STYLE: Manual
         GENERATE_INFOPLIST_FILE: YES
+  ScreenmeUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources: [Tests/ScreenmeUITests]
+    dependencies:
+      - target: Screenme
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.mariomiletta.ScreenmeUITests
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_STYLE: Manual
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: Screenme

@@ -39,6 +39,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if AppState.shared.needsSetup { OnboardingWindow.show() }
     }
 
+    /// `screenme://capture-area` and the like run that action, for Shortcuts, Raycast or scripts.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls {
+            guard let link = ActionLink(url: url) else { continue }
+            coordinator.perform(link.action, target: link.target)
+        }
+    }
+
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         SettingsWindow.show()
         return false
