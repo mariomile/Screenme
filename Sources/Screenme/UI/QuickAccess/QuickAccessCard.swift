@@ -93,10 +93,11 @@ final class QuickAccessCard: NSObject {
 
     // MARK: Actions from the views
 
-    /// Runs `action` on the capture. The card goes away once it did something, except Show in Finder.
+    /// Runs `action` on the capture. The card goes away once it did something, except Show in Finder,
+    /// and Share, whose menu opens from the card.
     func perform(_ action: CaptureAction) {
         Task {
-            guard await action.perform(model.item), action != .reveal else { return }
+            guard await action.perform(model.item), action != .reveal, action != .share else { return }
             owner.dismiss(self)
         }
     }

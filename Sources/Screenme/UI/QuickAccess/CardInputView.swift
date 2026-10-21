@@ -124,12 +124,16 @@ final class CardInputView: NSView, NSDraggingSource {
         let menu = NSMenu()
         for action in CaptureAction.allCases where action.isAvailable(for: kind) {
             if action == .edit || action == .trash { menu.addItem(.separator()) }
+            // The share menu lists the services as a submenu.
+            if action == .share {
+                menu.addItem(Share.menuItem(for: model.item.url))
+                continue
+            }
             let item = NSMenuItem(title: action.title(for: kind), action: #selector(menuAction(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = CaptureAction.allCases.firstIndex(of: action)
             item.image = NSImage(systemSymbolName: action.symbol(for: kind), accessibilityDescription: nil)
             menu.addItem(item)
-            if action == .reveal { menu.addItem(Share.menuItem(for: model.item.url)) }
         }
         return menu
     }

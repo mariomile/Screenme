@@ -175,12 +175,17 @@ private final class PinWindowController: NSObject {
     func makeMenu() -> NSMenu {
         let menu = NSMenu()
         menu.autoenablesItems = false
-        for (action, key) in [(CaptureAction.copy, "c"), (.copyMarkdown, ""), (.copyPath, ""), (.save, "s"), (.edit, "")] where action.isAvailable(for: item.kind) {
+        for (action, key) in [(CaptureAction.copy, "c"), (.copyMarkdown, ""), (.copyPath, ""), (.save, "s"), (.edit, ""), (.share, "")]
+            where action.isAvailable(for: item.kind) {
+            // The share menu lists the services as a submenu.
+            if action == .share {
+                menu.addItem(Share.menuItem(for: item.url))
+                continue
+            }
             let entry = entry(action.title(for: item.kind), #selector(captureAction(_:)), key: key)
             entry.representedObject = CaptureAction.allCases.firstIndex(of: action)
             menu.addItem(entry)
         }
-        menu.addItem(Share.menuItem(for: item.url))
         menu.addItem(.separator())
 
         let opacity = NSMenu()

@@ -306,10 +306,9 @@ private struct HistoryGridCell: View {
         ZStack(alignment: .bottom) {
             LinearGradient(colors: [.clear, .black.opacity(0.55)], startPoint: .center, endPoint: .bottom)
             HStack(spacing: 7) {
-                ForEach([CaptureAction.copy, .save, .pin, .edit, .trash].filter { $0.isAvailable(for: item.kind) }, id: \.self) { action in
+                ForEach([CaptureAction.copy, .save, .pin, .edit, .trash, .share].filter { $0.isAvailable(for: item.kind) }, id: \.self) { action in
                     HistoryActionButton(symbol: action.symbol(for: item.kind), help: action.title(for: item.kind)) { perform(action) }
                 }
-                HistoryActionButton(symbol: "square.and.arrow.up", help: "Share") { Share.show(item.url) }
             }
             .padding(.bottom, 9)
         }
@@ -320,9 +319,12 @@ private struct HistoryGridCell: View {
     private var menu: some View {
         ForEach(CaptureAction.allCases.filter { $0.isAvailable(for: item.kind) }, id: \.self) { action in
             if action == .edit || action == .trash { Divider() }
-            Button(action.title(for: item.kind), systemImage: action.symbol(for: item.kind),
-                   role: action == .trash ? .destructive : nil) { perform(action) }
-            if action == .reveal { ShareLink(item: item.url) }
+            if action == .share {
+                ShareLink(item: item.url)
+            } else {
+                Button(action.title(for: item.kind), systemImage: action.symbol(for: item.kind),
+                       role: action == .trash ? .destructive : nil) { perform(action) }
+            }
         }
     }
 
