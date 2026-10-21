@@ -51,6 +51,7 @@ enum Pref {
     static let afterRecordingCopy = PrefKey(name: "afterRecordingCopy", defaultValue: false)
     static let afterRecordingSave = PrefKey(name: "afterRecordingSave", defaultValue: false)
     static let afterRecordingOpenEditor = PrefKey(name: "afterRecordingOpenEditor", defaultValue: false)
+    static let afterRecordingAIReport = PrefKey(name: "afterRecordingAIReport", defaultValue: false)
 
     // Files
     static let saveDirectory = PrefKey(name: "saveDirectory", defaultValue: FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask)[0].path)

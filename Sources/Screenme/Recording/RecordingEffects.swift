@@ -1,8 +1,8 @@
 import AppKit
 import QuartzCore
 
-/// A transparent, click-through window over the recorded area that draws click highlights and
-/// pressed shortcuts. It is one of the few Screenme windows that is part of the recording.
+/// A transparent window over the recorded area that draws click highlights, pressed shortcuts and live drawings.
+/// It is one of the few Screenme windows that is part of the recording. Clicks go through it, except in draw mode.
 @MainActor
 final class RecordingEffects {
     let panel: FloatingPanel
@@ -13,10 +13,11 @@ final class RecordingEffects {
     private var monitors: [Any] = []
     private var pressLayer: CALayer?
     private let keyPill = KeyPillView()
+    private let canvas: DrawingCanvas
     private var keyHistory: [(String, Date)] = []
     private var keyHideTask: Task<Void, Never>?
 
-    init(frame: CGRect, highlightClicks: Bool, showKeystrokes: Bool) {
+    init(frame: CGRect, highlightClicks: Bool, showKeystrokes: Bool, drawing: LiveDrawing) {
         self.highlightClicks = highlightClicks
         self.showKeystrokes = showKeystrokes
         panel = FloatingPanel(frame: frame, level: .popUpMenu, hasShadow: false, ignoresMouse: true,
@@ -26,6 +27,8 @@ final class RecordingEffects {
         root.layer?.masksToBounds = true
         panel.contentView = root
 
+        canvas = DrawingCanvas(frame: root.bounds, drawing: drawing)
+        root.addSubview(canvas)
         keyPill.alphaValue = 0
         root.addSubview(keyPill)
     }
@@ -46,11 +49,20 @@ final class RecordingEffects {
         }
         if showKeystrokes, Permission.accessibility.isGranted {
             if let monitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown, handler: { [weak self] event in
-                let label = Self.label(for: event)
+                let label = Self.label(keyCode: event.keyCode, flags: event.modifierFlags, characters: event.charactersIgnoringModifiers)
                 MainActor.assumeIsolated { if let label { self?.showKey(label) } }
             }) { monitors.append(monitor) }
         }
     }
+
+    /// In draw mode the window takes the mouse for drawing; otherwise clicks reach the apps below.
+    func setDrawing(_ on: Bool) {
+        // An explicit false makes the transparent window catch clicks everywhere, which drawing needs.
+        panel.ignoresMouseEvents = !on
+        if !on { NSCursor.arrow.set() }
+    }
+
+    func clearDrawings() { canvas.clear() }
 
     func stop() {
         monitors.forEach { NSEvent.removeMonitor($0) }
@@ -151,8 +163,8 @@ final class RecordingEffects {
     }
 
     /// "⌘⇧4", "⌃⌥Space", "Return". Plain letters are not shown: only shortcuts and special keys.
-    nonisolated static func label(for event: NSEvent) -> String? {
-        let flags = event.modifierFlags.intersection([.command, .option, .control, .shift])
+    nonisolated static func label(keyCode: UInt16, flags: NSEvent.ModifierFlags, characters: String?) -> String? {
+        let flags = flags.intersection([.command, .option, .control, .shift])
         let special: [UInt16: String] = [
             36: "Return", 76: "Enter", 48: "Tab", 49: "Space", 51: "Delete", 117: "Forward Delete", 53: "Esc",
             123: "←", 124: "→", 125: "↓", 126: "↑", 115: "Home", 119: "End", 116: "Page Up", 121: "Page Down",
@@ -161,9 +173,9 @@ final class RecordingEffects {
         ]
         let hasCommandLike = !flags.intersection([.command, .option, .control]).isEmpty
         let name: String
-        if let known = special[event.keyCode] {
+        if let known = special[keyCode] {
             name = known
-        } else if hasCommandLike, let characters = event.charactersIgnoringModifiers, !characters.isEmpty {
+        } else if hasCommandLike, let characters, !characters.isEmpty {
             name = characters.uppercased()
         } else {
             return nil

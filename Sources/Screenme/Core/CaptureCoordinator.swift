@@ -173,6 +173,10 @@ final class CaptureCoordinator {
         defer { busy = false }
         guard let item = await RecordingController.shared.stop() else { return }
         afterCapture(item)
+        // Outside the busy window: transcribing can take a while, and a new capture need not wait for it.
+        if Prefs[Pref.afterRecordingAIReport], CaptureAction.reportForAI.isAvailable(for: item.kind) {
+            Task { await CaptureAction.reportForAI.perform(item) }
+        }
     }
 
     // MARK: After capture

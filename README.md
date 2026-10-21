@@ -9,7 +9,8 @@ A lightweight, native macOS capture tool. Capture, drop it where it goes, move o
 - **Capture screen**: from the menu bar.
 - **Hide sensitive info when sharing** (Settings > Screenshots, off by default): Copy for AI and Share send a copy with emails, phone numbers, cards, IBANs, keys, IP addresses and faces pixelated, and `[redacted]` in the copied text. The capture file is never changed. The editor's Redact Sensitive Info covers faces too.
 - **Copy for AI** (Quick Access, History, pins, editor `⇧⌘C`): copies the image plus a text block for Claude, ChatGPT or Cursor: the app, window and browser page it came from, the text in it, and the notes you wrote on annotations in the editor (select an annotation, type in Note for AI). Paste into a chat for the image, or into a terminal for the text with the file path.
-- **Bug Report** (recordings, from Quick Access, History or the video editor): record the screen while you explain the bug, then pick Bug Report. Screenme transcribes what you said on this Mac, takes a frame at each step and writes a `Bug Report` folder in your save folder with the video, the frames and `report.md`: environment, timestamped transcript, numbered steps with their frames, and a prompt for a coding agent. The report is also copied, with absolute paths, ready to paste into GitHub, Linear or Claude Code.
+- **Draw while recording** (`⌥⌘D` or the pencil in the recording controls): pen, arrow, rectangle or highlighter in red, yellow, green or blue, drawn on the screen and filmed into the video. Each drawing fades out 3 seconds after you finish it; turn on Keep in the palette to keep them until Clear. Esc or the pencil goes back to clicking your apps. The palette is never in the video.
+- **Report for AI** (recordings, from Quick Access, History or the video editor, or on its own after every recording with Settings > Recording > Create report for AI): record the screen, talk and draw, then pick Report for AI. Screenme transcribes what you said on this Mac and writes a `Report` folder in your save folder with the video, frames, `events.json` and `report.md`: environment, then a moment by moment timeline that merges what you said with your clicks (and the button or field clicked, with Accessibility allowed), shortcuts (never plain typing), app and window switches and drawings, each key moment with its frame, then the transcript and a prompt for an AI agent. The report is also copied, with absolute paths, ready to paste into Claude Code, Cursor, GitHub or Linear.
 
 ## Share links (S3-compatible storage)
 
@@ -85,7 +86,7 @@ screenme list --limit 5                  # recent captures, newest first
 
 That block goes in the client's MCP config (Claude Desktop: `~/Library/Application Support/Claude/claude_desktop_config.json`; Cursor: `~/.cursor/mcp.json`). In Claude Code: `claude mcp add screenme -- /Applications/Screenme.app/Contents/Helpers/screenme mcp`. In Codex: `codex mcp add screenme -- /Applications/Screenme.app/Contents/Helpers/screenme mcp`.
 
-The agent then has three tools: `take_screenshot` (mode `fullscreen`, `area` with `x`, `y`, `width`, `height`, or `window` with `app`), `get_latest_capture` and `list_captures`. Screenshots come back as an image (scaled to at most 1568 pixels on the long side) plus the path of the full-size file.
+The agent then has four tools: `take_screenshot` (mode `fullscreen`, `area` with `x`, `y`, `width`, `height`, or `window` with `app`), `get_latest_capture`, `get_latest_report` (the newest Report for AI in your save folder: `report.md` plus up to six frames) and `list_captures`. Screenshots come back as an image (scaled to at most 1568 pixels on the long side) plus the path of the full-size file.
 
 ## Where files go
 

@@ -164,11 +164,11 @@ struct VideoEditorView: View {
     private var actions: some View {
         HStack(spacing: 10) {
             // From the recording as it was made: the trim and Mute would cut the narration.
-            Button(CaptureAction.bugReport.title(for: model.item.kind), systemImage: CaptureAction.bugReport.symbol(for: model.item.kind)) {
+            Button(CaptureAction.reportForAI.title(for: model.item.kind), systemImage: CaptureAction.reportForAI.symbol(for: model.item.kind)) {
                 model.pause()
-                Task { await CaptureAction.bugReport.perform(model.item) }
+                Task { await CaptureAction.reportForAI.perform(model.item) }
             }
-            .help(CaptureAction.bugReport.tooltip(for: model.item.kind) + " Uses the whole recording, without trim or export settings.")
+            .help(CaptureAction.reportForAI.tooltip(for: model.item.kind) + " Uses the whole recording, without trim or export settings.")
             Spacer()
             Button(CaptureAction.copy.title(for: model.item.kind)) { model.perform(.copy) }
                 .help("Copy\nExports with these settings and puts the file on the clipboard.")

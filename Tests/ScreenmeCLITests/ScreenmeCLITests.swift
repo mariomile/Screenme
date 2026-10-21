@@ -64,6 +64,8 @@ final class CaptureFolderTests: XCTestCase {
         let newest = try writePNG("b.png", modified: now)
         try writePNG("c.png", modified: now.addingTimeInterval(-30))
         FileManager.default.createFile(atPath: folder.url.appendingPathComponent(".DS_Store").path, contents: Data([1]))
+        // The events of a recording, kept next to it by the app.
+        FileManager.default.createFile(atPath: folder.url.appendingPathComponent(".b.mp4.events.json").path, contents: Data("{}".utf8))
 
         XCTAssertEqual(folder.captures().map(\.url.lastPathComponent), ["b.png", "c.png", "a.png"])
         XCTAssertEqual(folder.latest?.url.lastPathComponent, newest.lastPathComponent)
@@ -112,9 +114,9 @@ final class MCPServerTests: XCTestCase {
         try? FileManager.default.removeItem(at: folder.url)
     }
 
-    /// A server whose captures write a 3000 x 1000 PNG instead of asking the app.
+    /// A server whose captures write a 3000 x 1000 PNG instead of asking the app, with its reports in the same folder.
     var server: MCPServer {
-        MCPServer(folder: folder) { request in
+        MCPServer(folder: folder, reports: folder.url) { request in
             self.captured.append(request)
             return try self.writeImage(width: 3000, height: 1000)
         }
@@ -164,10 +166,10 @@ final class MCPServerTests: XCTestCase {
         XCTAssertEqual((tool?["error"] as? [String: Any])?["code"] as? Int, -32602)
     }
 
-    func testListsThreeTools() async throws {
+    func testListsFourTools() async throws {
         let response = try await send(#"{"jsonrpc":"2.0","id":4,"method":"tools/list"}"#)
         let tools = try XCTUnwrap((response?["result"] as? [String: Any])?["tools"] as? [[String: Any]])
-        XCTAssertEqual(tools.compactMap { $0["name"] as? String }, ["take_screenshot", "get_latest_capture", "list_captures"])
+        XCTAssertEqual(tools.compactMap { $0["name"] as? String }, ["take_screenshot", "get_latest_capture", "get_latest_report", "list_captures"])
         XCTAssertTrue(tools.allSatisfy { $0["inputSchema"] is [String: Any] })
     }
 
@@ -217,5 +219,46 @@ final class MCPServerTests: XCTestCase {
         XCTAssertEqual(try MCPServer.request(from: ["mode": "window", "app": "Safari"]), .window(app: "Safari"))
         XCTAssertThrowsError(try MCPServer.request(from: ["mode": "area", "x": 1, "y": 2, "width": 0, "height": 4]))
         XCTAssertThrowsError(try MCPServer.request(from: [:]))
+    }
+
+    /// A report folder as Report for AI writes it, with `frames` PNG frames and report.md last modified at `modified`.
+    @discardableResult
+    func writeReport(_ name: String, frames: Int, modified: Date) throws -> URL {
+        let report = folder.url.appendingPathComponent(name, isDirectory: true)
+        try FileManager.default.createDirectory(at: report.appendingPathComponent("frames"), withIntermediateDirectories: true)
+        for index in 0..<frames {
+            let image = try writeImage(width: 64, height: 40)
+            try FileManager.default.moveItem(at: image, to: report.appendingPathComponent(String(format: "frames/%02d.png", index + 1)))
+        }
+        let markdown = report.appendingPathComponent("report.md")
+        try "# \(name)\n".write(to: markdown, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: modified], ofItemAtPath: markdown.path)
+        return report
+    }
+
+    func testLatestReportReturnsTheMarkdownAndUpToSixFrames() async throws {
+        let empty = try await send(#"{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"get_latest_report"}}"#)
+        XCTAssertEqual((empty?["result"] as? [String: Any])?["isError"] as? Bool, true)
+
+        let now = Date()
+        try writeReport("Report 2026-10-21 at 10.00.00", frames: 2, modified: now.addingTimeInterval(-60))
+        try writeReport("Report 2026-10-21 at 11.00.00", frames: 9, modified: now)
+        // Not reports: another folder, and a report folder still being written (no report.md yet).
+        try FileManager.default.createDirectory(at: folder.url.appendingPathComponent("Screens"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: folder.url.appendingPathComponent("Report 2026-10-21 at 12.00.00"), withIntermediateDirectories: true)
+
+        XCTAssertEqual(MCPServer.latestReport(in: folder.url)?.lastPathComponent, "Report 2026-10-21 at 11.00.00")
+        let response = try await send(#"{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"get_latest_report","arguments":{}}}"#)
+        let result = try XCTUnwrap(response?["result"] as? [String: Any])
+        XCTAssertNil(result["isError"])
+        let content = try XCTUnwrap(result["content"] as? [[String: Any]])
+        XCTAssertEqual(content.first?["text"] as? String, "# Report 2026-10-21 at 11.00.00\n")
+        let images = content.filter { $0["type"] as? String == "image" }
+        XCTAssertEqual(images.count, MCPServer.maxReportFrames)
+        XCTAssertTrue(images.allSatisfy { $0["mimeType"] as? String == "image/png" })
+        // Spread over the recording, not just the first six.
+        let paths = content.compactMap { $0["text"] as? String }.filter { $0.hasSuffix(".png") }.map { URL(fileURLWithPath: $0).lastPathComponent }
+        XCTAssertEqual(paths, ["01.png", "02.png", "04.png", "05.png", "07.png", "08.png"])
+        XCTAssertTrue((content.last?["text"] as? String)?.hasSuffix("Report 2026-10-21 at 11.00.00") == true)
     }
 }

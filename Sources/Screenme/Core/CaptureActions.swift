@@ -4,13 +4,13 @@ import SwiftUI
 /// What the user can do with a finished capture, from Quick Access, History, pins and the editors.
 /// Every surface takes its titles, symbols, availability and confirmation toasts from here.
 enum CaptureAction: CaseIterable {
-    case copy, copyForAI, bugReport, copyMarkdown, copyPath, save, saveAs, reveal, share, uploadLink, edit, pin, trash
+    case copy, copyForAI, reportForAI, copyMarkdown, copyPath, save, saveAs, reveal, share, uploadLink, edit, pin, trash
 
     func title(for kind: CaptureItem.Kind) -> String {
         switch self {
         case .copy: "Copy"
         case .copyForAI: "Copy for AI"
-        case .bugReport: "Bug Report"
+        case .reportForAI: "Report for AI"
         case .copyMarkdown: "Copy as Markdown"
         case .copyPath: "Copy Path"
         case .save: "Save"
@@ -28,7 +28,7 @@ enum CaptureAction: CaseIterable {
         switch self {
         case .copy: "doc.on.doc"
         case .copyForAI: "sparkles"
-        case .bugReport: "ladybug"
+        case .reportForAI: "doc.text.magnifyingglass"
         case .copyMarkdown: "doc.text"
         case .copyPath: "link"
         case .save: "square.and.arrow.down"
@@ -44,12 +44,12 @@ enum CaptureAction: CaseIterable {
 
     /// Images open in the annotation editor and videos in the video editor. GIFs have no editor:
     /// AVFoundation cannot read them and the annotation editor would flatten the animation.
-    /// Only images pin or go to an AI. A Markdown image link does not play a video. Bug Report needs a recording
+    /// Only images pin or go to Copy for AI. A Markdown image link does not play a video. Report for AI needs a recording
     /// with its sound, which a GIF does not have.
     func isAvailable(for kind: CaptureItem.Kind) -> Bool {
         switch self {
         case .copyForAI: kind == .image
-        case .bugReport: kind == .video
+        case .reportForAI: kind == .video
         case .copyMarkdown: kind != .video
         case .edit: kind != .gif
         case .pin: kind == .image
@@ -71,8 +71,8 @@ enum CaptureAction: CaseIterable {
                 return false
             }
             confirm(hidden: hidden)
-        case .bugReport:
-            guard await BugReporter.make(item) else { return false }
+        case .reportForAI:
+            guard await AIReporter.make(item) else { return false }
             confirm()
         case .copyMarkdown:
             // The link points at the copy in the save folder: the capture itself may be pruned from History.
@@ -105,6 +105,7 @@ enum CaptureAction: CaseIterable {
         case .trash:
             withAnimation(.snappy) { CaptureHistory.shared.trash(item) }
             CaptureContexts.forget(item.url)
+            RecordingEvents.forget(item.url)
             CaptureCoordinator.shared.forget(item)
             confirm()
         }
@@ -119,8 +120,8 @@ enum CaptureAction: CaseIterable {
             Toast.show("Copied to clipboard", symbol: "doc.on.doc.fill")
         case .copyForAI:
             Toast.show(hidden > 0 ? "Copied for AI, \(Self.hiddenItems(hidden)) hidden" : "Copied for AI", symbol: "sparkles")
-        case .bugReport:
-            Toast.show("Bug report copied", symbol: "ladybug.fill")
+        case .reportForAI:
+            Toast.show("Report for AI copied", symbol: "doc.text.magnifyingglass")
         case .copyMarkdown:
             Toast.show("Markdown copied", symbol: "doc.text.fill")
         case .copyPath:

@@ -11,6 +11,8 @@ struct MCPServer {
     static let maxImageSide = 1568
 
     let folder: CaptureFolder
+    /// Where Report for AI writes its folders: the app's save folder.
+    var reports: URL = MCPServer.saveFolder
     /// Takes a capture and returns its file. `CaptureFolder.take` in the tool, a stub in tests.
     let capture: (CaptureRequest) async throws -> URL
 
@@ -78,6 +80,13 @@ struct MCPServer {
             "inputSchema": ["type": "object", "properties": [String: Any]()],
         ],
         [
+            "name": "get_latest_report",
+            "description": "Return the newest Screenme Report for AI: a screen recording the user narrated and drew on, "
+                + "as report.md (a moment by moment timeline of what they said, clicked, pressed, switched to and drew, "
+                + "with the paths of the video, frames and events.json) plus up to \(MCPServer.maxReportFrames) of its frames as images.",
+            "inputSchema": ["type": "object", "properties": [String: Any]()],
+        ],
+        [
             "name": "list_captures",
             "description": "List recent Screenme captures, newest first: file path and date, one per line.",
             "inputSchema": [
@@ -96,6 +105,11 @@ struct MCPServer {
             case "get_latest_capture":
                 guard let latest = folder.latest else { return failure("There are no captures yet in \(folder.url.path)") }
                 return imageResult(latest.url)
+            case "get_latest_report":
+                guard let report = Self.latestReport(in: reports) else {
+                    return failure("There are no reports yet in \(reports.path). Make one with Report for AI on a recording.")
+                }
+                return try reportResult(report)
             default:
                 let limit = arguments["limit"] as? Int ?? Command.defaultListLimit
                 guard limit > 0 else { return failure("limit must be at least 1") }
@@ -124,6 +138,48 @@ struct MCPServer {
         default:
             throw Command.UsageError("mode must be fullscreen, area or window")
         }
+    }
+
+    // MARK: Reports
+
+    static let maxReportFrames = 6
+
+    /// The save folder from the app's settings, the Desktop until it is changed.
+    static var saveFolder: URL {
+        if let path = UserDefaults(suiteName: "dev.mariomiletta.Screenme")?.string(forKey: "saveDirectory"), !path.isEmpty {
+            return URL(fileURLWithPath: path, isDirectory: true)
+        }
+        return FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask)[0]
+    }
+
+    /// The newest `Report …` folder in `parent` that has a `report.md`, by the date of that file.
+    static func latestReport(in parent: URL) -> URL? {
+        let folders = (try? FileManager.default.contentsOfDirectory(at: parent, includingPropertiesForKeys: nil, options: .skipsHiddenFiles)) ?? []
+        let reports: [(URL, Date)] = folders.compactMap { folder in
+            guard folder.lastPathComponent.hasPrefix("Report ") else { return nil }
+            let file = folder.appendingPathComponent("report.md")
+            guard let date = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate else { return nil }
+            return (folder, date)
+        }
+        return reports.max { $0.1 < $1.1 }?.0
+    }
+
+    /// report.md, then up to `maxReportFrames` frames spread over the recording, then the folder's path.
+    private func reportResult(_ folder: URL) throws -> [String: Any] {
+        let markdown = try String(contentsOf: folder.appendingPathComponent("report.md"), encoding: .utf8)
+        let frames = ((try? FileManager.default.contentsOfDirectory(at: folder.appendingPathComponent("frames"), includingPropertiesForKeys: nil)) ?? [])
+            .filter { $0.pathExtension.lowercased() == "png" }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+        let count = min(frames.count, Self.maxReportFrames)
+        let picked = (0..<count).map { frames[$0 * frames.count / count] }
+        var content: [[String: Any]] = [text(markdown)]
+        for frame in picked {
+            guard let png = Self.pngData(of: frame) else { continue }
+            content.append(["type": "image", "data": png.base64EncodedString(), "mimeType": "image/png"])
+            content.append(text(frame.path))
+        }
+        content.append(text("Report folder: \(folder.path)"))
+        return ["content": content]
     }
 
     /// The image (PNG, scaled down to `maxImageSide`) and the path. Only the path when the file is not an image (a video).

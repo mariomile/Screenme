@@ -18,10 +18,13 @@ struct RecordingPane: View {
                 PrefToggle("Copy file to clipboard", Pref.afterRecordingCopy)
                 PrefToggle("Save to folder", Pref.afterRecordingSave)
                 PrefToggle("Open in video editor", Pref.afterRecordingOpenEditor)
+                PrefToggle("Create report for AI", Pref.afterRecordingAIReport,
+                           detail: "Transcribes what you said and writes the report folder, as Report for AI does.")
+                    .help("Create report for AI\nWhen a video recording stops, Screenme makes its Report for AI on its own: the moment by moment timeline, frames and a prompt, saved to your save folder and copied.")
             } header: {
                 Text("After recording")
             } footer: {
-                Text("With Open in video editor on, the editor opens instead of Quick Access. GIFs have no editor and go to Quick Access.")
+                Text("With Open in video editor on, the editor opens instead of Quick Access. GIFs have no editor and go to Quick Access. Reports are made for videos only.")
             }
 
             Section("Video") {

@@ -6,6 +6,8 @@ import CoreMedia
 /// A sample is written only when it lies entirely inside the current stretch of recording: one that
 /// straddles a pause or a resume is dropped, so no two samples of a track can overlap in the file.
 struct PauseTimeline {
+    /// Capture time the file starts at.
+    let start: CMTime
     /// Capture time the current stretch began at: the session start, or the last resume.
     private var stretchStart: CMTime
     /// Paused time cut out so far.
@@ -13,6 +15,7 @@ struct PauseTimeline {
     private var pausedAt: CMTime?
 
     init(start: CMTime) {
+        self.start = start
         stretchStart = start
     }
 
@@ -40,6 +43,12 @@ struct PauseTimeline {
             guard time < pausedAt, end <= pausedAt else { return nil }
         }
         return CMTimeSubtract(time, cut)
+    }
+
+    /// Seconds into the video of something that happens at capture time `time`, for the events of a recording.
+    /// Nil while paused, so what happens then is left out like the pictures.
+    func videoSeconds(at time: CMTime) -> Double? {
+        outputTime(for: time, duration: .zero).map { CMTimeSubtract($0, start).seconds }
     }
 
     /// The file time a recording stopped at `time` ends at. While paused, that is where the pause began.

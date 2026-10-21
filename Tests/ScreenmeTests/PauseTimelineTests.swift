@@ -78,4 +78,14 @@ final class PauseTimelineTests: XCTestCase {
         timeline.resume(at: t(4))
         XCTAssertEqual(timeline.outputTime(for: t(10), duration: none), t(10), "nothing is cut when pause and resume precede the start")
     }
+
+    func testEventTimesAreSecondsOfTheVideoWithPausesCutOut() {
+        var timeline = PauseTimeline(start: t(10))
+        XCTAssertEqual(timeline.videoSeconds(at: t(12)), 2)
+        timeline.pause(at: t(15))
+        XCTAssertNil(timeline.videoSeconds(at: t(16)), "an event while paused is not in the video")
+        timeline.resume(at: t(18))
+        XCTAssertEqual(timeline.videoSeconds(at: t(20)), 7)
+        XCTAssertNil(timeline.videoSeconds(at: t(9)), "before the video starts")
+    }
 }

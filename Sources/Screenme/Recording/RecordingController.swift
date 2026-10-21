@@ -1,5 +1,6 @@
 import AppKit
 import AVFoundation
+import Carbon.HIToolbox
 import ScreenCaptureKit
 
 /// Screen recording: pre-record bar, countdown, capture with pause, and the controls around it.
@@ -85,9 +86,10 @@ final class RecordingController {
         guard let session = takeRunning() else { return nil }
         let size = session.size
         guard let url = await end(session, keep: true) else { return nil }
-        // The recorded app and window, for Bug Report.
+        // The recorded app and window, and what happened during the recording, for Report for AI.
         CaptureContexts.record(session.target, for: url)
         if session.settings.format == .gif { return await convertToGIF(url, size: size) }
+        if let events = session.recordedEvents { RecordingEvents.record(events, for: url) }
         return CaptureItem(url: url, kind: .video)
     }
 
@@ -132,6 +134,11 @@ final class RecordingController {
         session.setPaused(!session.clock.isPaused)
     }
 
+    fileprivate func toggleDrawing() {
+        guard let session = running else { return }
+        session.setDrawing(!session.drawing.isOn)
+    }
+
     /// Throws the current take away and starts again with the same settings, without a countdown.
     fileprivate func restart() async {
         guard let session = takeRunning() else { return }
@@ -151,9 +158,10 @@ final class RecordingController {
 
     fileprivate func confirmDiscard() {
         guard let session = running else { return }
-        // The recording waits while the question is open.
+        // The recording waits while the question is open, and the overlay must not catch the clicks meant for it.
         let wasPaused = session.clock.isPaused
         session.setPaused(true)
+        session.setDrawing(false)
 
         let alert = NSAlert()
         alert.messageText = "Discard this recording?"
@@ -189,6 +197,7 @@ private final class Session {
     let target: CaptureTarget
     let settings: RecordingSettings
     let clock = RecordingClock()
+    let drawing = LiveDrawing()
     private var webcam: WebcamBubble?
     private var hidIcons = false
     private var effects: RecordingEffects?
@@ -196,6 +205,10 @@ private final class Session {
     private var recorder: StreamRecorder?
     private var outline: RecordingOutline?
     private var bar: RecordingControlBar?
+    private var events: RecordingEventRecorder?
+    private var palette: DrawPalette?
+    private var drawKey: TemporaryHotKey?
+    private var escapeKey: TemporaryHotKey?
 
     init(target: CaptureTarget, settings: RecordingSettings, webcam: WebcamBubble?) {
         self.target = target
@@ -223,11 +236,10 @@ private final class Session {
             Toast.show("Keystrokes need Accessibility access", symbol: "keyboard", duration: 3)
         }
         let showKeys = settings.showKeystrokes && Permission.accessibility.isGranted
-        if settings.highlightClicks || showKeys {
-            let overlay = RecordingEffects(frame: frame, highlightClicks: settings.highlightClicks, showKeystrokes: showKeys)
-            overlay.show()
-            effects = overlay
-        }
+        // Always there: live drawings are drawn in it.
+        let overlay = RecordingEffects(frame: frame, highlightClicks: settings.highlightClicks, showKeystrokes: showKeys, drawing: drawing)
+        overlay.show()
+        effects = overlay
 
         watermark = WatermarkOverlay(frame: frame)
         watermark?.show()
@@ -237,6 +249,10 @@ private final class Session {
         if !overlays.isEmpty { try? await Task.sleep(for: .milliseconds(200)) }
         recorder = try await makeRecorder(CaptureSetup.make(for: target, settings: settings, overlays: overlays))
         effects?.start()
+        let events = RecordingEventRecorder(area: frame) { [weak self] in self?.recorder?.videoTime() }
+        events.start()
+        self.events = events
+        drawing.onDrawing = { [weak events] tool, color, box, tip in events?.addDrawing(tool, color: color, box: box, tip: tip) }
 
         let insideFrame = if case .display = target { true } else { false }
         let outline = RecordingOutline(frame: frame, insideFrame: insideFrame)
@@ -246,13 +262,38 @@ private final class Session {
         // The clock exists since the pre-record bar closed; the recording starts now.
         clock.reset()
         let controller = RecordingController.shared
-        let bar = RecordingControlBar(clock: clock, area: frame, screen: Placement.screen(for: target),
+        let bar = RecordingControlBar(clock: clock, drawing: drawing, area: frame, screen: Placement.screen(for: target),
                                       pause: { controller.togglePause() },
                                       stop: { Task { await CaptureCoordinator.shared.stopRecording() } },
+                                      draw: { controller.toggleDrawing() },
                                       restart: { Task { await controller.restart() } },
                                       discard: { controller.confirmDiscard() })
         bar.show()
         self.bar = bar
+        drawKey = HotKeyCenter.shared.registerTemporary(keyCode: UInt32(kVK_ANSI_D), modifiers: UInt32(cmdKey | optionKey)) {
+            controller.toggleDrawing()
+        }
+    }
+
+    /// What happened during the recording, for Report for AI.
+    var recordedEvents: RecordingEvents? { events?.recorded }
+
+    /// Draw mode: the overlay takes the mouse, the palette shows, and Esc leaves it.
+    func setDrawing(_ on: Bool) {
+        guard drawing.isOn != on else { return }
+        drawing.isOn = on
+        effects?.setDrawing(on)
+        if on {
+            let palette = DrawPalette(drawing: drawing, near: bar?.frame ?? target.cocoaFrame) { [weak self] in self?.setDrawing(false) }
+            palette.show()
+            self.palette = palette
+            escapeKey = HotKeyCenter.shared.registerTemporary(keyCode: UInt32(kVK_Escape)) { [weak self] in self?.setDrawing(false) }
+        } else {
+            palette?.close()
+            palette = nil
+            HotKeyCenter.shared.unregisterTemporary(escapeKey)
+            escapeKey = nil
+        }
     }
 
     /// A recorder for `setup`, already capturing.
@@ -285,12 +326,18 @@ private final class Session {
         recorder = try await makeRecorder(previous.setup)
         clock.reset()
         outline?.setPaused(false)
+        events?.reset()
+        effects?.clearDrawings()
     }
 
     /// Releases everything, newest first. The controls go at once; the filmed overlays stay until the recorder
     /// has stopped, so the last frames still show them. Returns the file when `keep` is set and something was recorded.
     @discardableResult
     func tearDown(keep: Bool) async -> URL? {
+        setDrawing(false)
+        HotKeyCenter.shared.unregisterTemporary(drawKey)
+        drawKey = nil
+        events?.stop()
         bar?.close()
         bar = nil
         outline?.close()

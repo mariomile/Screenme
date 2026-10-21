@@ -118,6 +118,19 @@ final class StreamRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
         }
     }
 
+    /// Seconds into the video of what happens now, for the recording's events: 0 before the first picture,
+    /// nil while paused and once the recording is over.
+    func videoTime() -> Double? {
+        let now = Self.now()
+        return queue.sync {
+            switch phase {
+            case .awaitingFirstFrame: 0
+            case .writing: timeline.videoSeconds(at: now)
+            case .finished, .failed: nil
+            }
+        }
+    }
+
     // MARK: Samples
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {

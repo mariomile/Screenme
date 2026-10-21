@@ -34,15 +34,16 @@ final class RecordingClock: ObservableObject {
     }
 }
 
-/// The small draggable bar with time, pause, stop, restart and discard.
+/// The small draggable bar with time, pause, stop, draw, restart and discard.
 @MainActor
 final class RecordingControlBar {
     private let panel: FloatingPanel
 
-    init(clock: RecordingClock, area: CGRect, screen: NSScreen,
-         pause: @escaping () -> Void, stop: @escaping () -> Void,
+    init(clock: RecordingClock, drawing: LiveDrawing, area: CGRect, screen: NSScreen,
+         pause: @escaping () -> Void, stop: @escaping () -> Void, draw: @escaping () -> Void,
          restart: @escaping () -> Void, discard: @escaping () -> Void) {
-        let view = NSHostingView(rootView: ControlBarView(clock: clock, togglePause: pause, stop: stop, restart: restart, discard: discard))
+        let view = NSHostingView(rootView: ControlBarView(clock: clock, drawing: drawing, togglePause: pause, stop: stop,
+                                                          toggleDraw: draw, restart: restart, discard: discard))
         let size = view.fittingSize
         panel = FloatingPanel(frame: Placement.barFrame(size: size, near: area, on: screen), level: .popUpMenu)
         panel.isMovableByWindowBackground = true
@@ -52,10 +53,15 @@ final class RecordingControlBar {
     func show() { panel.present() }
     func close() { panel.dismiss() }
 
+    /// Where the bar is now; the user may have dragged it.
+    var frame: CGRect { panel.frame }
+
     private struct ControlBarView: View {
         @ObservedObject var clock: RecordingClock
+        @ObservedObject var drawing: LiveDrawing
         let togglePause: () -> Void
         let stop: () -> Void
+        let toggleDraw: () -> Void
         let restart: () -> Void
         let discard: () -> Void
 
@@ -85,6 +91,10 @@ final class RecordingControlBar {
                     .padding(.trailing, 6)
 
                 BarButton(symbol: clock.isPaused ? "play.fill" : "pause.fill", help: clock.isPaused ? "Resume\nContinues the same recording." : "Pause\nStops recording for a moment; the paused time is left out of the video.", action: togglePause)
+                BarButton(symbol: "pencil.tip.crop.circle", active: drawing.isOn,
+                          help: drawing.isOn ? "Stop Drawing  ⌥⌘D or Esc\nClicks go to your apps again."
+                                             : "Draw  ⌥⌘D\nDraw on the screen to point things out: pen, arrow, rectangle or highlighter. The drawings are part of the video.",
+                          action: toggleDraw)
                 BarButton(symbol: "arrow.counterclockwise", help: "Restart\nThrows away what you recorded so far and starts again, without a countdown.", action: restart)
                 BarButton(symbol: "trash", help: "Discard\nStops and deletes the recording.", action: discard)
             }
