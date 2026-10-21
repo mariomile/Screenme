@@ -14,12 +14,12 @@ About 0.5 MB on disk, no dependencies, system frameworks only (ScreenCaptureKit,
 Requires macOS 15+, Xcode 16+ and [XcodeGen](https://github.com/yonaskolb/XcodeGen).
 
 ```bash
-xcodegen generate
-xcodebuild -project Screenme.xcodeproj -scheme Screenme -configuration Release -derivedDataPath build/DerivedData build
-open build/DerivedData/Build/Products/Release/Screenme.app
+./scripts/install.sh
 ```
 
-On first launch, allow Screenme in System Settings > Privacy & Security > Screen & System Audio Recording, then relaunch.
+The script builds a Release copy, signs it with a self-signed certificate kept in its own keychain (created on the first run), and installs it in `/Applications`. macOS ties Screen Recording to the app's signature, so a stable signature keeps the permission across rebuilds. An ad-hoc build loses it every time.
+
+On first launch, allow Screenme in System Settings > Privacy & Security > Screen & System Audio Recording, then relaunch. If an older Screenme is already in that list, remove it with the minus button first.
 
 ## Where files go
 

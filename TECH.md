@@ -32,6 +32,6 @@
 - Captures live in `~/Library/Application Support/Screenme/Captures`; Save copies to the chosen save folder (Desktop by default).
 
 ## Known traps
-- Builds are ad-hoc signed (no signing identity on this Mac, 2026-10-20). macOS ties the Screen Recording permission to the code signature, so a rebuild can drop the permission: re-enable Screenme in System Settings after rebuilding. Fix: sign with a stable certificate.
+- Installs go through `scripts/install.sh`, which signs with "Screenme Local Signing", a self-signed certificate in `~/Library/Keychains/screenme-signing.keychain-db` (2026-10-21). macOS ties Screen Recording to the designated requirement (`identifier` + certificate leaf), which stays the same across rebuilds, so the permission survives. The Xcode build itself stays ad-hoc.
 - AppKit windows must be created on the main thread: an overlay built inside a non-MainActor `Task` crashed on the first shortcut (fixed by making UI types `@MainActor`, 2026-10-20).
 - Shottr owns ⌘⇧1 by default; `RegisterEventHotKey` then fails silently. Screenme now shows an alert at launch when a shortcut is taken.
