@@ -49,7 +49,7 @@ Order is Mario's stated frequency ranking (A, B, C), not an observed one. `[assu
 | Type | Constraint | Source |
 |------|-----------|--------|
 | Technical | Native, lightweight, performant: no Electron, no web runtime | `[doc:user-2026-10-20-screenme]` |
-| Regulatory | none (local only, no data leaves the Mac) | `[doc:user-2026-10-20-screenme]` |
+| Regulatory | none (local by default; data leaves the Mac only when the user uploads to their own bucket or shares) | `[doc:user-2026-10-20-screenme]` |
 | Resource | One builder (Mario + Claude Code) | `[doc:user-2026-10-20-screenme]` |
 | Distribution | Open source on GitHub; local build on Mario's Mac; no App Store | `[doc:user-2026-10-20-screenme]` |
 
