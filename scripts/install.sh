@@ -34,6 +34,9 @@ xcodegen generate >/dev/null
 xcodebuild -project Screenme.xcodeproj -scheme Screenme -configuration Release \
   -derivedDataPath build/release build -quiet
 APP="build/release/Build/Products/Release/Screenme.app"
+# Check for Updates in the app reads where it was built from and which commit it is.
+plutil -replace ScreenmeSourcePath -string "$ROOT" "$APP/Contents/Info.plist"
+plutil -replace ScreenmeCommit -string "$(git -C "$ROOT" rev-parse HEAD)" "$APP/Contents/Info.plist"
 codesign --force --sign "$IDENTITY" --keychain "$KEYCHAIN" --preserve-metadata=entitlements,flags "$APP"
 codesign --verify --strict "$APP"
 

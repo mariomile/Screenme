@@ -19,6 +19,8 @@ Requires macOS 15+, Xcode 16+ and [XcodeGen](https://github.com/yonaskolb/XcodeG
 
 The script builds a Release copy, signs it with a self-signed certificate kept in its own keychain (created on the first run), and installs it in `/Applications`. macOS ties Screen Recording to the app's signature, so a stable signature keeps the permission across rebuilds. An ad-hoc build loses it every time.
 
+To update, choose **Check for Updates…** in the menu bar (or Settings › About). Screenme fetches this checkout's remote, lists the commits it does not have yet, and **Download and Install** runs `git pull --ff-only` plus the install script, then restarts. It refuses to update while the checkout has uncommitted changes. The output of the last update is in `~/Library/Logs/Screenme/update.log`.
+
 On first launch, allow Screenme in System Settings > Privacy & Security > Screen & System Audio Recording, then relaunch. If an older Screenme is already in that list, remove it with the minus button first.
 
 ## Automation

@@ -118,6 +118,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(.separator())
         }
         menu.addItem(withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: ",").target = self
+        let updates = menu.addItem(withTitle: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
+        updates.target = self
+        updates.toolTip = "Looks for new Screenme changes on GitHub and offers to install them."
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit Screenme", action: #selector(quit), keyEquivalent: "q").target = self
     }
@@ -130,6 +133,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func openSettings() {
         SettingsWindow.show()
+    }
+
+    @objc private func checkForUpdates() {
+        SettingsWindow.show(tab: .about)
+        Task { await Updater.shared.check() }
     }
 
     @objc private func quit() {
