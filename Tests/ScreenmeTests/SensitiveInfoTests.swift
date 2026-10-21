@@ -81,12 +81,33 @@ final class SensitiveInfoTests: XCTestCase {
             "github_pat_11ABCDEFG0123456789_abcdefghij",
             "xoxb-1234567890-abcdefghij",
             "AKIAIOSFODNN7EXAMPLE",
+            "ASIAIOSFODNN7EXAMPLE",
+            "ghs_abcdefghijklmnopqrstuvwxyz0123456789",
+            "ghu_abcdefghijklmnopqrstuvwxyz0123456789",
+            "sk-ant-api03-abcdefghijklmnopqrstuvwxyz",
+            "glpat-abcdefghijklmnopqrst",
+            "npm_abcdefghijklmnopqrstuvwxyz0123456789",
+            "hf_abcdefghijklmnopqrstuvwxyzABCDEFGH",
+            "whsec_abcdefghijklmnopqrstuvwx",
+            "SG.abcdefghijklmnop_QR.abcdefghijklmnop_QR",
             "AIzaSyA1234567890abcdefghijklmnopqrstu",
             "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.abcdefghijk_lmnop",
         ]
         for key in keys {
             assertFinds("token \(key) here", [(.apiKey, key)])
         }
+    }
+
+    func testMaskReplacesEveryMatch() {
+        let masked = SensitiveInfo.mask("Mail me at a@b.com or call +39 333 123 4567, key ghp_abcdefghijklmnopqrstuvwxyz0123456789.")
+        XCTAssertEqual(masked.text, "Mail me at [redacted] or call [redacted], key [redacted].")
+        XCTAssertEqual(masked.count, 3)
+    }
+
+    func testMaskLeavesPlainTextAlone() {
+        let masked = SensitiveInfo.mask("Nothing to hide here")
+        XCTAssertEqual(masked.text, "Nothing to hide here")
+        XCTAssertEqual(masked.count, 0)
     }
 
     func testPrefixInsideAWordIsNotAKey() {

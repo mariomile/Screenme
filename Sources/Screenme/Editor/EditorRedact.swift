@@ -1,7 +1,7 @@
 import AppKit
 
 /// Redact Sensitive Info: reads the image's text and covers every email, phone number, card number, IBAN,
-/// key and IP address it finds with a pixelate annotation, as one undo step.
+/// key and IP address it finds, and every face, with a pixelate annotation, as one undo step.
 extension EditorController {
     func redactSensitiveInfo() {
         guard !isRedacting else { return }
@@ -22,13 +22,7 @@ extension EditorController {
                 return
             }
             let style = styles[.pixelate] ?? ToolKind.pixelate.traits.style
-            let annotations = boxes.map { box in
-                // A little margin so letter edges and descenders do not show around the mosaic.
-                let pad = max(box.height * 0.2, 2 * unit)
-                var annotation = Annotation(kind: .pixelate, style: style, at: box.origin)
-                annotation.shape = .box(box.insetBy(dx: -pad, dy: -pad).integral.intersection(source.bounds))
-                return annotation
-            }
+            let annotations = Redaction.annotations(covering: boxes, style: style, unit: unit, bounds: source.bounds)
             perform { $0.annotations.append(contentsOf: annotations) }
             choose(.select)
             select(Set(annotations.map(\.id)))

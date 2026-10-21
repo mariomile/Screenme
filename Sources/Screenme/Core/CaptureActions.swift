@@ -60,8 +60,8 @@ enum CaptureAction: CaseIterable {
             Clipboard.copy(item)
             confirm()
         case .copyForAI:
-            guard await AIClipboard.copy(item) else { return failed() }
-            confirm()
+            guard let hidden = await AIClipboard.copy(item) else { return failed() }
+            confirm(hidden: hidden)
         case .copyMarkdown:
             // The link points at the copy in the save folder: the capture itself may be pruned from History.
             guard let saved = Storage.savedCopy(of: item.url) ?? (try? Storage.save(item.url)) else { return failed() }
@@ -99,12 +99,12 @@ enum CaptureAction: CaseIterable {
 
     /// The one toast for this action, for code that did the work its own way (the editors).
     @MainActor
-    func confirm(savedTo url: URL? = nil) {
+    func confirm(savedTo url: URL? = nil, hidden: Int = 0) {
         switch self {
         case .copy:
             Toast.show("Copied to clipboard", symbol: "doc.on.doc.fill")
         case .copyForAI:
-            Toast.show("Copied for AI", symbol: "sparkles")
+            Toast.show(hidden > 0 ? "Copied for AI, \(Self.hiddenItems(hidden)) hidden" : "Copied for AI", symbol: "sparkles")
         case .copyMarkdown:
             Toast.show("Markdown copied", symbol: "doc.text.fill")
         case .copyPath:
@@ -116,6 +116,11 @@ enum CaptureAction: CaseIterable {
         case .reveal, .share, .edit, .pin:
             break
         }
+    }
+
+    /// "1 item", "3 items".
+    static func hiddenItems(_ count: Int) -> String {
+        "\(count) \(count == 1 ? "item" : "items")"
     }
 
     /// `![name](path)`: the file name without its extension, and the path percent-encoded so spaces and

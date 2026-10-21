@@ -15,7 +15,7 @@ enum TextRecognizer {
         }.value
     }
 
-    /// Boxes around the text `SensitiveInfo` flags, in image pixels with a top-left origin, one per match.
+    /// Boxes around the text `SensitiveInfo` flags and around faces, in image pixels with a top-left origin, one per match.
     static func sensitiveBoxes(in image: CGImage) async throws -> [CGRect] {
         let language = Prefs[Pref.ocrLanguage]
         return try await Task.detached(priority: .userInitiated) {
@@ -73,15 +73,18 @@ enum TextRecognizer {
         } else {
             request.recognitionLanguages = [language]
         }
-        try VNImageRequestHandler(cgImage: image, options: [:]).perform([request])
+        let faces = VNDetectFaceRectanglesRequest()
+        try VNImageRequestHandler(cgImage: image, options: [:]).perform([request, faces])
 
         let width = CGFloat(image.width), height = CGFloat(image.height)
-        return (request.results ?? []).flatMap { observation -> [CGRect] in
+        func pixels(_ box: CGRect) -> CGRect { // Normalized, bottom-left origin.
+            CGRect(x: box.minX * width, y: (1 - box.maxY) * height, width: box.width * width, height: box.height * height)
+        }
+        let faceBoxes = (faces.results ?? []).map { pixels($0.boundingBox) }
+        return faceBoxes + (request.results ?? []).flatMap { observation -> [CGRect] in
             guard let candidate = observation.topCandidates(1).first else { return [] }
             return SensitiveInfo.matches(in: candidate.string).compactMap { match in
-                // Normalized, bottom-left origin.
-                guard let box = try? candidate.boundingBox(for: match.range)?.boundingBox else { return nil }
-                return CGRect(x: box.minX * width, y: (1 - box.maxY) * height, width: box.width * width, height: box.height * height)
+                (try? candidate.boundingBox(for: match.range)?.boundingBox).map(pixels)
             }
         }
     }

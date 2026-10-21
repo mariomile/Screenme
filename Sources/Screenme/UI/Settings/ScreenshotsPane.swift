@@ -46,6 +46,11 @@ struct ScreenshotsPane: View {
                 PrefToggle("Close editor after copying", Pref.editorCloseAfterCopy, detail: "Copy also saves your edits to the screenshot and closes the editor.")
             }
 
+            Section("Sharing") {
+                PrefToggle("Hide sensitive info when sharing", Pref.hideSensitiveWhenSharing,
+                           detail: "Pixelates emails, phone numbers, cards, IBANs, keys, IP addresses and faces in Copy for AI and Share, and replaces them with [redacted] in the copied text. The file itself is not changed.")
+            }
+
             Section {
                 PrefToggle("Add watermark", Pref.watermarkEnabled, detail: "On new screenshots and recordings.")
                 if watermarkEnabled {

@@ -136,26 +136,44 @@ enum BrowserPage {
 
 /// Copy for AI: the image and, as text, where it came from, the notes and the text read from it.
 /// Chat apps take the image, and text fields and terminals paste the text.
+/// With "Hide sensitive info when sharing" the image and the text are redacted, and the text names a file holding the redacted image.
 enum AIClipboard {
+    /// Puts the screenshot on the clipboard. Returns how many sensitive items were hidden (0 when the setting is off),
+    /// or nil when they could not be checked: nothing is copied then. `unit` is the image's pixels per point.
     @MainActor
-    static func copy(image: CGImage, png: Data, path: URL, captureURL: URL) async {
+    static func copy(image: CGImage, png: Data, path: URL, captureURL: URL, unit: CGFloat) async -> Int? {
         let context = await CaptureContexts.context(for: captureURL)
-        let text = (try? await TextRecognizer.recognize(image)) ?? ""
+        var text = (try? await TextRecognizer.recognize(image)) ?? ""
+        var image = image, png = png, path = path
+        var hidden = 0
+        if Prefs[Pref.hideSensitiveWhenSharing] {
+            do {
+                if let result = try await Redaction.hidingSensitive(in: image, unit: unit),
+                   let data = NSBitmapImageRep(cgImage: result.image).representation(using: .png, properties: [:]),
+                   let file = Redaction.write(result.image, like: path.deletingPathExtension().appendingPathExtension("png")) {
+                    (image, png, path, hidden) = (result.image, data, file, result.count)
+                }
+            } catch {
+                return nil
+            }
+            let masked = SensitiveInfo.mask(text)
+            text = masked.text
+            hidden = max(hidden, masked.count)
+        }
         let prompt = context.prompt(path: path.path, pixelSize: CGSize(width: image.width, height: image.height), text: text)
         let entry = NSPasteboardItem()
         entry.setData(png, forType: .png)
         entry.setString(prompt, forType: .string)
         NSPasteboard.general.clearContents()
         NSPasteboard.general.writeObjects([entry])
+        return hidden
     }
 
-    /// Copies a capture file as it is.
+    /// Copies a capture file as it is. Returns how many items were hidden, or nil when it did not happen.
     @MainActor
-    static func copy(_ item: CaptureItem) async -> Bool {
-        guard let source = CGImageSourceCreateWithURL(item.url as CFURL, nil),
-              let image = CGImageSourceCreateImageAtIndex(source, 0, nil),
-              let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else { return false }
-        await copy(image: image, png: png, path: item.url, captureURL: item.url)
-        return true
+    static func copy(_ item: CaptureItem) async -> Int? {
+        guard let source = ImageSource.load(url: item.url),
+              let png = NSBitmapImageRep(cgImage: source.image).representation(using: .png, properties: [:]) else { return nil }
+        return await copy(image: source.image, png: png, path: item.url, captureURL: item.url, unit: source.unit)
     }
 }
