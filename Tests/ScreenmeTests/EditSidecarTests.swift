@@ -3,6 +3,39 @@ import XCTest
 
 /// Annotations stay editable after Done: the document is saved as JSON next to the capture and comes back intact.
 final class EditSidecarTests: PrefsSandboxTestCase {
+    private var folder: URL!
+
+    override func setUp() {
+        super.setUp()
+        folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    }
+
+    override func tearDown() {
+        try? FileManager.default.removeItem(at: folder)
+        super.tearDown()
+    }
+
+    /// A small opaque PNG standing in for a capture.
+    private func capture() throws -> URL {
+        let url = folder.appendingPathComponent("Screenshot.png")
+        let image = try XCTUnwrap(CGImage.drawn(width: 40, height: 30, colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!) { ctx in
+            ctx.setFillColor(CGColor(srgbRed: 0.2, green: 0.5, blue: 0.9, alpha: 1))
+            ctx.fill(CGRect(x: 0, y: 0, width: 40, height: 30))
+        })
+        let data = try XCTUnwrap(FlattenedImage(image: image, type: .png, dpi: 72, jpegQuality: 0.9, name: url.lastPathComponent).encoded())
+        try data.write(to: url)
+        return url
+    }
+
+    @MainActor private func addBox(_ controller: EditorController, at x: CGFloat) {
+        controller.perform { state in
+            var box = Annotation(kind: .rectangle, style: ToolStyle(color: Palette.red), at: CGPoint(x: x, y: 2))
+            box.shape = .box(CGRect(x: x, y: 2, width: 10, height: 8))
+            state.annotations.append(box)
+        }
+    }
+
     /// A document using every shape, a styled annotation, a note, crop past the image, resize, canvas fill,
     /// background and spotlight dim.
     static func richState() -> EditState {
@@ -54,5 +87,24 @@ final class EditSidecarTests: PrefsSandboxTestCase {
             XCTAssertTrue(json.contains(key), "missing \(key)")
         }
         XCTAssertFalse(json.contains("\"_0\":[["), "an unnamed shape payload")
+    }
+
+    @MainActor
+    func testDoneKeepsTheOriginalOnceAndRewritesTheDocument() throws {
+        let url = try capture()
+        let captured = try Data(contentsOf: url)
+        let controller = EditorController(item: CaptureItem(url: url, kind: .image), source: try XCTUnwrap(ImageSource.load(url: url)))
+        addBox(controller, at: 2)
+
+        XCTAssertTrue(controller.writeToCapture())
+        XCTAssertEqual(try Data(contentsOf: EditSidecar.originalURL(for: url)), captured)
+        XCTAssertNotEqual(try Data(contentsOf: url), captured, "the capture holds the flattened annotations")
+        XCTAssertEqual(EditSidecar.load(for: url)?.state, controller.state)
+        XCTAssertEqual(EditSidecar.folder(for: url).lastPathComponent, ".Screenshot.png.screenme-edit")
+
+        addBox(controller, at: 20)
+        XCTAssertTrue(controller.writeToCapture())
+        XCTAssertEqual(try Data(contentsOf: EditSidecar.originalURL(for: url)), captured, "a second Done keeps the original")
+        XCTAssertEqual(EditSidecar.load(for: url)?.state.annotations.count, 2)
     }
 }

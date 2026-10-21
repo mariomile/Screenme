@@ -82,8 +82,9 @@ extension EditorController {
         }
     }
 
-    /// Overwrites the capture file with the document and tells the rest of the app. False on failure, after an alert.
-    private func writeToCapture() -> Bool {
+    /// Overwrites the capture file with the document, saves the document in the capture's edit sidecar,
+    /// and tells the rest of the app. False on failure, after an alert.
+    func writeToCapture() -> Bool {
         canvas?.finishTextEditing()
         if mode.crop != nil { applyCrop() }
         guard let (image, type) = flatten(for: item.url), let data = encode(image, as: type) else {
@@ -91,11 +92,15 @@ extension EditorController {
             return false
         }
         do {
+            // The pixels as captured, kept once so the annotations stay editable (`EditSidecar`).
+            // Without them the capture still saves, flattened as before.
+            try? EditSidecar.keepOriginal(of: item.url)
             try data.write(to: item.url, options: .atomic)
         } catch {
             Feedback.alert("Screenme could not save the image: \(error.localizedDescription)", over: window)
             return false
         }
+        try? EditSidecar.write(state, for: item.url)
         markSaved()
         CaptureContexts.setNotes(notes, for: item.url)
         NotificationCenter.default.post(name: .captureUpdated, object: item.url)
