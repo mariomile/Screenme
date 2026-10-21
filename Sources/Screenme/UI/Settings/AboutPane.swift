@@ -53,7 +53,7 @@ private struct UpdateSection: View {
                     .foregroundStyle(.secondary)
             } else {
                 Button("Check for Updates") { Task { await updater.check() } }
-                    .disabled(updater.state == .checking || updater.state == .updating)
+                    .disabled(updater.isBusy)
                     .help("Fetches the latest changes from GitHub and lists what is new since this copy was installed.")
                 status
             }
@@ -87,12 +87,19 @@ private struct UpdateSection: View {
                     .buttonStyle(.borderedProminent)
                     .help("Pulls the changes, builds Screenme and installs it in Applications. Screenme restarts, and its permissions stay granted.")
             }
-        case .updating:
+        case .updating(let step):
             VStack(spacing: 4) {
-                ProgressView().controlSize(.small)
-                Text("Building and installing. This takes a minute or two.")
-                    .font(.callout)
-                Text("Screenme quits and reopens by itself when it is done.")
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text(step).font(.callout)
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        Text(Duration.seconds(context.date.timeIntervalSince(updater.updateStarted).rounded()),
+                             format: .time(pattern: .minuteSecond))
+                            .font(.callout.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Text("Usually under a minute. Screenme quits and reopens by itself when it is done.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

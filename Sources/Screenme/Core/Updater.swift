@@ -25,11 +25,19 @@ final class Updater: ObservableObject {
         case idle, checking, upToDate
         /// Subjects of the commits not in this copy yet, newest first.
         case available([String])
-        case updating
+        /// What the update is doing now, e.g. building.
+        case updating(String)
         case failed(String)
     }
 
     @Published private(set) var state: State = .idle
+    /// When the running update started, for the elapsed time next to its progress.
+    private(set) var updateStarted = Date()
+
+    var isBusy: Bool {
+        if case .updating = state { return true }
+        return state == .checking
+    }
     let source: Source?
 
     static let logURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/Screenme/update.log")
@@ -49,7 +57,7 @@ final class Updater: ObservableObject {
     }
 
     func check() async {
-        guard let source, state != .checking, state != .updating else { return }
+        guard let source, !isBusy else { return }
         state = .checking
         do {
             _ = try await Self.git(["fetch", "--quiet"], in: source.repo)
@@ -64,7 +72,7 @@ final class Updater: ObservableObject {
 
     /// Pulls and reinstalls. On success the install script quits this copy and opens the new one.
     func update() async {
-        guard let source, state != .updating else { return }
+        guard let source, !isBusy else { return }
         do {
             let changes = try await Self.git(["status", "--porcelain", "--untracked-files=no"], in: source.repo)
             guard changes.isEmpty else {
@@ -74,10 +82,22 @@ final class Updater: ObservableObject {
             try FileManager.default.createDirectory(at: Self.logURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             FileManager.default.createFile(atPath: Self.logURL.path, contents: nil)
             let log = try FileHandle(forWritingTo: Self.logURL)
-            state = .updating
-            let (status, _) = try await Self.run("/bin/zsh", ["-c", "git pull --ff-only && ./scripts/install.sh"], in: source.repo, log: log)
-            try? log.close()
-            if status != 0 { state = .failed("The update did not finish. Details are in the update log.") }
+            defer { try? log.close() }
+            updateStarted = Date()
+            let steps: [(title: String, command: String)] = [
+                ("Downloading the changes…", "git pull --ff-only"),
+                ("Building and installing…", "./scripts/install.sh"),
+            ]
+            for step in steps {
+                state = .updating(step.title)
+                log.write(Data("\n[\(Date().formatted(date: .omitted, time: .standard))] \(step.command)\n".utf8))
+                let (status, _) = try await Self.run("/bin/zsh", ["-c", step.command], in: source.repo, log: log)
+                guard status == 0 else {
+                    state = .failed("The update stopped at \"\(step.command)\". Details are in the update log.")
+                    return
+                }
+            }
+            // The install script quits this copy and opens the new one, so this is rarely reached.
         } catch {
             state = .failed(error.localizedDescription)
         }
