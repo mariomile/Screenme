@@ -136,18 +136,22 @@ enum SensitiveInfo {
 
     // MARK: Helpers
 
-    private static func regex(_ pattern: String, caseInsensitive: Bool = false) -> NSRegularExpression {
-        // The patterns are constants: a typo is a programming error caught by the tests.
-        try! NSRegularExpression(pattern: pattern, options: caseInsensitive ? [.caseInsensitive] : [])
+    /// Every pattern, compiled once in its static. Nil only for a pattern that does not compile, which then matches
+    /// nothing instead of crashing; a test checks that none is nil.
+    static var patterns: [NSRegularExpression?] { [email, keyPrefixes, iban, cardNumber, ipv4, phone, longToken] }
+
+    private static func regex(_ pattern: String, caseInsensitive: Bool = false) -> NSRegularExpression? {
+        try? NSRegularExpression(pattern: pattern, options: caseInsensitive ? [.caseInsensitive] : [])
     }
 
-    private static func ranges(of regex: NSRegularExpression, in text: String) -> [Range<String.Index>] {
-        regex.matches(in: text, range: NSRange(text.startIndex..., in: text)).compactMap { Range($0.range, in: text) }
+    private static func ranges(of regex: NSRegularExpression?, in text: String) -> [Range<String.Index>] {
+        guard let regex else { return [] }
+        return regex.matches(in: text, range: NSRange(text.startIndex..., in: text)).compactMap { Range($0.range, in: text) }
     }
 
     /// Greedy patterns can run into what is around them (an expiry date after a card number, a word after an IBAN):
     /// for each candidate, the first and longest run of its groups whose characters, separators left out, pass `isValid`.
-    private static func validRuns(of regex: NSRegularExpression, in text: String, separators: String,
+    private static func validRuns(of regex: NSRegularExpression?, in text: String, separators: String,
                                   isValid: (String) -> Bool) -> [Range<String.Index>] {
         ranges(of: regex, in: text).compactMap { candidate in
             let groups = text[candidate].split(whereSeparator: { separators.contains($0) }).map { $0.startIndex..<$0.endIndex }

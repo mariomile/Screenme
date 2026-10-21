@@ -13,6 +13,13 @@ final class SensitiveInfoTests: XCTestCase {
         XCTAssertEqual(actual.map(\.1), expected.map(\.1), "text in \"\(text)\"", file: file, line: line)
     }
 
+    func testEveryPatternCompiles() {
+        XCTAssertEqual(SensitiveInfo.patterns.count, 7)
+        for (index, pattern) in SensitiveInfo.patterns.enumerated() {
+            XCTAssertNotNil(pattern, "pattern \(index) does not compile")
+        }
+    }
+
     func testEmails() {
         assertFinds("Write to mario.rossi+test@example.co.uk today", [(.email, "mario.rossi+test@example.co.uk")])
         assertFinds("FOO@BAR.IO", [(.email, "FOO@BAR.IO")])
