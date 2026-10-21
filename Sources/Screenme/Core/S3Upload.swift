@@ -81,10 +81,20 @@ enum S3Keychain {
         return String(data: data, encoding: .utf8) ?? ""
     }
 
-    static func write(_ secret: String) {
-        SecItemDelete(query as CFDictionary)
+    /// Replaces the stored secret; an empty one removes it. Throws a readable error when the Keychain refuses.
+    static func write(_ secret: String) throws {
+        let deleted = SecItemDelete(query as CFDictionary)
+        guard deleted == errSecSuccess || deleted == errSecItemNotFound else { throw Failure(status: deleted) }
         guard !secret.isEmpty else { return }
-        SecItemAdd(query.merging([kSecValueData as String: Data(secret.utf8)]) { $1 } as CFDictionary, nil)
+        let added = SecItemAdd(query.merging([kSecValueData as String: Data(secret.utf8)]) { $1 } as CFDictionary, nil)
+        guard added == errSecSuccess else { throw Failure(status: added) }
+    }
+
+    struct Failure: LocalizedError {
+        let status: OSStatus
+        var errorDescription: String? {
+            "Could not save to the Keychain: \(SecCopyErrorMessageString(status, nil) as String? ?? "error \(status)")"
+        }
     }
 }
 
