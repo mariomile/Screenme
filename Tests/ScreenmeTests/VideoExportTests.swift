@@ -11,8 +11,8 @@ final class VideoExportTests: XCTestCase {
         super.tearDown()
     }
 
-    private func video(width: Int, height: Int, seconds: Double) throws -> URL {
-        let url = try TestVideo.make(width: width, height: height, seconds: seconds)
+    private func video(width: Int, height: Int, seconds: Double) async throws -> URL {
+        let url = try await TestVideo.make(width: width, height: height, seconds: seconds)
         cleanup.append(url)
         return url
     }
@@ -22,7 +22,7 @@ final class VideoExportTests: XCTestCase {
     }
 
     func testExportTrimsScalesAndSpeedsUp() async throws {
-        let source = try video(width: 640, height: 360, seconds: 4)
+        let source = try await video(width: 640, height: 360, seconds: 4)
         let renderer = FrameRenderer(renderSize: CGSize(width: 320, height: 180), timeOffset: 1, speed: 2)
         let output = try await VideoTranscoder.export(source, settings: VideoExportSettings(range: range(1, 3), renderer: renderer,
                                                                                            quality: .medium, mute: true))
@@ -38,7 +38,7 @@ final class VideoExportTests: XCTestCase {
 
     /// A 30 s 1080p recording must export in under 1.5x its length (45 s) on this Mac, with every layer on.
     func testExportOf30Seconds1080pIsFasterThanOneAndAHalfTimesRealtime() async throws {
-        let source = try video(width: 1920, height: 1080, seconds: 30)
+        let source = try await video(width: 1920, height: 1080, seconds: 30)
         let renderer = await TimingFixture.renderer(sourceSize: CGSize(width: 1920, height: 1080), duration: 30)
         let started = Date()
         let output = try await VideoTranscoder.export(source, settings: VideoExportSettings(range: range(0, 30), renderer: renderer,
@@ -52,7 +52,7 @@ final class VideoExportTests: XCTestCase {
     }
 
     func testSpeedUpShortensTheSoundTooAndMuteDropsIt() async throws {
-        let source = try TestVideo.make(width: 320, height: 180, seconds: 4, tone: true)
+        let source = try await TestVideo.make(width: 320, height: 180, seconds: 4, tone: true)
         cleanup.append(source)
         let renderer = FrameRenderer(renderSize: CGSize(width: 320, height: 180), timeOffset: 0, speed: 2)
         let output = try await VideoTranscoder.export(source, settings: VideoExportSettings(range: range(0, 4), renderer: renderer,
@@ -79,7 +79,7 @@ final class VideoExportTests: XCTestCase {
     }
 
     func testHEVCExport() async throws {
-        let source = try video(width: 640, height: 360, seconds: 1)
+        let source = try await video(width: 640, height: 360, seconds: 1)
         let renderer = FrameRenderer(renderSize: CGSize(width: 640, height: 360))
         let output = try await VideoTranscoder.export(source, settings: VideoExportSettings(range: range(0, 1), renderer: renderer,
                                                                                            quality: .high, codec: .hevc, mute: true))
@@ -90,7 +90,7 @@ final class VideoExportTests: XCTestCase {
     }
 
     func testGIFExportGoesThroughTheComposition() async throws {
-        let source = try video(width: 320, height: 180, seconds: 1)
+        let source = try await video(width: 320, height: 180, seconds: 1)
         let renderer = FrameRenderer(renderSize: CGSize(width: 160, height: 90))
         let output = try await GIFExporter.export(source, range: range(0, 1), renderer: renderer, fps: 10, quality: .low) { _ in }
         cleanup.append(output)
@@ -102,7 +102,7 @@ final class VideoExportTests: XCTestCase {
     }
 
     func testGIFExportOfAGeneratedVideoDecodesWithOneFramePerTick() async throws {
-        let source = try video(width: 320, height: 180, seconds: 1)
+        let source = try await video(width: 320, height: 180, seconds: 1)
         let renderer = FrameRenderer(renderSize: CGSize(width: 160, height: 90))
         let output = try await GIFExporter.export(source, range: range(0, 1), renderer: renderer, fps: 10, quality: .medium) { _ in }
         cleanup.append(output)

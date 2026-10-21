@@ -58,7 +58,7 @@ final class VideoCanvasTests: PrefsSandboxTestCase {
     /// A green video on a red square canvas: red in the corners, green in the middle, the corners rounded off.
     @MainActor
     func testExportDrawsTheBackgroundAroundTheVideo() async throws {
-        let video = try TestVideo.make(width: 320, height: 180, seconds: 1)
+        let video = try await TestVideo.make(width: 320, height: 180, seconds: 1)
         defer { try? FileManager.default.removeItem(at: video) }
         let edit = VideoEdit(canvas: settings(padding: 20, aspect: .square, radius: 30))
         let source = VideoSource(size: CGSize(width: 320, height: 180), events: nil)
