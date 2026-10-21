@@ -212,7 +212,11 @@ final class QuickAccessCard: NSObject {
         let work = DispatchWorkItem { [weak self] in
             MainActor.assumeIsolated {
                 guard let self, !self.model.hovering, !self.model.dragging else { return }
-                if Prefs[Pref.quickAccessAutoCloseSaves] { _ = try? Storage.save(self.model.item.url) }
+                // Not a second copy of a capture already saved after capture.
+                if Prefs[Pref.quickAccessAutoCloseSaves] {
+                    let url = self.model.item.url
+                    _ = Storage.savedCopy(of: url) ?? (try? Storage.save(url))
+                }
                 self.owner.dismiss(self)
             }
         }

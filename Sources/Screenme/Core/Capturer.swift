@@ -53,30 +53,29 @@ enum Storage {
     static func save(_ url: URL) throws -> URL {
         let folder = saveDirectory
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let base = url.deletingPathExtension().lastPathComponent
-        var destination = folder.appendingPathComponent(url.lastPathComponent)
-        var n = 2
-        while FileManager.default.fileExists(atPath: destination.path) {
-            destination = folder.appendingPathComponent("\(base) \(n).\(url.pathExtension)")
-            n += 1
-        }
+        // The names never run out, so there is always a first free one.
+        let destination = saveNames(for: url).lazy.map { folder.appendingPathComponent($0) }
+            .first { !FileManager.default.fileExists(atPath: $0.path) }!
         try FileManager.default.copyItem(at: url, to: destination)
         return destination
     }
 
     /// The copy of `url` that `save` already put in the save folder, if its bytes still match the capture.
-    /// Looks where `save` would have written it: the same name, then "name 2", "name 3" and so on.
+    /// Looks where `save` would have written it, up to the first free name.
     static func savedCopy(of url: URL) -> URL? {
         let folder = saveDirectory
-        let base = url.deletingPathExtension().lastPathComponent
-        var candidate = folder.appendingPathComponent(url.lastPathComponent)
-        var n = 2
-        while FileManager.default.fileExists(atPath: candidate.path) {
+        for name in saveNames(for: url) {
+            let candidate = folder.appendingPathComponent(name)
+            guard FileManager.default.fileExists(atPath: candidate.path) else { return nil }
             if FileManager.default.contentsEqual(atPath: candidate.path, andPath: url.path) { return candidate }
-            candidate = folder.appendingPathComponent("\(base) \(n).\(url.pathExtension)")
-            n += 1
         }
         return nil
+    }
+
+    /// The names `save` tries for a copy of `url`, in order: "name.ext", then "name 2.ext", "name 3.ext" and so on.
+    private static func saveNames(for url: URL) -> some Sequence<String> {
+        let base = url.deletingPathExtension().lastPathComponent
+        return (1...).lazy.map { $0 == 1 ? url.lastPathComponent : "\(base) \($0).\(url.pathExtension)" }
     }
 
     /// Asks where to save a copy of `url`, replacing a file the user chose to overwrite.
