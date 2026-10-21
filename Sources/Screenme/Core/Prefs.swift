@@ -34,6 +34,8 @@ enum Pref {
     static let playSounds = PrefKey(name: "playSounds", defaultValue: false)
     static let showMenuBarIcon = PrefKey(name: "showMenuBarIcon", defaultValue: true)
     static let settingsTab = PrefKey(name: "settingsSelectedTab", defaultValue: SettingsTab.general)
+    /// Commit of the copy that ran last, so a launch after an update can say so.
+    static let lastRunCommit = PrefKey(name: "lastRunCommit", defaultValue: "")
     /// JSON `[action: KeyCombo?]`, owned by `ShortcutStore`. Empty means every action uses its default.
     static let shortcuts = PrefKey(name: "shortcuts", defaultValue: Data())
 

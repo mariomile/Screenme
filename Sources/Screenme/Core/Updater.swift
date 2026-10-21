@@ -38,6 +38,16 @@ final class Updater: ObservableObject {
         self.source = source
     }
 
+    /// The update restarts Screenme silently, so the first launch on a new commit confirms it.
+    func announceIfUpdated() {
+        guard let source else { return }
+        let previous = Prefs[Pref.lastRunCommit]
+        Prefs[Pref.lastRunCommit] = source.commit
+        if !previous.isEmpty, previous != source.commit {
+            Toast.show("Screenme updated to \(source.shortCommit)", symbol: "arrow.down.circle.fill", duration: 4)
+        }
+    }
+
     func check() async {
         guard let source, state != .checking, state != .updating else { return }
         state = .checking

@@ -88,7 +88,14 @@ private struct UpdateSection: View {
                     .help("Pulls the changes, builds Screenme and installs it in Applications. Screenme restarts, and its permissions stay granted.")
             }
         case .updating:
-            ProgressView("Building and installing. Screenme restarts when it is done.").controlSize(.small)
+            VStack(spacing: 4) {
+                ProgressView().controlSize(.small)
+                Text("Building and installing. This takes a minute or two.")
+                    .font(.callout)
+                Text("Screenme quits and reopens by itself when it is done.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         case .failed(let message):
             VStack(spacing: 6) {
                 Text(message)
