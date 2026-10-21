@@ -17,23 +17,33 @@ final class FrameRenderer: @unchecked Sendable {
     let background: CIImage?
     /// White where the video shows (its rounded rectangle), transparent elsewhere; nil for square corners.
     let mask: CIImage?
+    /// Zooms; nil shows the whole video all along.
+    let camera: CameraPath?
 
     init(renderSize: CGSize, timeOffset: Double = 0, speed: Double = 1, contentRect: CGRect? = nil,
-         background: CIImage? = nil, mask: CIImage? = nil) {
+         background: CIImage? = nil, mask: CIImage? = nil, camera: CameraPath? = nil) {
         self.renderSize = renderSize
         self.timeOffset = timeOffset
         self.speed = speed
         self.contentRect = contentRect ?? CGRect(origin: .zero, size: renderSize)
         self.background = background
         self.mask = mask
+        self.camera = camera
     }
 
     func sourceTime(at compositionTime: Double) -> Double { timeOffset + compositionTime * speed }
 
     /// The output frame for `source` (a frame of the recording, at its own pixel size) at `compositionTime`.
     func image(for source: CIImage, at compositionTime: Double) -> CIImage {
+        let time = sourceTime(at: compositionTime)
         let extent = source.extent
-        let visible = extent
+        var visible = extent
+        if let camera {
+            // Unit coordinates from the top-left to pixels from the bottom-left.
+            let rect = camera.camera(at: time).visibleRect
+            visible = CGRect(x: extent.minX + rect.minX * extent.width, y: extent.minY + (1 - rect.maxY) * extent.height,
+                             width: rect.width * extent.width, height: rect.height * extent.height)
+        }
         let transform = CGAffineTransform(translationX: -visible.minX, y: -visible.minY)
             .concatenating(CGAffineTransform(scaleX: contentRect.width / visible.width, y: contentRect.height / visible.height))
             .concatenating(CGAffineTransform(translationX: contentRect.minX, y: contentRect.minY))

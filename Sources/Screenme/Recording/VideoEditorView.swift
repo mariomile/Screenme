@@ -76,6 +76,9 @@ struct VideoEditorView: View {
                         .allowsHitTesting(false)
                         .transition(.scale(scale: 0.8).combined(with: .opacity))
                 }
+                if model.pickingZoom != nil {
+                    ZoomRegionPicker(model: model)
+                }
             }
         }
         .animation(.easeOut(duration: 0.12), value: model.isPlaying)
@@ -211,15 +214,70 @@ struct VideoEditorView: View {
         }
     }
 
-    /// Space plays and pauses; the arrow keys step one frame.
+    /// Space plays and pauses; the arrow keys step one frame; Delete removes the selected zoom.
     private var keyboardShortcuts: some View {
         ZStack {
             Button("") { model.togglePlay() }.keyboardShortcut(.space, modifiers: [])
             Button("") { model.step(frames: -1) }.keyboardShortcut(.leftArrow, modifiers: [])
             Button("") { model.step(frames: 1) }.keyboardShortcut(.rightArrow, modifiers: [])
+            Button("") { if let id = model.selectedZoom { model.deleteZoom(id) } }.keyboardShortcut(.delete, modifiers: [])
         }
         .opacity(0)
         .allowsHitTesting(false)
+    }
+}
+
+/// Over the preview while a new zoom waits for its region: drag a rectangle on the video. Esc keeps the middle.
+private struct ZoomRegionPicker: View {
+    @ObservedObject var model: VideoEditorModel
+    @State private var start: CGPoint?
+    @State private var current: CGPoint?
+
+    var body: some View {
+        GeometryReader { geometry in
+            let frame = model.videoFrame(in: geometry.size)
+            ZStack(alignment: .topLeading) {
+                Color.black.opacity(0.25)
+                if let rect = dragged(in: frame) {
+                    Rectangle()
+                        .strokeBorder(Color.white, style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
+                        .background(Color.white.opacity(0.08))
+                        .frame(width: rect.width, height: rect.height)
+                        .offset(x: rect.minX, y: rect.minY)
+                }
+                VStack(spacing: 8) {
+                    Text("Drag a rectangle where the zoom should go")
+                        .font(.system(size: 12, weight: .semibold))
+                    Button("Keep the Middle") { model.endPicking() }
+                        .controlSize(.small)
+                        .keyboardShortcut(.cancelAction)
+                        .help("Keep the Middle (Esc)\nThe zoom stays on the middle of the video.")
+                }
+                .padding(10)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .frame(maxWidth: .infinity)
+                .padding(.top, 12)
+            }
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 4).onChanged { value in
+                if start == nil { start = value.startLocation }
+                current = value.location
+            }.onEnded { _ in
+                defer { start = nil; current = nil }
+                guard let rect = dragged(in: frame), frame.width > 0, frame.height > 0 else { return }
+                model.setZoomRegion(CGRect(x: (rect.minX - frame.minX) / frame.width, y: (rect.minY - frame.minY) / frame.height,
+                                           width: rect.width / frame.width, height: rect.height / frame.height))
+            })
+        }
+    }
+
+    /// The dragged rectangle, kept on the video.
+    private func dragged(in frame: CGRect) -> CGRect? {
+        guard let start, let current else { return nil }
+        let rect = CGRect(x: min(start.x, current.x), y: min(start.y, current.y),
+                          width: abs(current.x - start.x), height: abs(current.y - start.y))
+        let clipped = rect.intersection(frame)
+        return clipped.isNull || clipped.width < 2 || clipped.height < 2 ? nil : clipped
     }
 }
 

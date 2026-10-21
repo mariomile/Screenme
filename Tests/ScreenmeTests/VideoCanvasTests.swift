@@ -64,7 +64,7 @@ final class VideoCanvasTests: PrefsSandboxTestCase {
         let source = VideoSource(size: CGSize(width: 320, height: 180), events: nil)
         let size = edit.outputSize(for: source, resolution: .original)
         XCTAssertEqual(size, CGSize(width: 392, height: 392))
-        let renderer = edit.renderer(for: source, renderSize: size)
+        let renderer = edit.renderer(for: source, renderSize: size, duration: 1)
         let range = CMTimeRange(start: .zero, duration: CMTime(seconds: 1, preferredTimescale: 600))
         let output = try await VideoTranscoder.export(video, settings: VideoExportSettings(range: range, renderer: renderer, quality: .high, mute: true))
         defer { try? FileManager.default.removeItem(at: output) }

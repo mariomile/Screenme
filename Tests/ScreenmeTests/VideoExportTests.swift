@@ -75,10 +75,32 @@ final class VideoExportTests: XCTestCase {
     }
 }
 
-/// The renderer the timing test exports with.
+/// The renderer the timing test exports with: a gradient background with padding, corners and shadow, and
+/// an automatic zoom every 6 seconds following a cursor that circles the screen.
 @MainActor
 enum TimingFixture {
     static func renderer(sourceSize: CGSize, duration: Double) -> FrameRenderer {
-        FrameRenderer(renderSize: sourceSize)
+        var track = CursorTrack(hidden: true)
+        var clicks: [RecordingEvent] = []
+        let points = CGSize(width: sourceSize.width / 2, height: sourceSize.height / 2)
+        for i in 0...Int(duration * 60) {
+            let t = Double(i) / 60
+            track.add(time: t, x: points.width * (0.5 + 0.35 * cos(t)), y: points.height * (0.5 + 0.35 * sin(t)))
+        }
+        for t in stride(from: 3.0, to: duration, by: 6) {
+            clicks.append(.click(at: CGPoint(x: points.width * (0.5 + 0.35 * cos(t)), y: points.height * (0.5 + 0.35 * sin(t))),
+                                 right: false, time: t))
+        }
+        var events = RecordingEvents(width: points.width, height: points.height, events: clicks)
+        events.cursor = track
+        let source = VideoSource(size: sourceSize, events: events)
+
+        var edit = VideoEdit()
+        edit.canvas.enabled = true
+        edit.canvas.fill = .gradient("ocean")
+        edit.canvas.padding = 8
+        edit.canvas.aspect = .sixteenNine
+        edit.zooms = AutoZoom.segments(for: events, duration: duration)
+        return edit.renderer(for: source, renderSize: edit.outputSize(for: source, resolution: .p1080), duration: duration)
     }
 }

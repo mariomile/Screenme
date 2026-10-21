@@ -9,11 +9,13 @@ struct VideoInspector: View {
 
     enum Tab: String, CaseIterable, Identifiable {
         case background = "Background"
+        case zoom = "Zoom"
         var id: String { rawValue }
 
         var help: String {
             switch self {
             case .background: "Background\nPuts the video on a gradient, color, wallpaper or image, with padding, rounded corners and a shadow."
+            case .zoom: "Zoom\nZooms in on your clicks, or on regions you pick, and back out."
             }
         }
     }
@@ -34,6 +36,7 @@ struct VideoInspector: View {
                 Group {
                     switch tab {
                     case .background: BackgroundControls(model: model)
+                    case .zoom: VideoZoomControls(model: model)
                     }
                 }
                 .padding(.vertical, 8)
@@ -96,6 +99,39 @@ private struct BackgroundControls: View {
             Text(label).font(.system(size: 11).monospacedDigit()).foregroundStyle(.secondary).frame(width: 30, alignment: .leading)
         }
         .help(help)
+    }
+}
+
+// MARK: - Zoom
+
+private struct VideoZoomControls: View {
+    @ObservedObject var model: VideoEditorModel
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Toggle("Auto zoom", isOn: $model.autoZoom)
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .disabled(!model.hasClicks)
+                .help(model.hasClicks
+                      ? "Auto zoom\nZooms in on every click, from 1.5 s before to 2 s after, and follows the cursor. Clicks less than 3 s apart share one zoom."
+                      : "Auto zoom\nThis recording has no clicks to zoom on. Recordings made with this version of Screenme record them.")
+
+            HStack(spacing: 6) {
+                Text("Strength").font(.system(size: 11)).foregroundStyle(.secondary)
+                Slider(value: $model.edit.zoomStrength, in: AutoZoom.strengthRange).frame(width: 110).controlSize(.small)
+                Text(String(format: "%.1fx", model.edit.zoomStrength))
+                    .font(.system(size: 11).monospacedDigit()).foregroundStyle(.secondary).frame(width: 30, alignment: .leading)
+            }
+            .help("Strength\nHow far automatic zooms go in, from 1.3x to 3x.")
+
+            Button("Add Zoom", systemImage: "plus.magnifyingglass") { model.addZoom() }
+                .help("Add Zoom\nAdds a zoom at the playhead. Then drag a rectangle on the video to pick where it zooms.")
+            Button("Remove All", systemImage: "trash") { model.removeAllZooms() }
+                .disabled(model.edit.zooms.isEmpty)
+                .help("Remove All Zooms\nDeletes every zoom and turns Auto zoom off.")
+        }
+        .controlSize(.small)
     }
 }
 

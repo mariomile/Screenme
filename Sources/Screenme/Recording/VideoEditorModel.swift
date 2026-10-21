@@ -52,19 +52,36 @@ final class VideoEditorModel: ObservableObject {
         didSet {
             guard edit != oldValue else { return }
             if edit.canvas != oldValue.canvas { VideoCanvas.saved = edit.canvas }
+            if edit.zoomStrength != oldValue.zoomStrength { Prefs[Pref.videoZoomStrength] = edit.zoomStrength }
             updatePreview()
         }
     }
+    /// Zooms made from the recording's clicks. Remembered for next time.
+    @Published var autoZoom = Prefs[Pref.videoAutoZoom] {
+        didSet {
+            guard autoZoom != oldValue else { return }
+            Prefs[Pref.videoAutoZoom] = autoZoom
+            applyAutoZoom()
+        }
+    }
+    @Published var selectedZoom: UUID?
+    /// The zoom whose region is being dragged out on the preview.
+    @Published private(set) var pickingZoom: UUID? {
+        didSet { if pickingZoom != oldValue { updatePreview() } }
+    }
     /// The recording's clicks and cursor, when it was recorded with them.
     let events: RecordingEvents?
+    private let cursorPath: CursorPath?
 
-    var source: VideoSource { VideoSource(size: videoSize, events: events) }
+    var source: VideoSource { VideoSource(size: videoSize, events: events, cursor: cursorPath) }
 
     init(item: CaptureItem) {
         self.item = item
         events = RecordingEvents.events(for: item.url)
+        cursorPath = VideoSource.cursorPath(of: events)
         asset = AVURLAsset(url: item.url)
         edit.canvas = VideoCanvas.saved
+        edit.zoomStrength = min(max(Prefs[Pref.videoZoomStrength], AutoZoom.strengthRange.lowerBound), AutoZoom.strengthRange.upperBound)
         player.replaceCurrentItem(with: AVPlayerItem(asset: asset))
         player.actionAtItemEnd = .pause
 
@@ -113,6 +130,7 @@ final class VideoEditorModel: ObservableObject {
             trimStart = 0
             trimEnd = length
             applyEnd()
+            if autoZoom { applyAutoZoom() }
             updatePreview()
         } catch {
             loadFailed = true
@@ -299,8 +317,84 @@ final class VideoEditorModel: ObservableObject {
     // MARK: Rendering
 
     /// The renderer for an output of `size`. Exports start at the trim start; the preview plays the whole recording.
-    private func makeRenderer(size: CGSize, timeOffset: Double, speed: Double) -> FrameRenderer {
-        edit.renderer(for: source, renderSize: size, timeOffset: timeOffset, speed: speed)
+    /// While a zoom's region is being picked, the preview shows the whole video.
+    private func makeRenderer(size: CGSize, timeOffset: Double, speed: Double, preview: Bool = false) -> FrameRenderer {
+        edit.renderer(for: source, renderSize: size, duration: duration, timeOffset: timeOffset, speed: speed,
+                      zoomed: !(preview && pickingZoom != nil))
+    }
+
+    /// Where the video shows inside a view of `size` that fits the preview, y-down: for picking a zoom region.
+    func videoFrame(in size: CGSize) -> CGRect {
+        let preview = previewSize
+        let scale = min(size.width / preview.width, size.height / preview.height)
+        let shown = CGSize(width: preview.width * scale, height: preview.height * scale)
+        let origin = CGPoint(x: (size.width - shown.width) / 2, y: (size.height - shown.height) / 2)
+        let layout = edit.layout(for: source)
+        let k = shown.width / layout.canvasSize.width
+        let content = layout.contentRect
+        return CGRect(x: origin.x + content.minX * k, y: origin.y + content.minY * k, width: content.width * k, height: content.height * k)
+    }
+
+    // MARK: Zoom
+
+    /// Whether the recording has clicks to zoom on.
+    var hasClicks: Bool { events?.events.contains { $0.kind == .click } == true }
+
+    /// Replaces the automatic zooms with fresh ones from the clicks, or removes them. Zooms added by hand stay.
+    private func applyAutoZoom() {
+        var zooms = edit.zooms.filter { !$0.isAuto }
+        if autoZoom, let events, duration > 0 { zooms += AutoZoom.segments(for: events, duration: duration) }
+        edit.zooms = zooms.sorted { $0.start < $1.start }
+    }
+
+    func deleteZoom(_ id: UUID) {
+        edit.zooms.removeAll { $0.id == id }
+        if selectedZoom == id { selectedZoom = nil }
+        if pickingZoom == id { pickingZoom = nil }
+    }
+
+    /// Removes every zoom and turns Auto zoom off, so none come back.
+    func removeAllZooms() {
+        pickingZoom = nil
+        selectedZoom = nil
+        autoZoom = false
+        edit.zooms.removeAll()
+    }
+
+    /// Moves a zoom to start at `start`, keeping its length, inside the video.
+    func moveZoom(_ id: UUID, to start: Double) {
+        guard let index = edit.zooms.firstIndex(where: { $0.id == id }) else { return }
+        let length = edit.zooms[index].duration
+        let clamped = min(max(start, 0), max(duration - length, 0))
+        edit.zooms[index].start = clamped
+        edit.zooms[index].end = clamped + length
+    }
+
+    /// Adds a 3 second zoom at the playhead and asks for its region on the preview.
+    func addZoom() {
+        guard duration > 0 else { return }
+        pause()
+        let length = min(3, duration)
+        let start = min(max(currentTime, 0), duration - length)
+        let zoom = ZoomSegment(start: start, end: start + length, center: CGPoint(x: 0.5, y: 0.5), zoom: edit.zoomStrength, isAuto: false)
+        edit.zooms.append(zoom)
+        edit.zooms.sort { $0.start < $1.start }
+        selectedZoom = zoom.id
+        pickingZoom = zoom.id
+    }
+
+    /// The region picked on the preview, in unit coordinates of the video: the zoom centers on it and goes in until it fills the view.
+    func setZoomRegion(_ rect: CGRect) {
+        guard let id = pickingZoom, let index = edit.zooms.firstIndex(where: { $0.id == id }) else { return }
+        let side = max(rect.width, rect.height, 0.01)
+        let range = AutoZoom.strengthRange
+        edit.zooms[index].center = CGPoint(x: rect.midX, y: rect.midY)
+        edit.zooms[index].zoom = min(max(1 / side, range.lowerBound), range.upperBound)
+        pickingZoom = nil
+    }
+
+    func endPicking() {
+        pickingZoom = nil
     }
 
     /// The pixel size of the preview: the full-size output, at most 1920 pixels wide.
@@ -313,7 +407,7 @@ final class VideoEditorModel: ObservableObject {
     /// The preview draws through the same compositor as the export, so what it shows is what gets exported.
     private func updatePreview() {
         guard let playerItem = player.currentItem, videoTrackID != kCMPersistentTrackID_Invalid else { return }
-        playerItem.videoComposition = EditedVideo.videoComposition(renderer: makeRenderer(size: previewSize, timeOffset: 0, speed: 1),
+        playerItem.videoComposition = EditedVideo.videoComposition(renderer: makeRenderer(size: previewSize, timeOffset: 0, speed: 1, preview: true),
                                                                    trackID: videoTrackID, duration: CMTime(seconds: duration, preferredTimescale: 600),
                                                                    fps: fps)
         // A paused player keeps showing the old frame until it seeks.
