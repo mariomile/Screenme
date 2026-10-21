@@ -30,14 +30,16 @@ final class QuickAccessCard: NSObject {
 
     private var autoClose: DispatchWorkItem?
 
-    init(item: CaptureItem, screen: NSScreen, owner: QuickAccess) {
+    /// `preview`: the picture of a file still being written (see `QuickAccess.show(_:preview:)`).
+    init(item: CaptureItem, screen: NSScreen, owner: QuickAccess, preview: CGImage? = nil) {
         self.screen = screen
         self.owner = owner
         let width = Prefs[Pref.quickAccessSize].cardWidth
+        let aspect = preview.map { CGFloat($0.height) / CGFloat(max($0.width, 1)) } ?? Thumbnails.aspectRatio(of: item)
         // Between 140 and 220 points tall at the medium width, in proportion for the other sizes.
-        let height = CGFloat.minimum(width * 220 / 224, CGFloat.maximum(width * 140 / 224, width * Thumbnails.aspectRatio(of: item)))
+        let height = CGFloat.minimum(width * 220 / 224, CGFloat.maximum(width * 140 / 224, width * aspect))
         size = CGSize(width: width, height: height)
-        model = CardModel(item: item)
+        model = CardModel(item: item, preview: preview)
 
         let inset = QuickAccess.inset
         let frame = CGRect(x: 0, y: 0, width: width + inset * 2, height: height + inset * 2)
@@ -52,7 +54,7 @@ final class QuickAccessCard: NSObject {
         hosting.autoresizingMask = [.width, .height]
         root.addSubview(hosting)
         panel.contentView = root
-        Task { await model.reload() }
+        if preview == nil { Task { await model.reload() } }
     }
 
     // MARK: Placement
@@ -97,6 +99,7 @@ final class QuickAccessCard: NSObject {
     /// and Share, whose menu opens from the card.
     func perform(_ action: CaptureAction) {
         Task {
+            await model.untilWritten()
             guard await action.perform(model.item), action != .reveal, action != .share else { return }
             owner.dismiss(self)
         }

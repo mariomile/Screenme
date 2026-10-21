@@ -14,6 +14,9 @@ final class ImageSource {
 
     private var mips: [CGImage] = []
     private var redactions: [RedactKey: CGImage] = [:]
+    /// The cached redaction keys, least recently used first.
+    private var redactionUse: [RedactKey] = []
+    private static let redactionLimit = 48
 
     private struct RedactKey: Hashable {
         var blur: Bool
@@ -91,7 +94,7 @@ final class ImageSource {
         let r = rect.integral.intersection(bounds)
         guard !r.isNull, r.width >= 1, r.height >= 1 else { return nil }
         let key = RedactKey(blur: false, x: Int(r.minX), y: Int(r.minY), w: Int(r.width), h: Int(r.height), amount: Int(block * 4))
-        if let cached = redactions[key] { return (cached, r) }
+        if let cached = cached(key) { return (cached, r) }
         guard let crop = image.cropping(to: r) else { return nil }
         let bw = max(1, Int((r.width / max(block, 1)).rounded(.up)))
         let bh = max(1, Int((r.height / max(block, 1)).rounded(.up)))
@@ -107,7 +110,7 @@ final class ImageSource {
         let r = rect.integral.intersection(bounds)
         guard !r.isNull, r.width >= 1, r.height >= 1 else { return nil }
         let key = RedactKey(blur: true, x: Int(r.minX), y: Int(r.minY), w: Int(r.width), h: Int(r.height), amount: Int(sigma * 4))
-        if let cached = redactions[key] { return (cached, r) }
+        if let cached = cached(key) { return (cached, r) }
         let ciRect = CGRect(x: r.minX, y: size.height - r.maxY, width: r.width, height: r.height)
         let out = CIImage(cgImage: image).clampedToExtent()
             .applyingGaussianBlur(sigma: Double(max(sigma, 0.5)))
@@ -117,10 +120,25 @@ final class ImageSource {
         return (result, r)
     }
 
+    /// A cached patch, marked as just used.
+    private func cached(_ key: RedactKey) -> CGImage? {
+        guard let image = redactions[key] else { return nil }
+        if let index = redactionUse.lastIndex(of: key) { redactionUse.remove(at: index) }
+        redactionUse.append(key)
+        return image
+    }
+
+    /// Keeps at most `redactionLimit` patches, dropping the least recently used one first.
     private func store(_ image: CGImage, for key: RedactKey) {
-        if redactions.count > 48 { redactions.removeAll() }
+        if redactions[key] == nil, redactions.count >= Self.redactionLimit, !redactionUse.isEmpty {
+            redactions[redactionUse.removeFirst()] = nil
+        }
+        redactionUse.removeAll { $0 == key }
+        redactionUse.append(key)
         redactions[key] = image
     }
+
+    var cachedRedactionCount: Int { redactions.count }
 
     // MARK: Thumbnail
 

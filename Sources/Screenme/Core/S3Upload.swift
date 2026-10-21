@@ -81,10 +81,20 @@ enum S3Keychain {
         return String(data: data, encoding: .utf8) ?? ""
     }
 
-    static func write(_ secret: String) {
-        SecItemDelete(query as CFDictionary)
+    /// Replaces the stored secret; an empty one removes it. Throws a readable error when the Keychain refuses.
+    static func write(_ secret: String) throws {
+        let deleted = SecItemDelete(query as CFDictionary)
+        guard deleted == errSecSuccess || deleted == errSecItemNotFound else { throw Failure(status: deleted) }
         guard !secret.isEmpty else { return }
-        SecItemAdd(query.merging([kSecValueData as String: Data(secret.utf8)]) { $1 } as CFDictionary, nil)
+        let added = SecItemAdd(query.merging([kSecValueData as String: Data(secret.utf8)]) { $1 } as CFDictionary, nil)
+        guard added == errSecSuccess else { throw Failure(status: added) }
+    }
+
+    struct Failure: LocalizedError {
+        let status: OSStatus
+        var errorDescription: String? {
+            "Could not save to the Keychain: \(SecCopyErrorMessageString(status, nil) as String? ?? "error \(status)")"
+        }
     }
 }
 
@@ -183,11 +193,13 @@ enum S3Upload {
     }
 
     /// Uploads `file` as `key` and returns the public link. Throws a `Failure` with a readable message.
-    static func put(_ file: URL, key: String, settings: UploadSettings) async throws -> String {
+    /// `progress` gets the share of the file sent so far, from 0 to 1, on URLSession's queue.
+    static func put(_ file: URL, key: String, settings: UploadSettings,
+                    progress: (@Sendable (Double) -> Void)? = nil) async throws -> String {
         let hash = try SigV4.sha256Hex(ofFile: file)
         var request = try signedRequest("PUT", key: key, settings: settings, payloadHash: hash)
         request.setValue(contentType(forExtension: file.pathExtension), forHTTPHeaderField: "Content-Type")
-        try await send(request, file: file)
+        try await send(request, file: file, progress: progress)
         return settings.publicLink(key: key)
     }
 
@@ -217,10 +229,13 @@ enum S3Upload {
         return request
     }
 
-    private static func send(_ request: URLRequest, file: URL?) async throws {
+    private static func send(_ request: URLRequest, file: URL?, progress: (@Sendable (Double) -> Void)? = nil) async throws {
         do {
             let (data, response): (Data, URLResponse)
-            if let file { (data, response) = try await URLSession.shared.upload(for: request, fromFile: file) }
+            if let file {
+                (data, response) = try await URLSession.shared.upload(for: request, fromFile: file,
+                                                                      delegate: progress.map(UploadProgress.init))
+            }
             else { (data, response) = try await URLSession.shared.data(for: request) }
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             guard (200..<300).contains(status) else { throw Failure(errorDescription: message(status: status, body: data)) }
@@ -232,13 +247,26 @@ enum S3Upload {
     }
 }
 
+/// Passes on the bytes sent of one upload as a share of the file.
+private final class UploadProgress: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    private let report: @Sendable (Double) -> Void
+
+    init(_ report: @escaping @Sendable (Double) -> Void) { self.report = report }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didSendBodyData bytesSent: Int64,
+                    totalBytesSent: Int64, totalBytesExpectedToSend: Int64) {
+        guard totalBytesExpectedToSend > 0 else { return }
+        report(Double(totalBytesSent) / Double(totalBytesExpectedToSend))
+    }
+}
+
 /// Upload & Copy Link: a capture to a public link on the user's own bucket.
 @MainActor
 enum UploadLink {
     /// Returns true when the link is on the clipboard.
     static func run(_ item: CaptureItem) async -> Bool {
         guard let settings = UploadSettings.load() else {
-            Toast.show("Set up Upload in Settings first", symbol: "exclamationmark.triangle.fill", duration: 2.4)
+            Feedback.failure("Set up Upload in Settings first", duration: 2.4)
             SettingsWindow.show(tab: .upload)
             return false
         }
@@ -248,20 +276,23 @@ enum UploadLink {
             do {
                 if let copy = try await Redaction.redactedCopy(of: file) { (file, hidden) = (copy.url, copy.count) }
             } catch {
-                Toast.show("Could not read the text", symbol: "exclamationmark.triangle.fill")
+                Feedback.failure("Could not read the text")
                 return false
             }
         }
         let progress = Toast.progress("Uploading")
         do {
-            let link = try await S3Upload.put(file, key: S3Upload.randomKey(extension: file.pathExtension), settings: settings)
+            let link = try await S3Upload.put(file, key: S3Upload.randomKey(extension: file.pathExtension),
+                                              settings: settings) { value in
+                Task { @MainActor in progress.update(value) }
+            }
             progress.finish()
             Clipboard.copyText(link)
             Toast.show(hidden > 0 ? "Link copied, \(CaptureAction.hiddenItems(hidden)) hidden" : "Link copied", symbol: "link.icloud.fill")
             return true
         } catch {
             progress.finish()
-            Toast.show(error.localizedDescription, symbol: "exclamationmark.triangle.fill", duration: 3.2)
+            Feedback.failure(error.localizedDescription, duration: 3.2)
             return false
         }
     }

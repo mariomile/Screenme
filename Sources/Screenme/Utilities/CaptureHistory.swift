@@ -19,13 +19,21 @@ final class CaptureHistory: ObservableObject {
     }
 
     private let indexURL: URL
+    /// Screenme's own captures folder: expired captures in it go to the Trash. Files anywhere else are never touched.
+    private let capturesDirectory: URL
     private let writer = DispatchQueue(label: "dev.mariomiletta.Screenme.history", qos: .utility)
 
-    private init() {
+    private convenience init() {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Screenme", isDirectory: true)
         try? FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
-        indexURL = support.appendingPathComponent("history.json")
+        self.init(indexURL: support.appendingPathComponent("history.json"), capturesDirectory: Storage.directory)
+    }
+
+    /// Tests pass their own index file and captures folder.
+    init(indexURL: URL, capturesDirectory: URL) {
+        self.indexURL = indexURL
+        self.capturesDirectory = capturesDirectory.standardizedFileURL
         items = Self.load(from: indexURL)
 
         NotificationCenter.default.addObserver(forName: .captureUpdated, object: nil, queue: .main) { [weak self] note in
@@ -61,16 +69,26 @@ final class CaptureHistory: ObservableObject {
     }
 
     /// Drops entries older than `Pref.historyDays` (0 keeps everything) and entries whose file is gone.
-    func prune() {
+    /// An expired capture in Screenme's own captures folder goes to the Trash with its entry;
+    /// a file anywhere else (the user's save folder) stays where it is.
+    func prune(now: Date = Date()) {
         let days = Prefs[Pref.historyDays]
-        let cutoff = days > 0 ? Calendar.current.date(byAdding: .day, value: -days, to: Date()) : nil
-        let kept = items.filter { item in
-            if let cutoff, item.date < cutoff { return false }
-            return FileManager.default.fileExists(atPath: item.url.path)
+        let cutoff = days > 0 ? Calendar.current.date(byAdding: .day, value: -days, to: now) : nil
+        var kept: [CaptureItem] = []
+        for item in items {
+            if let cutoff, item.date < cutoff {
+                if isOwnCapture(item.url) { try? FileManager.default.trashItem(at: item.url, resultingItemURL: nil) }
+                continue
+            }
+            if FileManager.default.fileExists(atPath: item.url.path) { kept.append(item) }
         }
         guard kept.count != items.count else { return }
         items = kept
         save()
+    }
+
+    private func isOwnCapture(_ url: URL) -> Bool {
+        url.standardizedFileURL.deletingLastPathComponent().path == capturesDirectory.path
     }
 
     func revision(of url: URL) -> Int { revisions[url] ?? 0 }

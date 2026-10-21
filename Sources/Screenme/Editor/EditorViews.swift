@@ -52,8 +52,8 @@ struct ToolbarLeading: View {
 
     var body: some View {
         HStack(spacing: 2) {
-            IconButton(symbol: "arrow.uturn.backward", help: "Undo (⌘Z)\nTakes back your last change.", enabled: c.canUndo) { c.undo() }
-            IconButton(symbol: "arrow.uturn.forward", help: "Redo (⇧⌘Z)\nBrings back what you undid.", enabled: c.canRedo) { c.redo() }
+            SymbolButton(symbol: "arrow.uturn.backward", help: "Undo (⌘Z)\nTakes back your last change.", enabled: c.canUndo) { c.undo() }
+            SymbolButton(symbol: "arrow.uturn.forward", help: "Redo (⇧⌘Z)\nBrings back what you undid.", enabled: c.canRedo) { c.redo() }
         }
         .padding(.horizontal, 2)
     }
@@ -74,7 +74,8 @@ struct ToolPalette: View {
                 if index > 0 { Divider().frame(height: 18) }
                 HStack(spacing: 1) {
                     ForEach(group) { tool in
-                        ToolButton(tool: tool, selected: c.mode.choice == tool) { c.choose(tool) }
+                        SymbolButton(symbol: tool.symbol, help: tool.tooltip, style: .toolbar(width: 30, selected: c.mode.choice == tool),
+                                     label: tool.title) { c.choose(tool) }
                     }
                 }
             }
@@ -83,37 +84,12 @@ struct ToolPalette: View {
     }
 }
 
-private struct ToolButton: View {
-    let tool: ToolChoice
-    let selected: Bool
-    let action: () -> Void
-    @State private var hovering = false
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: tool.symbol)
-                .font(.system(size: 14, weight: .medium))
-                .frame(width: 30, height: 26)
-                .foregroundStyle(selected ? Color.accentColor : Color.primary.opacity(0.85))
-                .background(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(selected ? Color.accentColor.opacity(0.18) : Color.primary.opacity(hovering ? 0.08 : 0))
-                )
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
-        .help(tool.tooltip)
-        .accessibilityLabel(tool.title)
-    }
-}
-
 struct ToolbarTrailing: View {
     @ObservedObject var c: EditorController
 
     var body: some View {
         HStack(spacing: 8) {
-            IconButton(symbol: "eye.slash", help: "Redact Sensitive Info: pixelate emails, phone numbers, cards, IBANs, keys, IPs and faces",
+            SymbolButton(symbol: "eye.slash", help: "Redact Sensitive Info: pixelate emails, phone numbers, cards, IBANs, keys, IPs and faces",
                        enabled: !c.isRedacting) { c.redactSensitiveInfo() }
 
             Button {
@@ -160,9 +136,9 @@ struct ToolbarTrailing: View {
             DragThumb(controller: c)
                 .frame(width: 44, height: 30)
 
-            IconButton(symbol: "doc.on.doc", help: Prefs[Pref.editorCloseAfterCopy] ? "Copy (⌘C)\nPuts the edited image on the clipboard, saves it and closes the editor." : "Copy (⌘C)\nPuts the edited image on the clipboard without closing the editor.", enabled: true) { c.copyImage() }
-            IconButton(symbol: "sparkles", help: "Copy for AI (⇧⌘C)\nCopies the edited image with its context for Claude, ChatGPT or Cursor: the app and page it came from, your notes on annotations and the text in it. Hides sensitive info first if Settings > Screenshots says so.", enabled: true) { c.copyForAI() }
-            IconButton(symbol: "square.and.arrow.up", help: "Share\nSends the edited image with AirDrop, Messages, Mail and more. Hides sensitive info first if Settings > Screenshots says so.", enabled: true) { if let url = c.dragFile() { Share.show(url) } }
+            SymbolButton(symbol: "doc.on.doc", help: Prefs[Pref.editorCloseAfterCopy] ? "Copy (⌘C)\nPuts the edited image on the clipboard, saves it and closes the editor." : "Copy (⌘C)\nPuts the edited image on the clipboard without closing the editor.", enabled: true) { c.copyImage() }
+            SymbolButton(symbol: "sparkles", help: "Copy for AI (⇧⌘C)\nCopies the edited image with its context for Claude, ChatGPT or Cursor: the app and page it came from, your notes on annotations and the text in it. Hides sensitive info first if Settings > Screenshots says so.", enabled: true) { c.copyForAI() }
+            SymbolButton(symbol: "square.and.arrow.up", help: "Share\nSends the edited image with AirDrop, Messages, Mail and more. Hides sensitive info first if Settings > Screenshots says so.", enabled: true) { if let url = c.shareFile() { Share.show(url) } }
 
             Button("Done") { c.save() }
                 .buttonStyle(.borderedProminent)
@@ -202,29 +178,6 @@ struct EditSlider: View {
     }
 }
 
-struct IconButton: View {
-    let symbol: String
-    let help: String
-    var enabled = true
-    let action: () -> Void
-    @State private var hovering = false
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 14, weight: .medium))
-                .frame(width: 28, height: 26)
-                .foregroundStyle(Color.primary.opacity(enabled ? 0.85 : 0.28))
-                .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color.primary.opacity(hovering && enabled ? 0.08 : 0)))
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(!enabled)
-        .onHover { hovering = $0 }
-        .help(help)
-    }
-}
-
 // MARK: - Zoom
 
 struct ZoomControls: View {
@@ -232,7 +185,7 @@ struct ZoomControls: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            IconButton(symbol: "minus", help: "Zoom out (⌘-)\nShows more of the image. Edits are unaffected.") { c.zoomOut() }
+            SymbolButton(symbol: "minus", help: "Zoom out (⌘-)\nShows more of the image. Edits are unaffected.") { c.zoomOut() }
             Button { c.zoomFit() } label: {
                 Text("\(c.zoomPercent)%")
                     .font(.system(size: 11, weight: .medium).monospacedDigit())
@@ -241,7 +194,7 @@ struct ZoomControls: View {
             }
             .buttonStyle(.plain)
             .help("Fit to window (⌘0)\nShows the whole image. Click to reset the zoom.")
-            IconButton(symbol: "plus", help: "Zoom in (⌘+)\nFor precise placement. Edits are unaffected.") { c.zoomIn() }
+            SymbolButton(symbol: "plus", help: "Zoom in (⌘+)\nFor precise placement. Edits are unaffected.") { c.zoomIn() }
         }
         .padding(.horizontal, 4)
         .padding(.vertical, 3)
@@ -298,13 +251,43 @@ final class DragThumbView: NSView, NSDraggingSource {
     override func resetCursorRects() { addCursorRect(bounds, cursor: .openHand) }
     override func mouseDown(with event: NSEvent) { dragging = false }
 
+    /// A file promise: the image is encoded and written only when the receiver asks for it, on `writeQueue`.
     override func mouseDragged(with event: NSEvent) {
-        guard !dragging, let url = controller.dragFile() else { return }
+        guard !dragging, let export = controller.dragExport() else { return }
         dragging = true
-        let item = NSDraggingItem(pasteboardWriter: url as NSURL)
+        let provider = NSFilePromiseProvider(fileType: export.type.identifier, delegate: self)
+        provider.userInfo = export
+        let item = NSDraggingItem(pasteboardWriter: provider)
         item.setDraggingFrame(bounds, contents: thumbnail)
         beginDraggingSession(with: [item], event: event, source: self)
     }
 
     func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation { .copy }
+}
+
+extension DragThumbView: NSFilePromiseProviderDelegate {
+    private nonisolated static let writeQueue: OperationQueue = {
+        let queue = OperationQueue()
+        queue.qualityOfService = .userInitiated
+        return queue
+    }()
+
+    nonisolated func filePromiseProvider(_ provider: NSFilePromiseProvider, fileNameForType fileType: String) -> String {
+        (provider.userInfo as? FlattenedImage)?.name ?? "Screenshot.png"
+    }
+
+    nonisolated func filePromiseProvider(_ provider: NSFilePromiseProvider, writePromiseTo url: URL,
+                                         completionHandler: @escaping (Error?) -> Void) {
+        guard let data = (provider.userInfo as? FlattenedImage)?.encoded() else {
+            return completionHandler(CocoaError(.fileWriteUnknown))
+        }
+        do {
+            try data.write(to: url, options: .atomic)
+            completionHandler(nil)
+        } catch {
+            completionHandler(error)
+        }
+    }
+
+    nonisolated func operationQueue(for provider: NSFilePromiseProvider) -> OperationQueue { Self.writeQueue }
 }

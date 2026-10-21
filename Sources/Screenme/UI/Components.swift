@@ -2,6 +2,102 @@ import AppKit
 import ServiceManagement
 import SwiftUI
 
+// MARK: - Buttons
+
+/// The one style for Screenme's icon buttons and HUD controls, in the sizes the app uses.
+struct HUDButtonStyle: ButtonStyle {
+    enum Variant {
+        /// Editor toolbar and inspector: a symbol on a rounded square that shows on hover, accent when selected.
+        case toolbar(width: CGFloat = 28, selected: Bool = false)
+        /// All-in-One bar: a large tile, lit when focused by keys or the pointer, darker while pressed.
+        case tile(focused: Bool)
+        /// Quick Access: a small dark circle over the preview.
+        case circle
+        /// Quick Access: a white capsule with a title.
+        case pill
+    }
+
+    var variant: Variant
+
+    init(_ variant: Variant) { self.variant = variant }
+
+    func makeBody(configuration: Configuration) -> some View {
+        HUDButtonBody(configuration: configuration, variant: variant)
+    }
+}
+
+private struct HUDButtonBody: View {
+    let configuration: ButtonStyleConfiguration
+    let variant: HUDButtonStyle.Variant
+    @Environment(\.isEnabled) private var enabled
+    @State private var hovering = false
+
+    var body: some View {
+        switch variant {
+        case .toolbar(let width, let selected):
+            configuration.label
+                .font(.system(size: 14, weight: .medium))
+                .frame(width: width, height: 26)
+                .foregroundStyle(selected ? Color.accentColor : Color.primary.opacity(enabled ? 0.85 : 0.28))
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(selected ? Color.accentColor.opacity(0.18) : Color.primary.opacity(hovering && enabled ? 0.08 : 0))
+                )
+                .contentShape(Rectangle())
+                .onHover { hovering = $0 }
+        case .tile(let focused):
+            configuration.label
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color.primary.opacity(configuration.isPressed ? 0.18 : focused ? 0.09 : 0))
+                )
+                .animation(.easeOut(duration: 0.12), value: focused)
+                .animation(.easeOut(duration: 0.08), value: configuration.isPressed)
+        case .circle:
+            pressable(configuration.label
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 24, height: 24)
+                .background(.black.opacity(0.55), in: Circle())
+                .overlay(Circle().strokeBorder(.white.opacity(0.25), lineWidth: 0.5)))
+        case .pill:
+            pressable(configuration.label
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.black)
+                .frame(width: 84, height: 28)
+                .background(.white, in: Capsule())
+                .shadow(color: .black.opacity(0.25), radius: 3, y: 1))
+        }
+    }
+
+    /// Shrinks and darkens a little while pressed, for the controls over a Quick Access card.
+    private func pressable(_ content: some View) -> some View {
+        content
+            .scaleEffect(configuration.isPressed ? 0.93 : 1)
+            .brightness(configuration.isPressed ? -0.08 : 0)
+            .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
+    }
+}
+
+/// An SF Symbol button in `HUDButtonStyle`, with its tooltip.
+struct SymbolButton: View {
+    let symbol: String
+    let help: String
+    var style: HUDButtonStyle.Variant = .toolbar()
+    var enabled = true
+    /// The name VoiceOver reads.
+    var label: String?
+    let action: () -> Void
+
+    var body: some View {
+        let button = Button(action: action) { Image(systemName: symbol) }
+            .buttonStyle(HUDButtonStyle(style))
+            .disabled(!enabled)
+            .help(help)
+        if let label { button.accessibilityLabel(label) } else { button }
+    }
+}
+
 // MARK: - Small views
 
 /// A keyboard shortcut drawn as separate keycaps: "⇧ ⌘ 4".

@@ -67,7 +67,7 @@ enum CaptureAction: CaseIterable {
             confirm()
         case .copyForAI:
             guard let hidden = await AIClipboard.copy(item) else {
-                Toast.show("Could not copy", symbol: "exclamationmark.triangle.fill")
+                Feedback.failure("Could not copy")
                 return false
             }
             confirm(hidden: hidden)
@@ -151,7 +151,7 @@ enum CaptureAction: CaseIterable {
 
     @MainActor
     private func failed() -> Bool {
-        Toast.show("Could not save", symbol: "exclamationmark.triangle.fill")
+        Feedback.failure("Could not save")
         return false
     }
 }

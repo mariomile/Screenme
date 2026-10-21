@@ -10,7 +10,9 @@ enum MeasureOverlay {
     static func run() async throws {
         let screen = NSScreen.underMouse
         let snapshot = await SnapshotLoader.load(screens: [screen], images: true, showsCursor: false)
-        guard let image = snapshot.images[screen.displayID], let pixels = PixelBuffer(image) else {
+        guard let image = snapshot.images[screen.displayID] else { throw ScreenmeError.displayNotFound }
+        // About 59 MB at 5K: decoded off the main thread, before the ruler shows.
+        guard let pixels = await Task.detached(priority: .userInitiated, operation: { PixelBuffer(image) }).value else {
             throw ScreenmeError.displayNotFound
         }
         guard let copied = await MeasureSession(screen: screen, image: image, pixels: pixels).run() else { return }
@@ -37,7 +39,7 @@ private final class MeasureSession {
 
     private var previousApp: NSRunningApplication?
     private var eventMonitor: Any?
-    private var tickTimer: Timer?
+    private var globalMonitor: Any?
     private var screenObserver: NSObjectProtocol?
     private var finished = false
     private var continuation: CheckedContinuation<String?, Never>?
@@ -74,16 +76,15 @@ private final class MeasureSession {
             let consumed = MainActor.assumeIsolated { self.handle(box.event) }
             return consumed ? nil : event
         }
-        // As in the picker: mouse-moved events do not always reach the panel of an inactive app.
-        let timer = Timer(timeInterval: 1.0 / 120.0, repeats: true) { [weak self] _ in
-            guard let self else { return }
+        // As in the picker: mouse-moved events do not always reach the panel of an inactive app,
+        // so the moves other apps get are followed too.
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged]) { [weak self] _ in
             MainActor.assumeIsolated {
+                guard let self, !self.finished else { return }
                 let location = NSEvent.mouseLocation
                 if location != self.pointer { self.pointerMoved(to: location) }
             }
         }
-        RunLoop.main.add(timer, forMode: .common)
-        tickTimer = timer
         screenObserver = NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
                                                                 object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.finish(nil) }
@@ -95,8 +96,8 @@ private final class MeasureSession {
         finished = true
         if let eventMonitor { NSEvent.removeMonitor(eventMonitor) }
         eventMonitor = nil
-        tickTimer?.invalidate()
-        tickTimer = nil
+        if let globalMonitor { NSEvent.removeMonitor(globalMonitor) }
+        globalMonitor = nil
         if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) }
         screenObserver = nil
         panel.orderOut(nil)

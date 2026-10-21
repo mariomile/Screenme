@@ -17,7 +17,7 @@ enum Share {
                     present([url], in: view, at: point)
                 }
             } catch {
-                Toast.show("Could not read the text", symbol: "exclamationmark.triangle.fill")
+                Feedback.failure("Could not read the text")
             }
         }
     }

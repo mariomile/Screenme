@@ -1,13 +1,11 @@
 import AppKit
 import SwiftUI
 
-/// Resize the exported picture, keeping its proportions by default.
+/// Resize the exported picture by its width. The proportions always stay: the height follows.
 struct ResizeImageSheet: View {
     @ObservedObject var c: EditorController
     @Environment(\.dismiss) private var dismiss
     @State private var width: Int
-    @State private var height: Int
-    @State private var lockRatio = true
     private let original: CGSize
 
     init(c: EditorController) {
@@ -15,10 +13,10 @@ struct ResizeImageSheet: View {
         let size = c.outputSize
         original = size
         _width = State(initialValue: Int(size.width))
-        _height = State(initialValue: Int(size.height))
     }
 
     private var ratio: Double { original.height > 0 ? Double(original.width / original.height) : 1 }
+    private var height: Int { max(1, Int((Double(width) / ratio).rounded())) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -35,12 +33,10 @@ struct ResizeImageSheet: View {
                 }
                 GridRow {
                     Text("Height")
-                    TextField("Height", value: Binding(get: { height }, set: { setHeight($0) }), format: .number.grouping(.never))
-                        .textFieldStyle(.roundedBorder).frame(width: 90)
+                    Text("\(height)").monospacedDigit()
                     Text("px").foregroundStyle(.secondary)
                 }
             }
-            Toggle("Keep proportions", isOn: $lockRatio)
 
             HStack(spacing: 8) {
                 ForEach([25, 50, 75, 200], id: \.self) { percent in
@@ -57,7 +53,7 @@ struct ResizeImageSheet: View {
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(width < 1 || height < 1)
+                .disabled(width < 1)
             }
         }
         .padding(20)
@@ -66,12 +62,6 @@ struct ResizeImageSheet: View {
 
     private func setWidth(_ value: Int) {
         width = max(1, min(value, 30_000))
-        if lockRatio { height = max(1, Int((Double(width) / ratio).rounded())) }
-    }
-
-    private func setHeight(_ value: Int) {
-        height = max(1, min(value, 30_000))
-        if lockRatio { width = max(1, Int((Double(height) * ratio).rounded())) }
     }
 }
 

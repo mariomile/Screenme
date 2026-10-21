@@ -14,14 +14,16 @@ final class EditorController: ObservableObject {
     let source: ImageSource
     var unit: CGFloat { source.unit }
 
-    /// The document. It changes only through `update` and `perform` (and undo), so every change
-    /// redraws the canvas and tells SwiftUI here.
+    /// The document. It changes only through `update` and `perform` (and undo). Every change redraws the canvas;
+    /// SwiftUI hears of it at the end of an interaction (`commit`, undo, redo), not at every drag event,
+    /// and while an inspector slider drags at most 30 times a second (`publishSoon`).
     private(set) var state: EditState {
-        didSet {
-            canvas?.documentChanged()
-            notify()
-        }
+        didSet { canvas?.documentChanged() }
     }
+    private var publishScheduled = false
+    /// Tool styles and the background changed by sliders since the last commit, saved to the preferences at commit.
+    private var unsavedStyles: Set<ToolKind> = []
+    private var backgroundUnsaved = false
     private(set) var savedState: EditState
     private var history = UndoHistory()
     private var annotationClipboard: [Annotation] = []
@@ -37,6 +39,9 @@ final class EditorController: ObservableObject {
 
     weak var canvas: CanvasView?
     weak var window: NSWindow?
+    /// This editor's temporary files (Share), removed when it closes.
+    let exportFolder = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ScreenmeEditorDrag/\(UUID().uuidString)", isDirectory: true)
 
     init(item: CaptureItem, source: ImageSource) {
         self.item = item
@@ -51,6 +56,18 @@ final class EditorController: ObservableObject {
     }
 
     func notify() { objectWillChange.send() }
+
+    /// Tells SwiftUI within a frame at 30 Hz, however often it is called: for inspector sliders, whose values
+    /// the inspector shows while they drag.
+    private func publishSoon() {
+        guard !publishScheduled else { return }
+        publishScheduled = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / 30) { [weak self] in
+            guard let self else { return }
+            publishScheduled = false
+            notify()
+        }
+    }
 
     var isDirty: Bool { state != savedState }
     var canUndo: Bool { history.canUndo }
@@ -91,7 +108,20 @@ final class EditorController: ObservableObject {
     /// Makes everything since `before` one undo step (see `UndoHistory.commit`).
     func commit(since before: Checkpoint, coalesce key: String? = nil) {
         history.commit(from: before, to: state, coalesce: key)
+        saveRemembered()
         notify()
+    }
+
+    /// Writes the styles and background the user changed to the preferences, once per commit rather than per slider tick.
+    private func saveRemembered() {
+        for kind in unsavedStyles {
+            if let style = styles[kind] { EditorStore.save(style: style, for: kind) }
+        }
+        unsavedStyles.removeAll()
+        if backgroundUnsaved {
+            EditorStore.save(background: state.background)
+            backgroundUnsaved = false
+        }
     }
 
     /// A one-shot edit: one undo step.
@@ -105,6 +135,7 @@ final class EditorController: ObservableObject {
         canvas?.finishTextEditing()
         guard let previous = history.undo(from: state) else { return }
         state = previous
+        notify()
         pruneSelection()
     }
 
@@ -112,6 +143,7 @@ final class EditorController: ObservableObject {
         canvas?.finishTextEditing()
         guard let next = history.redo(from: state) else { return }
         state = next
+        notify()
         pruneSelection()
     }
 
@@ -176,7 +208,7 @@ final class EditorController: ObservableObject {
         var remembered = contextStyle ?? kind.traits.style
         change(&remembered)
         styles[kind] = remembered
-        EditorStore.save(style: remembered, for: kind)
+        unsavedStyles.insert(kind)
         guard !ids.isEmpty else { return }
         update { s in
             for i in s.annotations.indices where ids.contains(s.annotations[i].id) {
@@ -203,6 +235,7 @@ final class EditorController: ObservableObject {
     /// Sets the document's spotlight dim and remembers it for the next document, without an undo step.
     func applySpotlightDim(_ dim: Double) {
         update { $0.spotlightDim = dim }
+        publishSoon()
         Prefs[Pref.editorSpotlightDim] = dim
     }
 
@@ -372,7 +405,8 @@ final class EditorController: ObservableObject {
     /// Changes the background and remembers it for the next document, without an undo step.
     func applyBackground(_ change: (inout BackgroundSettings) -> Void) {
         update { change(&$0.background) }
-        EditorStore.save(background: state.background)
+        publishSoon()
+        backgroundUnsaved = true
     }
 
     /// A background change as one undo step.

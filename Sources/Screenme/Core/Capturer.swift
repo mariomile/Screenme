@@ -37,15 +37,20 @@ enum Storage {
 
     /// Writes in the user's chosen format (PNG or JPEG).
     static func write(_ image: CGImage) throws -> URL {
-        let format = Prefs[Pref.imageFormat]
-        let url = newURL(extension: format.fileExtension)
+        let url = newURL(extension: Prefs[Pref.imageFormat].fileExtension)
+        try write(image, to: url)
+        return url
+    }
+
+    /// Encodes `image` into `url` in the format its extension names. Safe off the main thread.
+    static func write(_ image: CGImage, to url: URL) throws {
+        let format = ImageFormat(of: url)
         guard let destination = CGImageDestinationCreateWithURL(url as CFURL, format.type.identifier as CFString, 1, nil) else {
             throw CocoaError(.fileWriteUnknown)
         }
         let options = format == .jpg ? [kCGImageDestinationLossyCompressionQuality: Prefs[Pref.jpegQuality]] as CFDictionary : nil
         CGImageDestinationAddImage(destination, image, options)
         guard CGImageDestinationFinalize(destination) else { throw CocoaError(.fileWriteUnknown) }
-        return url
     }
 
     /// Copies a capture to the save folder, never overwriting an existing file.
@@ -111,12 +116,14 @@ enum Storage {
 }
 
 enum Clipboard {
-    static func copyImage(at url: URL) {
+    /// One pasteboard item holding the image data and the file: two items make some apps paste twice or paste a file icon.
+    static func copyImage(at url: URL, to board: NSPasteboard = .general) {
         guard let data = try? Data(contentsOf: url) else { return }
-        let board = NSPasteboard.general
         board.clearContents()
-        board.setData(data, forType: NSPasteboard.PasteboardType(ImageFormat(of: url).type.identifier))
-        board.writeObjects([url as NSURL])
+        let entry = NSPasteboardItem()
+        entry.setData(data, forType: NSPasteboard.PasteboardType(ImageFormat(of: url).type.identifier))
+        entry.setString(url.absoluteString, forType: .fileURL)
+        board.writeObjects([entry])
     }
 
     static func copyFile(at url: URL) {

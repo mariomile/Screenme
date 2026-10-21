@@ -41,6 +41,31 @@ enum Toast {
     }
 }
 
+/// The two ways Screenme says something went wrong. A toast when the user can carry on; an alert only when
+/// they must act (a missing permission, edits that were not saved).
+@MainActor
+enum Feedback {
+    /// The one toast style for a problem.
+    static func failure(_ text: String, duration: Double = 1.6) {
+        Toast.show(text, symbol: "exclamationmark.triangle.fill", duration: duration)
+    }
+
+    /// The one alert style. Screenme comes forward first, so the alert never opens behind other windows.
+    /// Over `window` it is a sheet, which leaves the run loop free; without one it is modal.
+    static func alert(_ text: String, detail: String? = nil, over window: NSWindow? = nil) {
+        let alert = NSAlert()
+        alert.messageText = text
+        if let detail { alert.informativeText = detail }
+        FocusKeeper.activateSelf()
+        if let window {
+            window.makeKeyAndOrderFront(nil)
+            alert.beginSheetModal(for: window)
+        } else {
+            alert.runModal()
+        }
+    }
+}
+
 /// A progress toast on screen.
 @MainActor
 final class ToastHandle {

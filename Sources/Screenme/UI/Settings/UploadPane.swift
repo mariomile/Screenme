@@ -7,6 +7,10 @@ struct UploadPane: View {
     @AppStorage(Pref.s3AccessKeyID.name) private var accessKeyID = Pref.s3AccessKeyID.defaultValue
     @AppStorage(Pref.s3PublicURL.name) private var publicURL = Pref.s3PublicURL.defaultValue
     @State private var secret = S3Keychain.read()
+    /// What the Keychain holds, so leaving the field unchanged writes nothing.
+    @State private var savedSecret = S3Keychain.read()
+    @State private var secretError: String?
+    @FocusState private var secretFocused: Bool
     @State private var testing = false
     @State private var result: (message: String, ok: Bool)?
 
@@ -18,9 +22,16 @@ struct UploadPane: View {
                 field("Bucket", $bucket, prompt: "screenme")
                 field("Access Key ID", $accessKeyID, prompt: "")
                 LabeledContent("Secret Access Key") {
-                    SecureField("Secret Access Key", text: $secret, prompt: Text("Stored in the Keychain"))
-                        .labelsHidden().textFieldStyle(.roundedBorder).frame(width: 280)
-                        .onChange(of: secret) { _, new in S3Keychain.write(new) }
+                    VStack(alignment: .leading, spacing: 4) {
+                        SecureField("Secret Access Key", text: $secret, prompt: Text("Stored in the Keychain"))
+                            .labelsHidden().textFieldStyle(.roundedBorder).frame(width: 280)
+                            .focused($secretFocused)
+                            .onSubmit { saveSecret() }
+                            .onChange(of: secretFocused) { _, focused in if !focused { saveSecret() } }
+                        if let secretError {
+                            Text(secretError).font(.caption).foregroundStyle(.red).frame(width: 280, alignment: .leading)
+                        }
+                    }
                 }
                 field("Public URL", $publicURL, prompt: "https://pub-xxxx.r2.dev")
                 LabeledContent("Connection") {
@@ -48,6 +59,19 @@ struct UploadPane: View {
             }
         }
         .formStyle(.grouped)
+        .onDisappear { saveSecret() }
+    }
+
+    /// The Keychain is written when the secret is submitted or the field loses focus, not on every keystroke.
+    private func saveSecret() {
+        guard secret != savedSecret else { return }
+        do {
+            try S3Keychain.write(secret)
+            savedSecret = secret
+            secretError = nil
+        } catch {
+            secretError = error.localizedDescription
+        }
     }
 
     private func field(_ title: String, _ text: Binding<String>, prompt: String) -> some View {
@@ -57,6 +81,9 @@ struct UploadPane: View {
     }
 
     private func test() {
+        // The button does not take focus, so a secret still being typed is saved here.
+        saveSecret()
+        guard secretError == nil else { return }
         guard let settings = UploadSettings.load() else {
             result = ("Fill in every field first", false)
             return

@@ -15,11 +15,7 @@ enum AnnotationEditor {
         guard item.kind == .image else { return }
         if WindowPresenter.shared.focus(windowID(for: item)) { return }
         guard let source = ImageSource.load(url: item.url) else {
-            let alert = NSAlert()
-            alert.messageText = "Screenme could not open this image."
-            alert.informativeText = item.url.lastPathComponent
-            FocusKeeper.activateSelf()
-            alert.runModal()
+            Feedback.failure("Screenme could not open \(item.url.lastPathComponent)", duration: 3.2)
             return
         }
         let controller = EditorController(item: item, source: source)
@@ -97,6 +93,7 @@ private final class EditorWindow: NSObject, NSWindowDelegate, NSToolbarDelegate 
         closeObserver = nil
         changes = nil
         controller.canvas = nil
+        controller.removeExportFolder()
         onClose()
     }
 
