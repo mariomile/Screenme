@@ -183,11 +183,13 @@ enum S3Upload {
     }
 
     /// Uploads `file` as `key` and returns the public link. Throws a `Failure` with a readable message.
-    static func put(_ file: URL, key: String, settings: UploadSettings) async throws -> String {
+    /// `progress` gets the share of the file sent so far, from 0 to 1, on URLSession's queue.
+    static func put(_ file: URL, key: String, settings: UploadSettings,
+                    progress: (@Sendable (Double) -> Void)? = nil) async throws -> String {
         let hash = try SigV4.sha256Hex(ofFile: file)
         var request = try signedRequest("PUT", key: key, settings: settings, payloadHash: hash)
         request.setValue(contentType(forExtension: file.pathExtension), forHTTPHeaderField: "Content-Type")
-        try await send(request, file: file)
+        try await send(request, file: file, progress: progress)
         return settings.publicLink(key: key)
     }
 
@@ -217,10 +219,13 @@ enum S3Upload {
         return request
     }
 
-    private static func send(_ request: URLRequest, file: URL?) async throws {
+    private static func send(_ request: URLRequest, file: URL?, progress: (@Sendable (Double) -> Void)? = nil) async throws {
         do {
             let (data, response): (Data, URLResponse)
-            if let file { (data, response) = try await URLSession.shared.upload(for: request, fromFile: file) }
+            if let file {
+                (data, response) = try await URLSession.shared.upload(for: request, fromFile: file,
+                                                                      delegate: progress.map(UploadProgress.init))
+            }
             else { (data, response) = try await URLSession.shared.data(for: request) }
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             guard (200..<300).contains(status) else { throw Failure(errorDescription: message(status: status, body: data)) }
@@ -229,6 +234,19 @@ enum S3Upload {
         } catch {
             throw Failure(errorDescription: message(for: error))
         }
+    }
+}
+
+/// Passes on the bytes sent of one upload as a share of the file.
+private final class UploadProgress: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    private let report: @Sendable (Double) -> Void
+
+    init(_ report: @escaping @Sendable (Double) -> Void) { self.report = report }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didSendBodyData bytesSent: Int64,
+                    totalBytesSent: Int64, totalBytesExpectedToSend: Int64) {
+        guard totalBytesExpectedToSend > 0 else { return }
+        report(Double(totalBytesSent) / Double(totalBytesExpectedToSend))
     }
 }
 
@@ -254,7 +272,10 @@ enum UploadLink {
         }
         let progress = Toast.progress("Uploading")
         do {
-            let link = try await S3Upload.put(file, key: S3Upload.randomKey(extension: file.pathExtension), settings: settings)
+            let link = try await S3Upload.put(file, key: S3Upload.randomKey(extension: file.pathExtension),
+                                              settings: settings) { value in
+                Task { @MainActor in progress.update(value) }
+            }
             progress.finish()
             Clipboard.copyText(link)
             Toast.show(hidden > 0 ? "Link copied, \(CaptureAction.hiddenItems(hidden)) hidden" : "Link copied", symbol: "link.icloud.fill")
