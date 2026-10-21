@@ -148,12 +148,13 @@ final class CaptureCoordinator {
 
     private func finishScreenshot(_ result: SelectionResult) async throws {
         if case .area = result.target { previousArea = result.target }
-        try deliver(try await image(for: result))
+        try deliver(Notch.hidden(in: try await image(for: result), of: result.target))
     }
 
+    /// The frozen picture when the picker had one, otherwise a fresh capture.
     private func image(for result: SelectionResult) async throws -> CGImage {
-        let image = if let frozen = result.frozenImage { frozen } else { try await Capturer.screenshot(result.target) }
-        return Notch.hidden(in: image, of: result.target)
+        if let frozen = result.frozenImage { return frozen }
+        return try await Capturer.screenshot(result.target)
     }
 
     /// Writes an image capture and runs the after-capture actions.
