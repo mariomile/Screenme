@@ -14,14 +14,13 @@ final class EditorController: ObservableObject {
     let source: ImageSource
     var unit: CGFloat { source.unit }
 
-    /// The document. It changes only through `update` and `perform` (and undo), so every change
-    /// redraws the canvas and tells SwiftUI here.
+    /// The document. It changes only through `update` and `perform` (and undo). Every change redraws the canvas;
+    /// SwiftUI hears of it at the end of an interaction (`commit`, undo, redo), not at every drag event,
+    /// and while an inspector slider drags at most 30 times a second (`publishSoon`).
     private(set) var state: EditState {
-        didSet {
-            canvas?.documentChanged()
-            notify()
-        }
+        didSet { canvas?.documentChanged() }
     }
+    private var publishScheduled = false
     private(set) var savedState: EditState
     private var history = UndoHistory()
     private var annotationClipboard: [Annotation] = []
@@ -54,6 +53,18 @@ final class EditorController: ObservableObject {
     }
 
     func notify() { objectWillChange.send() }
+
+    /// Tells SwiftUI within a frame at 30 Hz, however often it is called: for inspector sliders, whose values
+    /// the inspector shows while they drag.
+    private func publishSoon() {
+        guard !publishScheduled else { return }
+        publishScheduled = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / 30) { [weak self] in
+            guard let self else { return }
+            publishScheduled = false
+            notify()
+        }
+    }
 
     var isDirty: Bool { state != savedState }
     var canUndo: Bool { history.canUndo }
@@ -108,6 +119,7 @@ final class EditorController: ObservableObject {
         canvas?.finishTextEditing()
         guard let previous = history.undo(from: state) else { return }
         state = previous
+        notify()
         pruneSelection()
     }
 
@@ -115,6 +127,7 @@ final class EditorController: ObservableObject {
         canvas?.finishTextEditing()
         guard let next = history.redo(from: state) else { return }
         state = next
+        notify()
         pruneSelection()
     }
 
@@ -206,6 +219,7 @@ final class EditorController: ObservableObject {
     /// Sets the document's spotlight dim and remembers it for the next document, without an undo step.
     func applySpotlightDim(_ dim: Double) {
         update { $0.spotlightDim = dim }
+        publishSoon()
         Prefs[Pref.editorSpotlightDim] = dim
     }
 
@@ -375,6 +389,7 @@ final class EditorController: ObservableObject {
     /// Changes the background and remembers it for the next document, without an undo step.
     func applyBackground(_ change: (inout BackgroundSettings) -> Void) {
         update { change(&$0.background) }
+        publishSoon()
         EditorStore.save(background: state.background)
     }
 
