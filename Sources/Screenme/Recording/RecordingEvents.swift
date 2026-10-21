@@ -5,7 +5,7 @@ import ApplicationServices
 /// Positions are points from the top-left corner of the recorded area.
 struct RecordingEvent: Codable, Equatable {
     enum Kind: String, Codable {
-        case click, drag, scroll, shortcut, app, drawing
+        case click, drag, scroll, shortcut, app, drawing, pin
     }
 
     struct Box: Codable, Equatable {
@@ -17,7 +17,7 @@ struct RecordingEvent: Codable, Equatable {
 
     var time: Double
     var kind: Kind
-    /// Click: where. Drag: where it started. Scroll: where the pointer was. Arrow: where it points.
+    /// Click: where. Drag: where it started. Scroll: where the pointer was. Arrow: where it points. Pin: where it is.
     var x: Double?
     var y: Double?
     /// Drag: where it was let go.
@@ -40,6 +40,8 @@ struct RecordingEvent: Codable, Equatable {
     var tool: String?
     var color: String?
     var box: Box?
+    /// Pin: its number on screen.
+    var number: Int?
 
     static func click(at point: CGPoint, right: Bool, time: Double) -> RecordingEvent {
         RecordingEvent(time: time, kind: .click, x: point.x.rounded(), y: point.y.rounded(), button: right ? "right" : nil)
@@ -55,6 +57,10 @@ struct RecordingEvent: Codable, Equatable {
 
     static func app(_ app: String, window: String?, time: Double) -> RecordingEvent {
         RecordingEvent(time: time, kind: .app, app: app, window: window)
+    }
+
+    static func pin(_ number: Int, at point: CGPoint, time: Double) -> RecordingEvent {
+        RecordingEvent(time: time, kind: .pin, x: point.x.rounded(), y: point.y.rounded(), number: number)
     }
 
     static func drawing(_ tool: LiveDrawTool, color: LiveDrawColor, box: CGRect, tip: CGPoint?, time: Double) -> RecordingEvent {
@@ -228,6 +234,10 @@ final class RecordingEventRecorder {
 
     func addDrawing(_ tool: LiveDrawTool, color: LiveDrawColor, box: CGRect, tip: CGPoint?) {
         add { .drawing(tool, color: color, box: box, tip: tip, time: $0) }
+    }
+
+    func addPin(_ number: Int, at point: CGPoint) {
+        add { .pin(number, at: point, time: $0) }
     }
 
     private func add(_ make: (Double) -> RecordingEvent) {

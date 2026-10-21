@@ -263,6 +263,7 @@ private final class Session {
         events.start()
         self.events = events
         drawing.onDrawing = { [weak events] tool, color, box, tip in events?.addDrawing(tool, color: color, box: box, tip: tip) }
+        drawing.onPin = { [weak events] number, point in events?.addPin(number, at: point) }
 
         let insideFrame = if case .display = target { true } else { false }
         let outline = RecordingOutline(frame: frame, insideFrame: insideFrame)

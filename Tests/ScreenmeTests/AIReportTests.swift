@@ -162,6 +162,23 @@ final class AIReportTests: XCTestCase {
         XCTAssertEqual(Keyframes.clauseStart(before: 3.5, in: said), 3.5, "nothing was being said")
     }
 
+    func testPinsGetAKeyframeAndShowOnTheSheetAndInTheSummary() {
+        let events = RecordingEvents(width: 900, height: 600, events: [
+            .click(at: CGPoint(x: 10, y: 10), right: false, time: 2),
+            .pin(1, at: CGPoint(x: 100, y: 80), time: 2.3),
+            .pin(2, at: CGPoint(x: 850, y: 550), time: 6),
+        ])
+        var report = report(transcript: [segment(6, "This one is wrong.")], events: events)
+        XCTAssertEqual(report.keyframes.map(\.reason), [.start, .pin, .pin], "a pin wins over a click next to it")
+        XCTAssertEqual(report.keyframes.map(\.time), [0.3, 2.5, 6.2])
+        XCTAssertEqual(report.caption(1), "pin 1")
+        XCTAssertEqual(report.caption(2), "pin 2 \u{00B7} \u{201C}This one is wrong.\u{201D}")
+        XCTAssertTrue(report.summary.contains("- #3 [0:06] \"This one is wrong.\"\n  - 0:06 Dropped pin 2 at the bottom right (850, 550)\n"))
+        XCTAssertEqual(AutoCrop.activity(from: 5, to: 7, in: events), [AutoCrop.Activity(point: CGPoint(x: 850, y: 550), weight: 5)])
+        report.keyframes = []
+        XCTAssertTrue(report.manifest.marks.isEmpty, "pins are not marks: they have their own numbers")
+    }
+
     func testKeyframesAreCappedByPriorityAndInsideTheVideo() {
         var list = (0..<30).map { RecordingEvent.click(at: .zero, right: false, time: Double($0)) }
         list.append(.drawing(.pen, color: .red, box: CGRect(x: 0, y: 0, width: 20, height: 20), tip: nil, time: 29.95))

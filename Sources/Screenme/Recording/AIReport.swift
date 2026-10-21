@@ -145,6 +145,8 @@ struct AIReport {
             case .drawing:
                 marks += 1
                 return drawingText(event, area: area) + " (mark \(marks))"
+            case .pin:
+                return "Dropped pin \(event.number ?? 0) \(placeName(of: CGPoint(x: event.x ?? 0, y: event.y ?? 0), in: area)) (\(Int(event.x ?? 0)), \(Int(event.y ?? 0)))"
             }
         }
     }
@@ -181,7 +183,7 @@ struct AIReport {
             return "Drew a \(color) arrow \(place), pointing at \(tip)"
         case .rectangle: return "Drew a \(color) rectangle \(place) (\(size))"
         case .highlighter: return "Highlighted in \(color) \(place) (\(size))"
-        case .pen, nil: return "Drew in \(color) \(place) (\(size))"
+        case .pen, .pin, nil: return "Drew in \(color) \(place) (\(size))"
         }
     }
 
@@ -203,14 +205,19 @@ struct AIReport {
         switch reason {
         case .start: "(the start)"
         case .change, .scroll: "(the screen changed)"
-        case .cue, .drawing, .click, .drag, .app: "(nothing said)"
+        case .cue, .drawing, .pin, .click, .drag, .app: "(nothing said)"
         }
     }
 
-    /// The line under a keyframe on the contact sheet: what was said, else what happened, else why it is there.
+    /// The line under a keyframe on the contact sheet: its pins ("pin 3"), then what was said, else what happened,
+    /// else why it is there.
     func caption(_ index: Int) -> String {
         let keyframe = keyframes[index]
-        if !keyframe.text.isEmpty { return "\u{201C}\(keyframe.text)\u{201D}" }
+        let recorded = events?.events ?? []
+        let pins = keyframe.events.compactMap { recorded[$0].kind == .pin ? recorded[$0].number.map { "pin \($0)" } : nil }
+        let prefix = pins.isEmpty ? "" : pins.joined(separator: ", ") + " \u{00B7} "
+        if !keyframe.text.isEmpty { return prefix + "\u{201C}\(keyframe.text)\u{201D}" }
+        if !pins.isEmpty { return pins.joined(separator: ", ") }
         if let first = keyframe.events.first { return eventTexts[first] }
         return Self.silentText(keyframe.reason)
     }

@@ -64,7 +64,8 @@ final class RecordingEffects {
         if !on { NSCursor.arrow.set() }
     }
 
-    func clearDrawings() { canvas.clear() }
+    /// A restart: the drawings and the pins of the thrown-away take go.
+    func clearDrawings() { canvas.clear(pins: true) }
 
     /// Moves the overlay onto `frame` (global Cocoa coordinates), for a window that moved since the recording started.
     func move(to frame: CGRect) {

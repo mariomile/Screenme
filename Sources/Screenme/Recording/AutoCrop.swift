@@ -59,6 +59,8 @@ enum AutoCrop {
                     let rect = CGRect(x: box.x, y: box.y, width: box.width, height: box.height)
                     found += [CGPoint(x: rect.minX, y: rect.minY), CGPoint(x: rect.maxX, y: rect.maxY)].map { Activity(point: $0, weight: 5) }
                 }
+            case .pin:
+                found.append(Activity(point: point, weight: 5))
             case .click:
                 found.append(Activity(point: point, weight: 4))
             case .drag:

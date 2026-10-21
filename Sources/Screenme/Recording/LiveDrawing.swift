@@ -8,14 +8,14 @@ extension Pref {
 }
 
 /// The tools for drawing on the screen while recording. Each is an editor annotation kind, drawn by
-/// `EditorRenderer`, so live drawings look like annotations.
+/// `EditorRenderer`, so live drawings look like annotations. A pin is the editor's numbered counter.
 enum LiveDrawTool: String, CaseIterable, Identifiable {
-    case pen, arrow, rectangle, highlighter
+    case pen, arrow, rectangle, highlighter, pin
 
     var id: String { rawValue }
-    var kind: ToolKind { ToolKind(rawValue: rawValue)! }
-    var title: String { kind.traits.title }
-    var symbol: String { kind.traits.symbol }
+    var kind: ToolKind { self == .pin ? .counter : ToolKind(rawValue: rawValue)! }
+    var title: String { self == .pin ? "Pin" : kind.traits.title }
+    var symbol: String { self == .pin ? "mappin" : kind.traits.symbol }
 
     var help: String {
         switch self {
@@ -23,6 +23,7 @@ enum LiveDrawTool: String, CaseIterable, Identifiable {
         case .arrow: "Arrow\nDrag to point at something."
         case .rectangle: "Rectangle\nDrag to frame an area."
         case .highlighter: "Highlighter\nMark text or an area with a translucent marker."
+        case .pin: "Pin  ⇧-click\nClick to drop a numbered red pin. Pins stay until the recording ends and show in the report as pin 1, pin 2… ⇧-click drops one with any tool."
         }
     }
 }
@@ -60,7 +61,12 @@ final class LiveDrawing: ObservableObject {
     weak var canvas: DrawingCanvas?
     /// A drawing was finished: its tool, color, bounding box and, for an arrow, its tip, in the canvas (top-left origin).
     var onDrawing: (LiveDrawTool, LiveDrawColor, CGRect, CGPoint?) -> Void = { _, _, _, _ in }
+    /// A pin was dropped: its number and where, in the canvas (top-left origin).
+    var onPin: (Int, CGPoint) -> Void = { _, _ in }
+    /// Pins dropped in this take: the next one is `pins + 1`.
+    var pins = 0
 
+    /// Clear in the palette: every drawing goes, the pins stay.
     func clear() { canvas?.clear() }
 
     /// What a new drawing looks like: the editor's style for the kind, in the chosen color.
@@ -112,6 +118,7 @@ final class DrawingCanvas: NSView {
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
+        if drawing.tool == .pin || event.modifierFlags.contains(.shift) { return dropPin(at: point) }
         start = point
         currentTool = drawing.tool
         let view = AnnotationView(frame: bounds, annotation: Annotation(kind: currentTool.kind, style: drawing.style, at: point))
@@ -145,19 +152,32 @@ final class DrawingCanvas: NSView {
         if !drawing.keep { fade(view, after: Self.fadeDelay) }
     }
 
-    /// Fades every finished drawing out, after the usual delay. Keep was turned off.
-    func fadeAll() {
-        for case let view as AnnotationView in subviews where view !== current { fade(view, after: Self.fadeDelay) }
+    /// A numbered red pin, which stays until the recording ends: neither fading nor Clear removes it.
+    private func dropPin(at point: CGPoint) {
+        drawing.pins += 1
+        var style = LiveDrawTool.pin.kind.traits.style
+        style.color = LiveDrawColor.red.rgba
+        let view = AnnotationView(frame: bounds, annotation: Annotation(kind: .counter, style: style, at: point), number: drawing.pins)
+        addSubview(view)
+        view.frame = view.annotation.bounds(unit: 1).insetBy(dx: -12, dy: -12).integral.intersection(bounds)
+        drawing.onPin(drawing.pins, point)
     }
 
-    func clear() {
-        for view in subviews where view !== current { view.removeFromSuperview() }
+    /// Fades every finished drawing out, after the usual delay. Keep was turned off.
+    func fadeAll() {
+        for case let view as AnnotationView in subviews where view !== current && !view.isPin { fade(view, after: Self.fadeDelay) }
+    }
+
+    /// Removes the drawings, and the pins too with `pins` (a restart, which starts the numbers again).
+    func clear(pins: Bool = false) {
+        for case let view as AnnotationView in subviews where view !== current && (pins || !view.isPin) { view.removeFromSuperview() }
+        if pins { drawing.pins = 0 }
     }
 
     private func fade(_ view: AnnotationView, after delay: TimeInterval) {
         Task { [weak self, weak view] in
             try? await Task.sleep(for: .seconds(delay))
-            guard let self, let view, view.superview === self, !self.drawing.keep else { return }
+            guard let self, let view, view.superview === self, !self.drawing.keep, !view.isPin else { return }
             NSAnimationContext.runAnimationGroup { context in
                 context.duration = 0.5
                 view.animator().alphaValue = 0
@@ -172,9 +192,13 @@ final class DrawingCanvas: NSView {
 @MainActor
 private final class AnnotationView: NSView {
     var annotation: Annotation { didSet { needsDisplay = true } }
+    /// The number a pin shows; nil for a drawing.
+    let number: Int?
+    var isPin: Bool { number != nil }
 
-    init(frame: CGRect, annotation: Annotation) {
+    init(frame: CGRect, annotation: Annotation, number: Int? = nil) {
         self.annotation = annotation
+        self.number = number
         super.init(frame: frame)
         wantsLayer = true
     }
@@ -188,7 +212,7 @@ private final class AnnotationView: NSView {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
         // The annotation is in canvas coordinates.
         ctx.translateBy(x: -frame.minX, y: -frame.minY)
-        EditorRenderer.draw(annotation, number: 1, unit: 1, ctx: ctx, baseScale: window?.backingScaleFactor ?? 2)
+        EditorRenderer.draw(annotation, number: number ?? 1, unit: 1, ctx: ctx, baseScale: window?.backingScaleFactor ?? 2)
     }
 }
 
@@ -244,7 +268,7 @@ final class DrawPalette {
                                              : "Keep Drawings: off\nEach drawing fades out 3 seconds after you finish it. Turn on to keep them until Clear.") {
                     drawing.keep.toggle()
                 }
-                BarButton(symbol: "eraser", help: "Clear\nRemoves every drawing from the screen.") { drawing.clear() }
+                BarButton(symbol: "eraser", help: "Clear\nRemoves every drawing from the screen. Pins stay until the recording ends.") { drawing.clear() }
                 BarButton(symbol: "checkmark", help: "Done  ⌥⌘D or Esc\nLeaves draw mode; clicks go to your apps again.", action: done)
             }
             .padding(6)

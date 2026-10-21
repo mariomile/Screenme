@@ -4,7 +4,7 @@ import CoreGraphics
 /// One frame of a report: the moment it shows, why it was cut, and what was said and done while it was on screen.
 struct Keyframe: Equatable {
     enum Reason: String, Codable {
-        case start, drawing, click, drag, scroll, app, change, cue
+        case start, drawing, pin, click, drag, scroll, app, change, cue
     }
 
     /// Where the frame is taken, in seconds of the video.
@@ -111,7 +111,7 @@ enum Keyframes {
     /// cue: a strong one ("now", "here", "look", "guarda") at the settled view of a change around the word, or
     /// where it was said; a weak one ("this", "questo") only with such a change. Pauses never cut. Screen changes
     /// and cues add a frame only when its picture differs from every frame already chosen. At most `maxFrames`:
-    /// drawings first, then clicks, drags and scrolls, then app switches and the start, then screen changes, then cues.
+    /// drawings and pins first, then clicks, drags and scrolls, then app switches and the start, then screen changes, then cues.
     static func select(words: [TranscriptSegment], events: RecordingEvents?, samples: [FrameSample], duration: Double,
                        maxFrames: Int = maxFrames) -> [Keyframe] {
         let last = max(duration - 0.1, 0)
@@ -131,6 +131,8 @@ enum Keyframes {
             switch event.kind {
             case .drawing:
                 candidates.append((Keyframe(time: clamp(event.time + 0.2), moment: event.time, reason: .drawing), 0, false))
+            case .pin:
+                candidates.append((Keyframe(time: clamp(event.time + 0.2), moment: event.time, reason: .pin), 0, false))
             case .click:
                 candidates.append((Keyframe(time: clamp(event.time + 0.4), moment: event.time, reason: .click), 1, false))
             case .drag:
