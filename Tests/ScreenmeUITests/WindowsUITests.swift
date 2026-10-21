@@ -16,19 +16,14 @@ final class WindowsUITests: ScreenmeUITestCase {
 
     func testSettingsSidebarChangesThePaneFromTheKeyboard() {
         launch()
-        // Opening Screenme again while it runs shows Settings.
-        let opened = expectation(description: "reopen")
-        let appURL = Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent("Screenme.app")
-        NSWorkspace.shared.openApplication(at: appURL, configuration: NSWorkspace.OpenConfiguration()) { _, _ in opened.fulfill() }
-        wait(for: [opened], timeout: 10)
+        run("settings?tab=general")
         let settings = window("Screenme Settings")
         let outline = settings.outlines.firstMatch
         XCTAssertTrue(outline.waitForExistence(timeout: 5))
         let rows = outline.outlineRows
         XCTAssertGreaterThanOrEqual(rows.count, 9)
 
-        // Start from the top, then select each tab with the arrow keys and check the pane title follows.
-        for _ in 0..<10 { settings.typeKey(.upArrow, modifierFlags: []) }
+        // From General, select each tab with the arrow keys and check the pane title follows.
         for title in ["General", "Screenshots", "Quick Access", "Recording"] {
             if title != "General" { settings.typeKey(.downArrow, modifierFlags: []) }
             XCTAssertTrue(settings.staticTexts[title].waitForExistence(timeout: 3), "\(title) pane should show")

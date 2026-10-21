@@ -7,6 +7,7 @@ import ScreenCaptureKit
 /// - `screenme://capture-area?x=100&y=80&width=640&height=400`: actions that select something capture that rectangle
 ///   instead of asking. Global screen points, top-left origin. Recordings then start at once with the saved settings.
 /// - `screenme://capture-window?app=com.apple.TextEdit`: the frontmost window of that app (bundle ID or name).
+/// - `screenme://settings?tab=recording`: opens Settings, on a tab when one is named (`AppDelegate` handles it).
 struct ActionLink {
     enum Target {
         case area(CGRect)

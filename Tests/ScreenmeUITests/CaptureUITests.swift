@@ -36,9 +36,9 @@ final class CaptureUITests: ScreenmeUITestCase {
     }
 
     func testWindowCaptureGrabsThatAppsWindow() {
-        let window = openTextEdit("Window capture test")
+        let window = showTestWindow("Window capture test")
         launch()
-        run("capture-window?app=com.apple.TextEdit")
+        run("capture-window?app=\(runnerBundleID)")
         let size = pixelSize(waitForCaptures(1)[0])
         // The window, plus its shadow when that preference is on.
         XCTAssertGreaterThanOrEqual(size.width, window.width * backingScale - 2)
@@ -46,10 +46,10 @@ final class CaptureUITests: ScreenmeUITestCase {
     }
 
     func testTextCaptureCopiesTheRecognizedText() {
-        let window = openTextEdit("SCREENME OCR CHECK 4821\nThe quick brown fox jumps over the lazy dog.")
+        let window = showTestWindow("SCREENME OCR CHECK 4821\nThe quick brown fox jumps over the lazy dog.")
         launch()
         NSPasteboard.general.clearContents()
-        run("capture-text", area: CGRect(x: window.minX, y: window.minY + 24, width: window.width, height: 120))
+        run("capture-text", area: window)
         var text = ""
         XCTAssertTrue(eventually { text = NSPasteboard.general.string(forType: .string) ?? ""; return !text.isEmpty })
         XCTAssertTrue(text.contains("SCREENME OCR CHECK 4821"), "OCR read: \(text)")

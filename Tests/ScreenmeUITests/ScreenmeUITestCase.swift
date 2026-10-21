@@ -161,21 +161,28 @@ class ScreenmeUITestCase: XCTestCase {
         return condition()
     }
 
-    // MARK: Other apps
+    // MARK: Test window
 
-    /// Opens a text document in TextEdit, in front, and returns its window frame (top-left points).
-    func openTextEdit(_ text: String) -> CGRect {
-        let file = FileManager.default.temporaryDirectory.appendingPathComponent("screenme-ui-\(UUID().uuidString.prefix(8)).txt")
-        try? text.write(to: file, atomically: true, encoding: .utf8)
-        deleteAfterwards(file)
-        let textEdit = XCUIApplication(bundleIdentifier: "com.apple.TextEdit")
-        let opened = expectation(description: "TextEdit")
-        NSWorkspace.shared.open([file], withApplicationAt: URL(fileURLWithPath: "/System/Applications/TextEdit.app"),
-                                configuration: NSWorkspace.OpenConfiguration()) { _, _ in opened.fulfill() }
-        wait(for: [opened], timeout: 10)
-        let window = textEdit.windows[file.lastPathComponent]
-        XCTAssertTrue(window.waitForExistence(timeout: 10), "TextEdit should open the document")
-        addTeardownBlock { textEdit.terminate() }
-        return window.frame
+    /// Shows `text` in a window of the test runner, in front at a known place, and returns its frame in
+    /// top-left screen points. Tests capture this window, never the user's apps. A normal window level, because
+    /// `capture-window` picks normal windows.
+    func showTestWindow(_ text: String, size: CGSize = CGSize(width: 760, height: 220)) -> CGRect {
+        let screen = NSScreen.screens[0].frame
+        let cocoa = CGRect(x: 120, y: screen.height - 140 - size.height, width: size.width, height: size.height)
+        let window = NSWindow(contentRect: cocoa, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.backgroundColor = .white
+        window.isReleasedWhenClosed = false
+        let label = NSTextField(wrappingLabelWithString: text)
+        label.font = .systemFont(ofSize: 28, weight: .medium)
+        label.textColor = .black
+        label.frame = CGRect(x: 24, y: 24, width: size.width - 48, height: size.height - 48)
+        window.contentView?.addSubview(label)
+        window.orderFrontRegardless()
+        addTeardownBlock { @MainActor in window.close() }
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        return CGRect(x: cocoa.minX, y: screen.height - cocoa.maxY, width: cocoa.width, height: cocoa.height)
     }
+
+    /// The test runner's bundle ID, for `capture-window?app=`.
+    var runnerBundleID: String { Bundle.main.bundleIdentifier ?? "" }
 }
