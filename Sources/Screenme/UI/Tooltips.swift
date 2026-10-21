@@ -36,7 +36,7 @@ extension CaptureAction {
         switch self {
         case .copy: return "Puts the \(noun) on the clipboard, ready to paste into any app."
         case .copyForAI: return "Copies the image with its context for Claude, ChatGPT or Cursor: the app, window and page it came from, your notes on annotations and the text in it." + Self.hidingNote
-        case .reportForAI: return "Turns the recording into a report an AI agent can act on: what you said, clicked, pressed and drew, moment by moment, with frames and a prompt. Saved as a folder and copied as Markdown."
+        case .reportForAI: return "Turns the recording into a report an AI agent can act on: numbered keyframes with what you said, clicked, pressed and drew on each, a contact sheet of them all, and a prompt. Saved as a folder; the summary and the contact sheet are copied."
         case .copyMarkdown: return "Saves the \(noun) to your save folder and copies a Markdown image link to it, for notes and docs."
         case .copyPath: return "Copies the file path of the \(noun), for scripts or the terminal."
         case .save: return "Saves a copy to your save folder (Settings > General)."

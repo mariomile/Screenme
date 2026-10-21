@@ -9,8 +9,22 @@ A lightweight, native macOS capture tool. Capture, drop it where it goes, move o
 - **Capture screen**: from the menu bar.
 - **Hide sensitive info when sharing** (Settings > Screenshots, off by default): Copy for AI and Share send a copy with emails, phone numbers, cards, IBANs, keys, IP addresses and faces pixelated, and `[redacted]` in the copied text. The capture file is never changed. The editor's Redact Sensitive Info covers faces too.
 - **Copy for AI** (Quick Access, History, pins, editor `⇧⌘C`): copies the image plus a text block for Claude, ChatGPT or Cursor: the app, window and browser page it came from, the text in it, and the notes you wrote on annotations in the editor (select an annotation, type in Note for AI). Paste into a chat for the image, or into a terminal for the text with the file path.
-- **Draw while recording** (`⌥⌘D` or the pencil in the recording controls): pen, arrow, rectangle or highlighter in red, yellow, green or blue, drawn on the screen and filmed into the video. Each drawing fades out 3 seconds after you finish it; turn on Keep in the palette to keep them until Clear. Esc or the pencil goes back to clicking your apps. The palette is never in the video.
-- **Report for AI** (recordings, from Quick Access, History or the video editor, or on its own after every recording with Settings > Recording > Create report for AI): record the screen, talk and draw, then pick Report for AI. Screenme transcribes what you said on this Mac and writes a `Report` folder in your save folder with the video, frames, `events.json` and `report.md`: environment, then a moment by moment timeline that merges what you said with your clicks (and the button or field clicked, with Accessibility allowed), shortcuts (never plain typing), app and window switches and drawings, each key moment with its frame, then the transcript and a prompt for an AI agent. The report is also copied, with absolute paths, ready to paste into Claude Code, Cursor, GitHub or Linear.
+- **Draw while recording** (`⌥⌘D` or the pencil in the recording controls): pen, arrow, rectangle or highlighter in red, yellow, green or blue, drawn on the screen and filmed into the video. Each drawing fades out 3 seconds after you finish it; turn on Keep in the palette to keep them until Clear. **Pins**: the Pin tool, or `⇧`-click with any tool, drops a numbered red pin that stays until the recording ends (Clear leaves pins). Esc or the pencil goes back to clicking your apps. The palette is never in the video.
+- **Report for AI** (recordings, from Quick Access, History or the video editor, or on its own after every recording with Settings > Recording > Create report for AI): record the screen, talk, click and draw, then pick Report for AI. Screenme transcribes what you said on this Mac, picks the keyframes and writes a `Report` folder in your save folder. The summary and the contact sheet are copied together: paste into a chat for the sheet, into Claude Code, Cursor, GitHub or Linear for the text with absolute paths. See [Report for AI](#report-for-ai) below.
+
+## Report for AI
+
+A report folder holds:
+
+- `contact-sheet.png`: every keyframe in one picture, three to a row, each with a big `#N`, its time and what you said under it. An agent reads the whole recording at a glance.
+- `frames/frame-01.png`…: the keyframes (`frame-03.png` is #3). With auto-crop, `frames-full/` and `contact-sheet-full.png` keep the whole screens.
+- `recording.mp4`: the video.
+- `summary.md`: the environment (app, window, browser page, macOS, screen), a `Cropped to:` line when auto-crop applied, then `#N [m:ss]` for each keyframe with what you said while it was on screen and what you did then (clicks with the button or field clicked when Accessibility is allowed, drags, scrolls, shortcuts but never plain typing, app and window switches, drawings as numbered marks, pins), then what an agent should do, with absolute paths.
+- `report.json`: the manifest: environment, keyframes with time, file, crop, text and events, every word with its time, marks, events and the windows on screen through the recording.
+
+**Keyframes** are cut where something happened, not every few seconds: when a drawing is finished or a pin dropped, after a click, drag or scroll, after an app or window switch, when the screen settles after a real change (the video is sampled twice a second at 64 pixels and compared), and when you say "now", "here", "look", "watch" (or "qui", "guarda", "ora", "vedi"), where "this", "that" or "questo" count only with a screen change. Pauses never cut, and a screen change or a spoken cue adds a keyframe only when its picture differs from every keyframe already chosen. Each keyframe owns what you said from its moment until the next one. At most 24, drawings and pins first.
+
+**Auto-crop** (Settings > Recording > Auto-crop frames, on by default): screen and area recordings note the windows on screen about once a second and the pointer about 20 times a second. Each keyframe is cropped to the window where you were working at that moment (ink, pins, clicks, drags and scrolls first, then where the pointer rested), with 24 points around it and at least 480 points wide. Neighbouring crops that mostly overlap become one, and a crop that would cover most of the screen is skipped. Window recordings are not cropped.
 
 ## Share links (S3-compatible storage)
 
@@ -67,6 +81,19 @@ screenme latest                          # path of the newest capture
 screenme list --limit 5                  # recent captures, newest first
 ```
 
+For Reports for AI (a report folder, or `latest` for the newest one in your save folder, the default):
+
+```bash
+screenme zoom latest --at 0:21                 # a 3x3 grid of frames around 0:21, a quarter of 2 s before it
+screenme zoom latest --phrase "the width"      # around when you said it
+screenme zoom latest --mark 2 --span 1 --grid 4x4
+screenme frames latest --from 0:04 --to 0:06 --fps 4   # plain PNG frames of a stretch
+screenme inspect latest [--json]               # summary.md, or report.json
+screenme skill                                 # the agent skill, below
+```
+
+`zoom` and `frames` write into the report's `zoom/` folder and print the paths; `zoom` also prints the time of each cell and what was said.
+
 `capture` waits up to 20 seconds for the file and exits with an error if none appears (Screenme not allowed to record the screen, another capture in progress, no such window). Your after-capture settings still apply: a capture is also copied, shown in Quick Access, and so on.
 
 ### MCP server for AI agents
@@ -86,7 +113,7 @@ screenme list --limit 5                  # recent captures, newest first
 
 That block goes in the client's MCP config (Claude Desktop: `~/Library/Application Support/Claude/claude_desktop_config.json`; Cursor: `~/.cursor/mcp.json`). In Claude Code: `claude mcp add screenme -- /Applications/Screenme.app/Contents/Helpers/screenme mcp`. In Codex: `codex mcp add screenme -- /Applications/Screenme.app/Contents/Helpers/screenme mcp`.
 
-The agent then has four tools: `take_screenshot` (mode `fullscreen`, `area` with `x`, `y`, `width`, `height`, or `window` with `app`), `get_latest_capture`, `get_latest_report` (the newest Report for AI in your save folder: `report.md` plus up to six frames) and `list_captures`. Screenshots come back as an image (scaled to at most 1568 pixels on the long side) plus the path of the full-size file.
+The agent then has six tools: `take_screenshot` (mode `fullscreen`, `area` with `x`, `y`, `width`, `height`, or `window` with `app`), `get_latest_capture`, `get_latest_report` (the newest Report for AI in your save folder: `summary.md` and the contact sheet), `zoom_report` (`at`, `phrase` or `mark`, with `span` and `grid`: the zoom grid as an image), `inspect_report` (`summary.md`, or `report.json` with `json`) and `list_captures`. Screenshots come back as an image (scaled to at most 1568 pixels on the long side) plus the path of the full-size file.
 
 ### Agent skill
 
