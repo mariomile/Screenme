@@ -98,7 +98,7 @@ enum ImageCombiner {
     @MainActor
     private static func open(_ image: CGImage?, failure: String) {
         guard let image, let url = try? Storage.write(image) else {
-            Toast.show(failure, symbol: "exclamationmark.triangle.fill")
+            Feedback.failure(failure)
             return
         }
         let item = CaptureItem(url: url, kind: .image)

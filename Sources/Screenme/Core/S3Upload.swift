@@ -238,7 +238,7 @@ enum UploadLink {
     /// Returns true when the link is on the clipboard.
     static func run(_ item: CaptureItem) async -> Bool {
         guard let settings = UploadSettings.load() else {
-            Toast.show("Set up Upload in Settings first", symbol: "exclamationmark.triangle.fill", duration: 2.4)
+            Feedback.failure("Set up Upload in Settings first", duration: 2.4)
             SettingsWindow.show(tab: .upload)
             return false
         }
@@ -248,7 +248,7 @@ enum UploadLink {
             do {
                 if let copy = try await Redaction.redactedCopy(of: file) { (file, hidden) = (copy.url, copy.count) }
             } catch {
-                Toast.show("Could not read the text", symbol: "exclamationmark.triangle.fill")
+                Feedback.failure("Could not read the text")
                 return false
             }
         }
@@ -261,7 +261,7 @@ enum UploadLink {
             return true
         } catch {
             progress.finish()
-            Toast.show(error.localizedDescription, symbol: "exclamationmark.triangle.fill", duration: 3.2)
+            Feedback.failure(error.localizedDescription, duration: 3.2)
             return false
         }
     }

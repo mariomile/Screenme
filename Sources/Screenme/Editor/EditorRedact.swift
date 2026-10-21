@@ -14,7 +14,7 @@ extension EditorController {
             do {
                 boxes = try await TextRecognizer.sensitiveBoxes(in: image)
             } catch {
-                Toast.show("Could not read the text", symbol: "exclamationmark.triangle.fill")
+                Feedback.failure("Could not read the text")
                 return
             }
             guard !boxes.isEmpty else {

@@ -219,12 +219,14 @@ final class CaptureCoordinator {
 
     // MARK: Helpers
 
+    /// A toast, so a failed capture never blocks the next shortcut, link or CLI call. Only a missing
+    /// Screen Recording permission, which the user must fix, is an alert.
     func report(_ error: Error) {
-        let alert = NSAlert(error: error)
         if !Permission.screenRecording.isGranted {
-            alert.informativeText = "Screenme needs Screen Recording permission. Open Settings > Permissions to turn it on."
+            Feedback.alert(error.localizedDescription,
+                           detail: "Screenme needs Screen Recording permission. Open Settings > Permissions to turn it on.")
+        } else {
+            Feedback.failure(error.localizedDescription, duration: 3.2)
         }
-        FocusKeeper.activateSelf()
-        alert.runModal()
     }
 }

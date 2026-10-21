@@ -51,7 +51,7 @@ extension EditorController {
         Task {
             guard let hidden = await AIClipboard.copy(image: image, png: png, path: file, captureURL: item.url,
                                                       unit: source.unit * state.outputScale) else {
-                Toast.show("Could not read the text", symbol: "exclamationmark.triangle.fill")
+                Feedback.failure("Could not read the text")
                 return
             }
             CaptureAction.copyForAI.confirm(hidden: hidden)
@@ -81,13 +81,13 @@ extension EditorController {
         canvas?.finishTextEditing()
         if mode.crop != nil { applyCrop() }
         guard let (image, type) = flatten(for: item.url), let data = encode(image, as: type) else {
-            alert("Screenme could not render the image.")
+            Feedback.alert("Screenme could not render the image.", over: window)
             return false
         }
         do {
             try data.write(to: item.url, options: .atomic)
         } catch {
-            alert("Screenme could not save the image: \(error.localizedDescription)")
+            Feedback.alert("Screenme could not save the image: \(error.localizedDescription)", over: window)
             return false
         }
         markSaved()
@@ -129,7 +129,7 @@ extension EditorController {
                 try data.write(to: url, options: .atomic)
                 CaptureAction.saveAs.confirm(savedTo: url)
             } catch {
-                self.alert("Screenme could not save the image: \(error.localizedDescription)")
+                Feedback.alert("Screenme could not save the image: \(error.localizedDescription)", over: window)
             }
         }
     }
@@ -143,12 +143,6 @@ extension EditorController {
         let url = folder.appendingPathComponent(item.url.lastPathComponent)
         guard (try? data.write(to: url)) != nil else { return nil }
         return url
-    }
-
-    func alert(_ text: String) {
-        let alert = NSAlert()
-        alert.messageText = text
-        alert.runModal()
     }
 
     // MARK: Closing
