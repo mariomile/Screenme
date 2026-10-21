@@ -19,6 +19,8 @@ final class VideoEditorModel: ObservableObject {
     private var observers: [NSObjectProtocol] = []
     private var exportTask: Task<Void, Never>?
     private var isScrubbing = false
+    private var videoTrackID = kCMPersistentTrackID_Invalid
+    private var fps = 30
 
     @Published private(set) var duration = 0.0
     @Published private(set) var videoSize = CGSize.zero
@@ -41,6 +43,7 @@ final class VideoEditorModel: ObservableObject {
     @Published var mute = false {
         didSet { player.isMuted = mute }
     }
+    @Published var codec = VideoCodec.h264
     @Published private(set) var exportProgress: Double?
     @Published private(set) var exportTitle = ""
 
@@ -87,11 +90,15 @@ final class VideoEditorModel: ObservableObject {
             }
             let natural = try await track.load(.naturalSize).applying(track.load(.preferredTransform))
             videoSize = CGSize(width: abs(natural.width), height: abs(natural.height))
+            videoTrackID = track.trackID
+            let nominal = try await track.load(.nominalFrameRate)
+            fps = nominal > 1 ? Int(min(max(nominal, 24), 60).rounded()) : 30
             hasAudio = try await !asset.loadTracks(withMediaType: .audio).isEmpty
             duration = length
             trimStart = 0
             trimEnd = length
             applyEnd()
+            updatePreview()
         } catch {
             loadFailed = true
             return
@@ -192,7 +199,7 @@ final class VideoEditorModel: ObservableObject {
     /// True when the output would be a byte-for-byte copy of the recording.
     private var isUnmodified: Bool {
         format == .mp4 && trimStart <= 0.001 && trimEnd >= duration - 0.001 && resolution == .original
-            && (!mute || !hasAudio) && quality == .high
+            && (!mute || !hasAudio) && quality == .high && codec == .h264
     }
 
     enum Action {
@@ -261,16 +268,34 @@ final class VideoEditorModel: ObservableObject {
         }
         let range = CMTimeRange(start: CMTime(seconds: trimStart, preferredTimescale: 600),
                                 end: CMTime(seconds: trimEnd, preferredTimescale: 600))
+        let renderer = makeRenderer(size: outputSize, timeOffset: trimStart, speed: 1)
         switch format {
         case .mp4:
-            let url = try await VideoTranscoder.export(item.url, settings: VideoExportSettings(range: range, size: outputSize,
-                                                                                               quality: quality, mute: mute),
-                                                       progress: progress)
+            let settings = VideoExportSettings(range: range, renderer: renderer, quality: quality, codec: codec, mute: mute)
+            let url = try await VideoTranscoder.export(item.url, settings: settings, progress: progress)
             return CaptureItem(url: url, kind: .video)
         case .gif:
-            let url = try await GIFExporter.export(item.url, range: range, size: outputSize, fps: gifFPS, quality: quality,
+            let url = try await GIFExporter.export(item.url, range: range, renderer: renderer, fps: gifFPS, quality: quality,
                                                    progress: progress)
             return CaptureItem(url: url, kind: .gif)
         }
+    }
+
+    // MARK: Rendering
+
+    /// The renderer for an output of `size`. Exports start at the trim start; the preview plays the whole recording.
+    private func makeRenderer(size: CGSize, timeOffset: Double, speed: Double) -> FrameRenderer {
+        FrameRenderer(renderSize: size, timeOffset: timeOffset, speed: speed)
+    }
+
+    /// The preview draws through the same compositor as the export, at a size a window shows: at most 1920 pixels wide.
+    private func updatePreview() {
+        guard let playerItem = player.currentItem, videoTrackID != kCMPersistentTrackID_Invalid else { return }
+        let full = outputSize
+        let scale = min(1, 1920 / max(full.width, full.height, 1))
+        let size = CGSize(width: max(2, (full.width * scale).rounded()), height: max(2, (full.height * scale).rounded()))
+        playerItem.videoComposition = EditedVideo.videoComposition(renderer: makeRenderer(size: size, timeOffset: 0, speed: 1),
+                                                                   trackID: videoTrackID, duration: CMTime(seconds: duration, preferredTimescale: 600),
+                                                                   fps: fps)
     }
 }

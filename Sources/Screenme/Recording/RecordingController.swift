@@ -114,8 +114,8 @@ final class RecordingController {
         defer { toast.finish() }
         do {
             let duration = try await AVURLAsset(url: video).load(.duration)
-            let gif = try await GIFExporter.export(video, range: CMTimeRange(start: .zero, duration: duration),
-                                                   size: ExportResolution.gif(for: size).outputSize(for: size),
+            let renderer = FrameRenderer(renderSize: ExportResolution.gif(for: size).outputSize(for: size))
+            let gif = try await GIFExporter.export(video, range: CMTimeRange(start: .zero, duration: duration), renderer: renderer,
                                                    fps: 15, quality: .high) { value in
                 Task { @MainActor in toast.update(value) }
             }

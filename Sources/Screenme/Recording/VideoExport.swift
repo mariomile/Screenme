@@ -97,14 +97,15 @@ enum ExportResolution: String, CaseIterable, Identifiable {
 /// Converts video to an animated GIF with a shared adaptive palette, ordered dithering,
 /// changed-rectangle frames and an infinite loop.
 enum GIFExporter {
-    /// Converts `range` of the video at `url` to a `size` GIF at `fps` (at most 30).
-    /// `quality` sets the palette size and the dithering.
-    static func export(_ url: URL, range: CMTimeRange, size: CGSize, fps: Int, quality: VideoQuality,
+    /// Converts the edit drawn by `renderer` (`range` of the video at `url`) to a GIF of the renderer's size at `fps`
+    /// (at most 30). `quality` sets the palette size and the dithering.
+    static func export(_ url: URL, range: CMTimeRange, renderer: FrameRenderer, fps: Int, quality: VideoQuality,
                        progress: @escaping @Sendable (Double) -> Void) async throws -> URL {
-        let asset = AVURLAsset(url: url)
-        guard let track = try await asset.loadTracks(withMediaType: .video).first else { throw ScreenmeError.recordingFailed }
-        let width = max(2, Int(size.width.rounded()))
-        let height = max(2, Int(size.height.rounded()))
+        let source = try await EditedVideo.source(url, range: range, speed: renderer.speed, mute: true)
+        let composition = EditedVideo.videoComposition(renderer: renderer, trackID: source.videoTrack.trackID,
+                                                       duration: source.composition.duration, fps: source.fps)
+        let width = max(2, Int(renderer.renderSize.width.rounded()))
+        let height = max(2, Int(renderer.renderSize.height.rounded()))
         let rate = Double(min(max(fps, 1), 30))
         let colors = quality.gifColors
         let dither = quality.gifDither
@@ -112,7 +113,7 @@ enum GIFExporter {
         let cancel = ExportCancel()
         let data: Data = try await withTaskCancellationHandler {
             try await Task.detached(priority: .userInitiated) {
-                try await encode(asset: asset, track: track, range: range, width: width, height: height, fps: rate,
+                try await encode(source: source, composition: composition, width: width, height: height, fps: rate,
                                  colors: colors, dither: dither, cancel: cancel, progress: progress)
             }.value
         } onCancel: {
@@ -125,22 +126,22 @@ enum GIFExporter {
         return output
     }
 
-    private static func encode(asset: AVURLAsset, track: AVAssetTrack, range: CMTimeRange, width: Int, height: Int, fps: Double,
+    private static func encode(source: EditedVideo.Source, composition: AVVideoComposition, width: Int, height: Int, fps: Double,
                                colors: Int, dither: Bool, cancel: ExportCancel,
                                progress: @Sendable (Double) -> Void) async throws -> Data {
+        let asset = source.composition
         let frame = RGBAFrame(width: width, height: height)
-        let start = range.start.seconds
-        let total = max(range.duration.seconds, 0.04)
+        let total = max(asset.duration.seconds, 0.04)
 
         // Pass 1: a palette from a dozen frames spread over the clip.
         let builder = GIFPaletteBuilder()
         let generator = AVAssetImageGenerator(asset: asset)
-        generator.appliesPreferredTrackTransform = true
+        generator.videoComposition = composition
         generator.maximumSize = CGSize(width: width, height: height)
         let samples = 12
         for index in 0..<samples {
             try cancel.check()
-            let time = CMTime(seconds: start + total * (Double(index) + 0.5) / Double(samples), preferredTimescale: 600)
+            let time = CMTime(seconds: total * (Double(index) + 0.5) / Double(samples), preferredTimescale: 600)
             if let (image, _) = try? await generator.image(at: time) {
                 frame.draw(image)
                 builder.add(frame.pixels, width: width, height: height, bytesPerRow: frame.bytesPerRow)
@@ -149,14 +150,12 @@ enum GIFExporter {
         let palette = builder.build(colors: colors)
         let encoder = GIFEncoder(width: width, height: height, palette: palette, dither: dither)
 
-        // Pass 2: read every frame in order and hold each one until the next tick of the GIF clock.
+        // Pass 2: read every drawn frame in order and hold each one until the next tick of the GIF clock.
         let reader = try AVAssetReader(asset: asset)
-        reader.timeRange = range
-        let output = AVAssetReaderTrackOutput(track: track, outputSettings: [
+        let output = AVAssetReaderVideoCompositionOutput(videoTracks: [source.videoTrack], videoSettings: [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
-            kCVPixelBufferWidthKey as String: width,
-            kCVPixelBufferHeightKey as String: height,
         ])
+        output.videoComposition = composition
         output.alwaysCopiesSampleData = false
         reader.add(output)
         guard reader.startReading() else { throw reader.error ?? ScreenmeError.recordingFailed }
@@ -187,8 +186,11 @@ enum GIFExporter {
         }
 
         while let sample = output.copyNextSampleBuffer() {
-            try cancel.check()
-            let time = sample.presentationTimeStamp.seconds - start
+            if cancel.isCancelled {
+                reader.cancelReading()
+                throw CancellationError()
+            }
+            let time = sample.presentationTimeStamp.seconds
             emitTicks(before: time)
             held = sample
             heldDrawn = false
@@ -203,24 +205,31 @@ enum GIFExporter {
 
 // MARK: - MP4
 
+enum VideoCodec: String, CaseIterable, Identifiable {
+    case h264, hevc
+
+    var id: String { rawValue }
+    var title: String { self == .h264 ? "H.264" : "HEVC" }
+    var type: AVVideoCodecType { self == .h264 ? .h264 : .hevc }
+}
+
 struct VideoExportSettings {
+    /// The part of the recording to export, in its own time.
     var range: CMTimeRange
-    var size: CGSize
+    /// Draws every frame: its size is the output size and its speed the playback speed.
+    var renderer: FrameRenderer
     var quality: VideoQuality
+    var codec = VideoCodec.h264
     var mute: Bool
 }
 
-/// Trims, scales and re-encodes a video to MP4 with AVAssetReader and AVAssetWriter.
-/// Multiple audio tracks (system audio and microphone) are mixed into one.
+/// Trims, speeds up, draws and encodes a video to MP4 in one pass: AVAssetReader through the `FrameCompositor`
+/// on the GPU, then the hardware encoder through AVAssetWriter. Multiple audio tracks (system audio and
+/// microphone) are mixed into one.
 enum VideoTranscoder {
     static func export(_ url: URL, settings: VideoExportSettings, progress: (@Sendable (Double) -> Void)? = nil) async throws -> URL {
-        let asset = AVURLAsset(url: url)
-        guard let videoTrack = try await asset.loadTracks(withMediaType: .video).first else { throw ScreenmeError.recordingFailed }
-        let audioTracks = settings.mute ? [] : try await asset.loadTracks(withMediaType: .audio)
-        let nominal = try await videoTrack.load(.nominalFrameRate)
-        let fps = nominal > 1 ? Int(min(max(nominal, 24), 60).rounded()) : 30
-
-        let job = try TranscodeJob(asset: asset, videoTrack: videoTrack, audioTracks: audioTracks, settings: settings, fps: fps, progress: progress)
+        let source = try await EditedVideo.source(url, range: settings.range, speed: settings.renderer.speed, mute: settings.mute)
+        let job = try TranscodeJob(source: source, settings: settings, progress: progress)
         return try await withTaskCancellationHandler {
             try await job.run()
         } onCancel: {
@@ -232,40 +241,40 @@ enum VideoTranscoder {
 private final class TranscodeJob: @unchecked Sendable {
     private let reader: AVAssetReader
     private let writer: AVAssetWriter
-    private let videoOutput: AVAssetReaderTrackOutput
+    private let videoOutput: AVAssetReaderVideoCompositionOutput
     private let videoInput: AVAssetWriterInput
     private var audioOutput: AVAssetReaderAudioMixOutput?
     private var audioInput: AVAssetWriterInput?
     private let outputURL: URL
-    private let start: CMTime
     private let duration: Double
     private let cancelFlag = ExportCancel()
     private let progress: (@Sendable (Double) -> Void)?
 
-    init(asset: AVURLAsset, videoTrack: AVAssetTrack, audioTracks: [AVAssetTrack], settings: VideoExportSettings,
-         fps: Int, progress: (@Sendable (Double) -> Void)?) throws {
+    init(source: EditedVideo.Source, settings: VideoExportSettings, progress: (@Sendable (Double) -> Void)?) throws {
         self.progress = progress
-        start = settings.range.start
-        duration = max(settings.range.duration.seconds, 0.04)
+        let asset = source.composition
+        duration = max(asset.duration.seconds, 0.04)
         outputURL = Storage.newURL(extension: "mp4")
+        let size = settings.renderer.renderSize
 
         reader = try AVAssetReader(asset: asset)
-        reader.timeRange = settings.range
-        videoOutput = AVAssetReaderTrackOutput(track: videoTrack, outputSettings: [
-            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
+        videoOutput = AVAssetReaderVideoCompositionOutput(videoTracks: [source.videoTrack], videoSettings: [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
         ])
+        videoOutput.videoComposition = EditedVideo.videoComposition(renderer: settings.renderer, trackID: source.videoTrack.trackID,
+                                                                    duration: asset.duration, fps: source.fps)
         videoOutput.alwaysCopiesSampleData = false
         reader.add(videoOutput)
 
         writer = try AVAssetWriter(outputURL: outputURL, fileType: .mp4)
         videoInput = AVAssetWriterInput(mediaType: .video,
-                                        outputSettings: H264.settings(width: Int(settings.size.width), height: Int(settings.size.height),
-                                                                      fps: fps, quality: settings.quality, realTime: false))
+                                        outputSettings: H264.settings(width: Int(size.width), height: Int(size.height), fps: source.fps,
+                                                                      quality: settings.quality, realTime: false, codec: settings.codec))
         videoInput.expectsMediaDataInRealTime = false
         writer.add(videoInput)
 
-        if !audioTracks.isEmpty {
-            let output = AVAssetReaderAudioMixOutput(audioTracks: audioTracks, audioSettings: [
+        if !source.audioTracks.isEmpty {
+            let output = AVAssetReaderAudioMixOutput(audioTracks: source.audioTracks, audioSettings: [
                 AVFormatIDKey: kAudioFormatLinearPCM,
                 AVSampleRateKey: 48000,
                 AVNumberOfChannelsKey: 2,
@@ -274,6 +283,8 @@ private final class TranscodeJob: @unchecked Sendable {
                 AVLinearPCMIsBigEndianKey: false,
                 AVLinearPCMIsNonInterleaved: false,
             ])
+            // Sped up speech keeps its pitch.
+            output.audioTimePitchAlgorithm = .spectral
             output.alwaysCopiesSampleData = false
             reader.add(output)
             audioOutput = output
@@ -326,7 +337,7 @@ private final class TranscodeJob: @unchecked Sendable {
 
     private func pump(output: AVAssetReaderOutput, input: AVAssetWriterInput, label: String, group: DispatchGroup, reportsProgress: Bool) {
         group.enter()
-        let queue = DispatchQueue(label: "dev.mariomiletta.screenme.export.\(label)")
+        let queue = DispatchQueue(label: "dev.mariomiletta.screenme.export." + label)
         var finished = false
         input.requestMediaDataWhenReady(on: queue) { [self] in
             while input.isReadyForMoreMediaData, !finished {
@@ -336,17 +347,13 @@ private final class TranscodeJob: @unchecked Sendable {
                     group.leave()
                     return
                 }
-                // Timestamps start at zero; the sample that straddles the trim start is pinned to zero.
-                let pts = sample.presentationTimeStamp
-                let shifted = CMTimeMaximum(CMTimeSubtract(pts, start), .zero)
-                guard let moved = sample.shifted(by: CMTimeSubtract(pts, shifted)) else { continue }
-                if !input.append(moved) {
+                if !input.append(sample) {
                     finished = true
                     input.markAsFinished()
                     group.leave()
                     return
                 }
-                if reportsProgress { progress?(min(max(shifted.seconds / duration, 0), 1) * 0.99) }
+                if reportsProgress { progress?(min(max(sample.presentationTimeStamp.seconds / duration, 0), 1) * 0.99) }
             }
         }
     }
