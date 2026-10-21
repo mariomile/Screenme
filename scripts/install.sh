@@ -40,7 +40,11 @@ plutil -replace ScreenmeCommit -string "$(git -C "$ROOT" rev-parse HEAD)" "$APP/
 codesign --force --sign "$IDENTITY" --keychain "$KEYCHAIN" --preserve-metadata=entitlements,flags "$APP"
 codesign --verify --strict "$APP"
 
-pkill -x Screenme 2>/dev/null && sleep 1 || true
+# -a: Check for Updates runs this script from inside Screenme, and pkill skips its own ancestors by default,
+# so without it the old copy kept running and `open` below only brought the old copy forward.
+if pkill -a -x Screenme 2>/dev/null; then
+  while pgrep -a -x Screenme >/dev/null; do sleep 0.2; done
+fi
 rm -rf /Applications/Screenme.app
 cp -R "$APP" /Applications/
 open /Applications/Screenme.app
