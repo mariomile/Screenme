@@ -54,6 +54,10 @@ final class VideoEditorModel: ObservableObject {
             if edit.canvas != oldValue.canvas { VideoCanvas.saved = edit.canvas }
             if edit.zoomStrength != oldValue.zoomStrength { Prefs[Pref.videoZoomStrength] = edit.zoomStrength }
             if edit.cursor != oldValue.cursor { CursorStyle.saved = edit.cursor }
+            if edit.speed != oldValue.speed {
+                player.defaultRate = Float(edit.speed)
+                if isPlaying { player.rate = Float(edit.speed) }
+            }
             updatePreview()
         }
     }
@@ -230,6 +234,8 @@ final class VideoEditorModel: ObservableObject {
 
     var outputSize: CGSize { edit.outputSize(for: source, resolution: resolution) }
     var clipDuration: Double { trimEnd - trimStart }
+    /// How long the export plays, at its speed.
+    var outputDuration: Double { clipDuration / edit.speed }
 
     /// True when the output would be a byte-for-byte copy of the recording.
     private var isUnmodified: Bool {
@@ -303,7 +309,7 @@ final class VideoEditorModel: ObservableObject {
         }
         let range = CMTimeRange(start: CMTime(seconds: trimStart, preferredTimescale: 600),
                                 end: CMTime(seconds: trimEnd, preferredTimescale: 600))
-        let renderer = makeRenderer(size: outputSize, timeOffset: trimStart, speed: 1)
+        let renderer = makeRenderer(size: outputSize, timeOffset: trimStart, speed: edit.speed)
         switch format {
         case .mp4:
             let settings = VideoExportSettings(range: range, renderer: renderer, quality: quality, codec: codec, mute: mute)

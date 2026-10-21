@@ -36,9 +36,13 @@ struct VideoEdit: Equatable {
     /// How far automatic zooms go in.
     var zoomStrength = 1.8
     var cursor = CursorStyle()
+    /// Playback speed of the whole clip, 1x to 3x.
+    var speed = 1.0
+
+    static let speedRange = 1.0...3.0
 
     /// True when the output is the recording's own picture, only trimmed or scaled.
-    func isPlain(for source: VideoSource) -> Bool { !canvas.enabled && zooms.isEmpty && !drawsCursor(for: source) }
+    func isPlain(for source: VideoSource) -> Bool { !canvas.enabled && zooms.isEmpty && !drawsCursor(for: source) && speed == 1 }
 
     /// The cursor is drawn when the recording left it out (Smooth cursor) and recorded where it went.
     func drawsCursor(for source: VideoSource) -> Bool {

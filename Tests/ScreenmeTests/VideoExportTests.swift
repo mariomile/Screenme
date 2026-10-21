@@ -51,6 +51,27 @@ final class VideoExportTests: XCTestCase {
         XCTAssertEqual(duration, 30, accuracy: 0.1)
     }
 
+    func testSpeedUpShortensTheSoundTooAndMuteDropsIt() async throws {
+        let source = try TestVideo.make(width: 320, height: 180, seconds: 4, tone: true)
+        cleanup.append(source)
+        let renderer = FrameRenderer(renderSize: CGSize(width: 320, height: 180), timeOffset: 0, speed: 2)
+        let output = try await VideoTranscoder.export(source, settings: VideoExportSettings(range: range(0, 4), renderer: renderer,
+                                                                                           quality: .medium, mute: false))
+        cleanup.append(output)
+        let audio = try await AVURLAsset(url: output).loadTracks(withMediaType: .audio)
+        XCTAssertEqual(audio.count, 1)
+        let audioLength = try await audio[0].load(.timeRange).duration.seconds
+        XCTAssertEqual(audioLength, 2, accuracy: 0.15)
+
+        let muted = try await VideoTranscoder.export(source, settings: VideoExportSettings(range: range(1, 3), renderer: FrameRenderer(renderSize: CGSize(width: 320, height: 180), timeOffset: 1),
+                                                                                          quality: .medium, mute: true))
+        cleanup.append(muted)
+        let mutedAudio = try await AVURLAsset(url: muted).loadTracks(withMediaType: .audio)
+        XCTAssertTrue(mutedAudio.isEmpty)
+        let mutedLength = try await AVURLAsset(url: muted).load(.duration).seconds
+        XCTAssertEqual(mutedLength, 2, accuracy: 0.1)
+    }
+
     func testHEVCExport() async throws {
         let source = try video(width: 640, height: 360, seconds: 1)
         let renderer = FrameRenderer(renderSize: CGSize(width: 640, height: 360))

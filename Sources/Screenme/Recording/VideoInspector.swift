@@ -11,11 +11,13 @@ struct VideoInspector: View {
         case background = "Background"
         case zoom = "Zoom"
         case cursor = "Cursor"
+        case speed = "Speed"
         var id: String { rawValue }
 
         var help: String {
             switch self {
             case .background: "Background\nPuts the video on a gradient, color, wallpaper or image, with padding, rounded corners and a shadow."
+            case .speed: "Speed\nPlays the whole clip faster, up to 3x."
             case .cursor: "Cursor\nDraws a smooth cursor with click highlights, for recordings made with Smooth cursor."
             case .zoom: "Zoom\nZooms in on your clicks, or on regions you pick, and back out."
             }
@@ -40,6 +42,7 @@ struct VideoInspector: View {
                     case .background: BackgroundControls(model: model)
                     case .zoom: VideoZoomControls(model: model)
                     case .cursor: CursorControls(model: model)
+                    case .speed: SpeedControls(model: model)
                     }
                 }
                 .padding(.vertical, 8)
@@ -133,6 +136,32 @@ private struct VideoZoomControls: View {
             Button("Remove All", systemImage: "trash") { model.removeAllZooms() }
                 .disabled(model.edit.zooms.isEmpty)
                 .help("Remove All Zooms\nDeletes every zoom and turns Auto zoom off.")
+        }
+        .controlSize(.small)
+    }
+}
+
+// MARK: - Speed
+
+private struct SpeedControls: View {
+    @ObservedObject var model: VideoEditorModel
+
+    var body: some View {
+        HStack(spacing: 14) {
+            HStack(spacing: 6) {
+                Text("Speed up").font(.system(size: 11)).foregroundStyle(.secondary)
+                Slider(value: $model.edit.speed, in: VideoEdit.speedRange, step: 0.25).frame(width: 160)
+                Text(model.edit.speed.formatted(.number.precision(.fractionLength(0...2))) + "x")
+                    .font(.system(size: 11).monospacedDigit()).foregroundStyle(.secondary).frame(width: 34, alignment: .leading)
+            }
+            .help("Speed up\nPlays the whole clip faster, from 1x to 3x. Sound keeps its pitch.")
+            Button("Reset") { model.edit.speed = 1 }
+                .disabled(model.edit.speed == 1)
+                .help("Reset\nBack to normal speed.")
+            Text("Exports \(Duration.format(model.outputDuration, tenths: true)) long")
+                .font(.system(size: 11).monospacedDigit())
+                .foregroundStyle(.secondary)
+                .fixedSize()
         }
         .controlSize(.small)
     }
