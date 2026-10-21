@@ -4,18 +4,18 @@ import UniformTypeIdentifiers
 
 /// Report for AI: turns a recording, what was said and what happened during it into a folder in the save folder
 /// (the video, key frames, `events.json` and `report.md`) and copies the report, with absolute paths, ready to paste
-/// into an agent, GitHub or Linear.
-@MainActor
+/// into an agent, GitHub or Linear. The work runs off the main thread; only the toast and the pasteboard are on it.
 enum AIReporter {
     /// Makes the report, copies it and shows the folder. Returns false when it failed, which an alert says.
+    @MainActor
     static func make(_ item: CaptureItem) async -> Bool {
         let toast = Toast.progress("Creating report for AI")
         defer { toast.finish() }
         do {
             let context = await CaptureContexts.context(for: item.url)
             let report = try await write(item.url, context: context, events: RecordingEvents.events(for: item.url),
-                                         recordedAt: item.date, in: Storage.saveDirectory) {
-                toast.update($0)
+                                         recordedAt: item.date, screen: screenDescription(), in: Storage.saveDirectory) { value in
+                Task { @MainActor in toast.update(value) }
             }
             Clipboard.copyText(report.markdown(absoluteLinks: true))
             NSWorkspace.shared.activateFileViewerSelecting([report.folder.appendingPathComponent("report.md")])
@@ -26,10 +26,17 @@ enum AIReporter {
         }
     }
 
+    /// "1512×982 points at 2x": the main screen, for the report's environment.
+    @MainActor
+    static func screenDescription() -> String? {
+        NSScreen.main.map { "\(Int($0.frame.width))×\(Int($0.frame.height)) points at \(Int($0.backingScaleFactor))x" }
+    }
+
     /// Writes the report folder for `video` inside `parent` and returns the report. Asks for speech recognition
-    /// only when the video has sound.
-    static func write(_ video: URL, context: CaptureContext, events: RecordingEvents?, recordedAt date: Date, in parent: URL,
-                      progress: (Double) -> Void = { _ in }) async throws -> AIReport {
+    /// only when the video has sound. Not on the main actor: copying, decoding and writing PNGs take a while.
+    static func write(_ video: URL, context: CaptureContext, events: RecordingEvents?, recordedAt date: Date,
+                      screen: String? = nil, in parent: URL,
+                      progress: @escaping @Sendable (Double) -> Void = { _ in }) async throws -> AIReport {
         let asset = AVURLAsset(url: video)
         let duration = try await asset.load(.duration).seconds
         guard let track = try await asset.loadTracks(withMediaType: .video).first else {
@@ -58,7 +65,6 @@ enum AIReporter {
         progress(0.7)
 
         let os = ProcessInfo.processInfo.operatingSystemVersion
-        let screen = NSScreen.main.map { "\(Int($0.frame.width))×\(Int($0.frame.height)) points at \(Int($0.backingScaleFactor))x" }
         let dateFormatter = DateFormatter()
         dateFormatter.dateStyle = .long
         dateFormatter.timeStyle = .short

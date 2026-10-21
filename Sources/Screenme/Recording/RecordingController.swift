@@ -88,7 +88,12 @@ final class RecordingController {
         guard let url = await end(session, keep: true) else { return nil }
         // The recorded app and window, and what happened during the recording, for Report for AI.
         CaptureContexts.record(session.target, for: url)
-        if session.settings.format == .gif { return await convertToGIF(url, size: size) }
+        if session.settings.format == .gif {
+            let gif = await convertToGIF(url, size: size)
+            // The video is gone after the conversion: the context belongs to the GIF.
+            if let gif, gif.url != url { CaptureContexts.move(url, to: gif.url) }
+            return gif
+        }
         if let events = session.recordedEvents { RecordingEvents.record(events, for: url) }
         return CaptureItem(url: url, kind: .video)
     }

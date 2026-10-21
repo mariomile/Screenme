@@ -51,6 +51,11 @@ enum CaptureContexts {
         contexts[url] = nil
     }
 
+    /// The capture's file was replaced by another one (a recording converted to GIF).
+    static func move(_ url: URL, to newURL: URL) {
+        contexts[newURL] = contexts.removeValue(forKey: url)
+    }
+
     /// The recorded context, with the browser page looked up now: only when the browser still shows the
     /// captured page, so a tab switched since the capture never lends its address.
     static func context(for url: URL) async -> CaptureContext {
