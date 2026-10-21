@@ -122,7 +122,8 @@ private final class MeasureSession {
                 box = dragged
                 view.update(spans: spanLines(), label: spanLabel(), box: box)
             } else {
-                finish(spanText())
+                // A click copies what the labels show: the box when there is one, like ⌘C.
+                finish(box.map { size($0) } ?? spanText())
             }
         case .rightMouseDown, .otherMouseDown:
             finish(nil)
