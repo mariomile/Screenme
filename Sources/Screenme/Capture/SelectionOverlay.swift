@@ -53,7 +53,9 @@ final class SelectionSession {
     private var previousApp: NSRunningApplication?
     private var cursorHidden = false
     private var eventMonitor: Any?
-    private var tickTimer: Timer?
+    private var globalMonitor: Any?
+    /// Runs only while a drag is in progress.
+    private var dragTimer: Timer?
     private var screenObserver: NSObjectProtocol?
     private var finished = false
     private var outcome: SelectionResult??
@@ -146,17 +148,11 @@ final class SelectionSession {
             let consumed = MainActor.assumeIsolated { self.handle(box.event) }
             return consumed ? nil : event
         }
-        // Mouse-moved events are not delivered reliably to panels of an inactive app,
-        // and never across displays while a button is held, so poll as well.
-        let timer = Timer(timeInterval: 1.0 / 120.0, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            MainActor.assumeIsolated {
-                let location = NSEvent.mouseLocation
-                if location != self.pointer { self.pointerMoved(to: location) }
-            }
+        // Mouse-moved events are not delivered reliably to panels of an inactive app: the moves other apps get
+        // are followed too. Across displays with a button held no event arrives at all, so a drag polls (`startDragPolling`).
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged]) { [weak self] _ in
+            MainActor.assumeIsolated { self?.followPointer() }
         }
-        RunLoop.main.add(timer, forMode: .common)
-        tickTimer = timer
         screenObserver = NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
                                                                 object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.finish(nil) }
@@ -166,8 +162,9 @@ final class SelectionSession {
     private func teardown() {
         if let eventMonitor { NSEvent.removeMonitor(eventMonitor) }
         eventMonitor = nil
-        tickTimer?.invalidate()
-        tickTimer = nil
+        if let globalMonitor { NSEvent.removeMonitor(globalMonitor) }
+        globalMonitor = nil
+        stopDragPolling()
         if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) }
         screenObserver = nil
         if cursorHidden {
@@ -235,6 +232,27 @@ final class SelectionSession {
         refresh()
     }
 
+    /// The pointer as it is now, when it moved: for moves seen by the global monitor or the drag timer.
+    private func followPointer() {
+        guard !finished else { return }
+        let location = NSEvent.mouseLocation
+        if location != pointer { pointerMoved(to: location) }
+    }
+
+    private func startDragPolling() {
+        stopDragPolling()
+        let timer = Timer(timeInterval: 1.0 / 120.0, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.followPointer() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        dragTimer = timer
+    }
+
+    private func stopDragPolling() {
+        dragTimer?.invalidate()
+        dragTimer = nil
+    }
+
     private func mouseDown() {
         if windowMode { return }
         let screen = NSScreen.at(pointer)
@@ -243,6 +261,7 @@ final class SelectionSession {
         corner = anchor
         cornerOffset = .zero
         dragging = true
+        startDragPolling()
         refresh()
     }
 
@@ -253,6 +272,7 @@ final class SelectionSession {
         }
         guard dragging, let screen = dragScreen else { return }
         let rect = selectionRect()
+        stopDragPolling()
         dragging = false
         dragScreen = nil
         spaceHeld = false
