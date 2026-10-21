@@ -9,6 +9,7 @@ A lightweight, native macOS capture tool. Capture, drop it where it goes, move o
 - **Capture screen**: from the menu bar.
 - **Hide sensitive info when sharing** (Settings > Screenshots, off by default): Copy for AI and Share send a copy with emails, phone numbers, cards, IBANs, keys, IP addresses and faces pixelated, and `[redacted]` in the copied text. The capture file is never changed. The editor's Redact Sensitive Info covers faces too.
 - **Copy for AI** (Quick Access, History, pins, editor `⇧⌘C`): copies the image plus a text block for Claude, ChatGPT or Cursor: the app, window and browser page it came from, the text in it, and the notes you wrote on annotations in the editor (select an annotation, type in Note for AI). Paste into a chat for the image, or into a terminal for the text with the file path.
+- **Bug Report** (recordings, from Quick Access, History or the video editor): record the screen while you explain the bug, then pick Bug Report. Screenme transcribes what you said on this Mac, takes a frame at each step and writes a `Bug Report` folder in your save folder with the video, the frames and `report.md`: environment, timestamped transcript, numbered steps with their frames, and a prompt for a coding agent. The report is also copied, with absolute paths, ready to paste into GitHub, Linear or Claude Code.
 
 About 0.5 MB on disk, no dependencies, system frameworks only (ScreenCaptureKit, AVFoundation, AVKit, SwiftUI).
 
