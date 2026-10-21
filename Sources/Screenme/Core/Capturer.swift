@@ -111,12 +111,14 @@ enum Storage {
 }
 
 enum Clipboard {
-    static func copyImage(at url: URL) {
+    /// One pasteboard item holding the image data and the file: two items make some apps paste twice or paste a file icon.
+    static func copyImage(at url: URL, to board: NSPasteboard = .general) {
         guard let data = try? Data(contentsOf: url) else { return }
-        let board = NSPasteboard.general
         board.clearContents()
-        board.setData(data, forType: NSPasteboard.PasteboardType(ImageFormat(of: url).type.identifier))
-        board.writeObjects([url as NSURL])
+        let entry = NSPasteboardItem()
+        entry.setData(data, forType: NSPasteboard.PasteboardType(ImageFormat(of: url).type.identifier))
+        entry.setString(url.absoluteString, forType: .fileURL)
+        board.writeObjects([entry])
     }
 
     static func copyFile(at url: URL) {

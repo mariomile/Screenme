@@ -47,4 +47,18 @@ final class CopyActionsTests: PrefsSandboxTestCase {
         try Data("after".utf8).write(to: capture)
         XCTAssertNil(Storage.savedCopy(of: capture))
     }
+
+    func testCopyImageWritesOneItemWithTheImageAndTheFile() throws {
+        let capture = folder.appendingPathComponent("Shot.png")
+        try Data("png".utf8).write(to: capture)
+        let board = NSPasteboard.withUniqueName()
+        defer { board.releaseGlobally() }
+
+        Clipboard.copyImage(at: capture, to: board)
+
+        XCTAssertEqual(board.pasteboardItems?.count, 1)
+        let item = try XCTUnwrap(board.pasteboardItems?.first)
+        XCTAssertEqual(item.data(forType: .png), Data("png".utf8))
+        XCTAssertEqual(item.string(forType: .fileURL), capture.absoluteString)
+    }
 }
