@@ -9,6 +9,33 @@ enum ExportFormat: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+extension Pref {
+    static let videoCodec = PrefKey(name: "videoCodec", defaultValue: VideoCodec.h264)
+    static let videoGIFFPS = PrefKey(name: "videoGIFFPS", defaultValue: 15)
+    static let videoGIFMaxWidth = PrefKey(name: "videoGIFMaxWidth", defaultValue: 1280)
+}
+
+/// What the video editor does with a file it exported. Never the after-recording actions: with Open in video
+/// editor on they would open another editor on the export, and with Save to folder on save it a second time.
+@MainActor
+struct VideoEditorDelivery {
+    var record: (CaptureItem) -> Void
+    var copy: (CaptureItem) -> Void
+
+    static let live = VideoEditorDelivery(record: { CaptureCoordinator.shared.record($0) }, copy: { Clipboard.copy($0) })
+
+    /// Done: the export becomes the latest capture in History, and is copied when Copy file to clipboard is on.
+    func finished(_ item: CaptureItem) {
+        record(item)
+        if Prefs[Pref.afterRecordingCopy] { copy(item) }
+    }
+
+    /// Save already put the file where the user asked; the new file still goes to History.
+    func saved(_ item: CaptureItem) {
+        record(item)
+    }
+}
+
 @MainActor
 final class VideoEditorModel: ObservableObject {
     let item: CaptureItem
@@ -19,6 +46,8 @@ final class VideoEditorModel: ObservableObject {
     private var observers: [NSObjectProtocol] = []
     private var exportTask: Task<Void, Never>?
     private var isScrubbing = false
+    private var videoTrackID = kCMPersistentTrackID_Invalid
+    private var fps = 30
 
     @Published private(set) var duration = 0.0
     @Published private(set) var videoSize = CGSize.zero
@@ -30,23 +59,70 @@ final class VideoEditorModel: ObservableObject {
     @Published private(set) var isPlaying = false
     @Published private(set) var thumbnails: [CGImage?] = Array(repeating: nil, count: 24)
 
-    @Published var format = ExportFormat.mp4 {
-        didSet {
-            if format == .gif, oldValue != .gif, resolution == .original { resolution = .gif(for: videoSize) }
-        }
-    }
+    @Published var format = ExportFormat.mp4
     @Published var resolution = ExportResolution.original
     @Published var quality = VideoQuality.high
-    @Published var gifFPS = 15
+    @Published var gifFPS = Prefs[Pref.videoGIFFPS] {
+        didSet { Prefs[Pref.videoGIFFPS] = gifFPS }
+    }
+    /// The widest a GIF gets, in pixels; 0 keeps the full width.
+    @Published var gifMaxWidth = Prefs[Pref.videoGIFMaxWidth] {
+        didSet { Prefs[Pref.videoGIFMaxWidth] = gifMaxWidth }
+    }
     @Published var mute = false {
         didSet { player.isMuted = mute }
+    }
+    @Published var codec = Prefs[Pref.videoCodec] {
+        didSet { Prefs[Pref.videoCodec] = codec }
     }
     @Published private(set) var exportProgress: Double?
     @Published private(set) var exportTitle = ""
 
-    init(item: CaptureItem) {
+    /// What the editor draws on the recording. Every change redraws the preview; the canvas is remembered for next time.
+    @Published var edit = VideoEdit() {
+        didSet {
+            guard edit != oldValue else { return }
+            if edit.canvas != oldValue.canvas { VideoCanvas.saved = edit.canvas }
+            if edit.zoomStrength != oldValue.zoomStrength { Prefs[Pref.videoZoomStrength] = edit.zoomStrength }
+            if edit.cursor != oldValue.cursor { CursorStyle.saved = edit.cursor }
+            if edit.speed != oldValue.speed {
+                player.defaultRate = Float(edit.speed)
+                if isPlaying { player.rate = Float(edit.speed) }
+            }
+            updatePreview()
+        }
+    }
+    /// Zooms made from the recording's clicks. Remembered for next time.
+    @Published var autoZoom = Prefs[Pref.videoAutoZoom] {
+        didSet {
+            guard autoZoom != oldValue else { return }
+            Prefs[Pref.videoAutoZoom] = autoZoom
+            applyAutoZoom()
+        }
+    }
+    @Published var selectedZoom: UUID?
+    /// The zoom whose region is being dragged out on the preview.
+    @Published private(set) var pickingZoom: UUID? {
+        didSet { if pickingZoom != oldValue { updatePreview() } }
+    }
+    /// The recording's clicks and cursor, when it was recorded with them.
+    let events: RecordingEvents?
+    private let cursorPath: CursorPath?
+
+    var source: VideoSource { VideoSource(size: videoSize, events: events, cursor: cursorPath) }
+
+    /// What happens to an exported file.
+    private let delivery: VideoEditorDelivery
+
+    init(item: CaptureItem, delivery: VideoEditorDelivery = .live) {
         self.item = item
+        self.delivery = delivery
+        events = RecordingEvents.events(for: item.url)
+        cursorPath = VideoSource.cursorPath(of: events)
         asset = AVURLAsset(url: item.url)
+        edit.canvas = VideoCanvas.saved
+        edit.cursor = CursorStyle.saved
+        edit.zoomStrength = min(max(Prefs[Pref.videoZoomStrength], AutoZoom.strengthRange.lowerBound), AutoZoom.strengthRange.upperBound)
         player.replaceCurrentItem(with: AVPlayerItem(asset: asset))
         player.actionAtItemEnd = .pause
 
@@ -87,11 +163,16 @@ final class VideoEditorModel: ObservableObject {
             }
             let natural = try await track.load(.naturalSize).applying(track.load(.preferredTransform))
             videoSize = CGSize(width: abs(natural.width), height: abs(natural.height))
+            videoTrackID = track.trackID
+            let nominal = try await track.load(.nominalFrameRate)
+            fps = nominal > 1 ? Int(min(max(nominal, 24), 60).rounded()) : 30
             hasAudio = try await !asset.loadTracks(withMediaType: .audio).isEmpty
             duration = length
             trimStart = 0
             trimEnd = length
             applyEnd()
+            if autoZoom { applyAutoZoom() }
+            updatePreview()
         } catch {
             loadFailed = true
             return
@@ -186,13 +267,20 @@ final class VideoEditorModel: ObservableObject {
 
     // MARK: Export
 
-    var outputSize: CGSize { resolution.outputSize(for: videoSize) }
+    var outputSize: CGSize {
+        switch format {
+        case .mp4: edit.outputSize(for: source, resolution: resolution)
+        case .gif: ExportResolution.fitting(edit.outputSize(for: source, resolution: .original), maxWidth: gifMaxWidth)
+        }
+    }
     var clipDuration: Double { trimEnd - trimStart }
+    /// How long the export plays, at its speed.
+    var outputDuration: Double { clipDuration / edit.speed }
 
     /// True when the output would be a byte-for-byte copy of the recording.
     private var isUnmodified: Bool {
         format == .mp4 && trimStart <= 0.001 && trimEnd >= duration - 0.001 && resolution == .original
-            && (!mute || !hasAudio) && quality == .high
+            && (!mute || !hasAudio) && quality == .high && codec == .h264 && edit.isPlain(for: source)
     }
 
     enum Action {
@@ -222,7 +310,7 @@ final class VideoEditorModel: ObservableObject {
                 case .save:
                     let output = try await renderOutput(title: "Saving")
                     if await CaptureAction.save.perform(output), output.url != item.url {
-                        CaptureCoordinator.shared.afterCapture(output)
+                        delivery.saved(output)
                     }
 
                 case .saveAs:
@@ -236,7 +324,7 @@ final class VideoEditorModel: ObservableObject {
                 case .done:
                     if !isUnmodified {
                         let output = try await renderOutput(title: "Exporting")
-                        CaptureCoordinator.shared.afterCapture(output)
+                        delivery.finished(output)
                     }
                     window?.close()
                 }
@@ -261,16 +349,119 @@ final class VideoEditorModel: ObservableObject {
         }
         let range = CMTimeRange(start: CMTime(seconds: trimStart, preferredTimescale: 600),
                                 end: CMTime(seconds: trimEnd, preferredTimescale: 600))
+        let renderer = makeRenderer(size: outputSize, timeOffset: trimStart, speed: edit.speed)
         switch format {
         case .mp4:
-            let url = try await VideoTranscoder.export(item.url, settings: VideoExportSettings(range: range, size: outputSize,
-                                                                                               quality: quality, mute: mute),
-                                                       progress: progress)
+            let settings = VideoExportSettings(range: range, renderer: renderer, quality: quality, codec: codec, mute: mute)
+            let url = try await VideoTranscoder.export(item.url, settings: settings, progress: progress)
             return CaptureItem(url: url, kind: .video)
         case .gif:
-            let url = try await GIFExporter.export(item.url, range: range, size: outputSize, fps: gifFPS, quality: quality,
+            let url = try await GIFExporter.export(item.url, range: range, renderer: renderer, fps: gifFPS, quality: quality,
                                                    progress: progress)
             return CaptureItem(url: url, kind: .gif)
         }
+    }
+
+    // MARK: Rendering
+
+    /// The renderer for an output of `size`. Exports start at the trim start; the preview plays the whole recording.
+    /// While a zoom's region is being picked, the preview shows the whole video.
+    private func makeRenderer(size: CGSize, timeOffset: Double, speed: Double, preview: Bool = false) -> FrameRenderer {
+        edit.renderer(for: source, renderSize: size, duration: duration, timeOffset: timeOffset, speed: speed,
+                      zoomed: !(preview && pickingZoom != nil))
+    }
+
+    /// Where the video shows inside a view of `size` that fits the preview, y-down: for picking a zoom region.
+    func videoFrame(in size: CGSize) -> CGRect {
+        let preview = previewSize
+        let scale = min(size.width / preview.width, size.height / preview.height)
+        let shown = CGSize(width: preview.width * scale, height: preview.height * scale)
+        let origin = CGPoint(x: (size.width - shown.width) / 2, y: (size.height - shown.height) / 2)
+        let layout = edit.layout(for: source)
+        let k = shown.width / layout.canvasSize.width
+        let content = layout.contentRect
+        return CGRect(x: origin.x + content.minX * k, y: origin.y + content.minY * k, width: content.width * k, height: content.height * k)
+    }
+
+    /// Recorded with Smooth cursor, so the editor draws the cursor. Otherwise it is in the picture already.
+    var canDrawCursor: Bool { events?.cursor?.hidden == true && cursorPath != nil }
+
+    // MARK: Zoom
+
+    /// Whether the recording has clicks to zoom on.
+    var hasClicks: Bool { events?.events.contains { $0.kind == .click } == true }
+
+    /// Replaces the automatic zooms with fresh ones from the clicks, or removes them. Zooms added by hand stay.
+    private func applyAutoZoom() {
+        var zooms = edit.zooms.filter { !$0.isAuto }
+        if autoZoom, let events, duration > 0 { zooms += AutoZoom.segments(for: events, duration: duration) }
+        edit.zooms = zooms.sorted { $0.start < $1.start }
+    }
+
+    func deleteZoom(_ id: UUID) {
+        edit.zooms.removeAll { $0.id == id }
+        if selectedZoom == id { selectedZoom = nil }
+        if pickingZoom == id { pickingZoom = nil }
+    }
+
+    /// Removes every zoom and turns Auto zoom off, so none come back.
+    func removeAllZooms() {
+        pickingZoom = nil
+        selectedZoom = nil
+        autoZoom = false
+        edit.zooms.removeAll()
+    }
+
+    /// Moves a zoom to start at `start`, keeping its length, inside the video.
+    func moveZoom(_ id: UUID, to start: Double) {
+        guard let index = edit.zooms.firstIndex(where: { $0.id == id }) else { return }
+        let length = edit.zooms[index].duration
+        let clamped = min(max(start, 0), max(duration - length, 0))
+        edit.zooms[index].start = clamped
+        edit.zooms[index].end = clamped + length
+    }
+
+    /// Adds a 3 second zoom at the playhead and asks for its region on the preview.
+    func addZoom() {
+        guard duration > 0 else { return }
+        pause()
+        let length = min(3, duration)
+        let start = min(max(currentTime, 0), duration - length)
+        let zoom = ZoomSegment(start: start, end: start + length, center: CGPoint(x: 0.5, y: 0.5), zoom: edit.zoomStrength, isAuto: false)
+        edit.zooms.append(zoom)
+        edit.zooms.sort { $0.start < $1.start }
+        selectedZoom = zoom.id
+        pickingZoom = zoom.id
+    }
+
+    /// The region picked on the preview, in unit coordinates of the video: the zoom centers on it and goes in until it fills the view.
+    func setZoomRegion(_ rect: CGRect) {
+        guard let id = pickingZoom, let index = edit.zooms.firstIndex(where: { $0.id == id }) else { return }
+        let side = max(rect.width, rect.height, 0.01)
+        let range = AutoZoom.strengthRange
+        edit.zooms[index].center = CGPoint(x: rect.midX, y: rect.midY)
+        edit.zooms[index].zoom = min(max(1 / side, range.lowerBound), range.upperBound)
+        pickingZoom = nil
+    }
+
+    func endPicking() {
+        pickingZoom = nil
+    }
+
+    /// The pixel size of the preview: the full-size output, at most 1920 pixels wide.
+    var previewSize: CGSize {
+        let full = edit.outputSize(for: source, resolution: .original)
+        let scale = min(1, 1920 / max(full.width, full.height, 1))
+        return CGSize(width: max(2, (full.width * scale).rounded()), height: max(2, (full.height * scale).rounded()))
+    }
+
+    /// The preview draws through the same compositor as the export, so what it shows is what gets exported.
+    private func updatePreview() {
+        guard let playerItem = player.currentItem, videoTrackID != kCMPersistentTrackID_Invalid else { return }
+        playerItem.videoComposition = EditedVideo.videoComposition(renderer: makeRenderer(size: previewSize, timeOffset: 0, speed: 1, preview: true),
+                                                                   trackID: videoTrackID, duration: CMTime(seconds: duration, preferredTimescale: 600),
+                                                                   fps: fps)
+        // A paused player keeps showing the old frame until it seeks.
+        if !isPlaying { seek(to: currentTime) }
     }
 }

@@ -41,6 +41,9 @@ struct RecordingPane: View {
                     ForEach(VideoQuality.allCases) { Text($0.title).tag($0) }
                 }
                 PrefToggle("Show cursor", Pref.recordingShowCursor)
+                PrefToggle("Smooth cursor (render after recording)", Pref.recordingSmoothCursor,
+                           detail: "Films the video without the cursor; the video editor draws a smooth one, which you can resize or hide.")
+                    .help("Smooth cursor (render after recording)\nVideos are filmed without the cursor and Screenme records where it went. The video editor then draws a smooth cursor with click highlights. GIF recordings keep the filmed cursor.")
                 PrefToggle("Highlight clicks", Pref.recordingHighlightClicks)
                 Toggle("Show keystrokes", isOn: $keystrokes)
                 if keystrokes && !permissions.isGranted(.accessibility) {

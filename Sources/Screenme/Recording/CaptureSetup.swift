@@ -15,7 +15,7 @@ struct CaptureSetup {
     @MainActor
     static func make(for target: CaptureTarget, settings: RecordingSettings, overlays: [NSWindow]) async throws -> CaptureSetup {
         let profile = settings.profile
-        let (filter, config) = try await target.streamSetup(showsCursor: settings.showCursor, retina: profile.retina,
+        let (filter, config) = try await target.streamSetup(showsCursor: settings.filmsCursor, retina: profile.retina,
                                                             including: overlays.map { CGWindowID($0.windowNumber) },
                                                             hidingNotifications: settings.hideNotifications)
         var width = CGFloat(config.width)

@@ -17,7 +17,7 @@ final class AutoCropTests: XCTestCase {
 
     private func events(_ list: [RecordingEvent], windows: [WindowSnapshot.Window]? = nil, cursor: [[Double]] = []) -> RecordingEvents {
         RecordingEvents(width: 1440, height: 900, events: list,
-                        windows: [WindowSnapshot(time: 0, windows: windows ?? desk)], cursor: cursor)
+                        windows: [WindowSnapshot(time: 0, windows: windows ?? desk)], pointer: cursor)
     }
 
     func testCropsToTheWindowThatWasClickedWithPadding() {

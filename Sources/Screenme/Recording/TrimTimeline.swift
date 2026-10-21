@@ -1,11 +1,13 @@
 import AppKit
 import SwiftUI
 
-/// The filmstrip with the trim handles and the playhead.
+/// The filmstrip with the trim handles and the playhead, and under it the lane of zooms.
 struct TrimTimeline: View {
     @ObservedObject var model: VideoEditorModel
     private let handleWidth: CGFloat = 14
     private let height: CGFloat = 58
+    private let laneGap: CGFloat = 6
+    private let laneHeight: CGFloat = 20
 
     var body: some View {
         GeometryReader { geometry in
@@ -45,8 +47,19 @@ struct TrimTimeline: View {
                 playhead
                     .offset(x: x(min(max(model.currentTime, model.trimStart), model.trimEnd)) - 1)
                     .allowsHitTesting(false)
+
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(Color.primary.opacity(0.05))
+                    .frame(width: inner, height: laneHeight)
+                    .offset(x: handleWidth, y: height + laneGap)
+                    .allowsHitTesting(false)
+                ForEach(model.edit.zooms) { zoom in
+                    ZoomBlock(model: model, zoom: zoom, pointsPerSecond: inner / CGFloat(duration))
+                        .frame(width: max(x(zoom.end) - x(zoom.start), 6), height: laneHeight)
+                        .offset(x: x(zoom.start), y: height + laneGap)
+                }
             }
-            .frame(height: height, alignment: .top)
+            .frame(height: height + laneGap + laneHeight, alignment: .top)
             .padding(.top, 8)
             .coordinateSpace(name: "strip")
             .contentShape(Rectangle())
@@ -54,7 +67,7 @@ struct TrimTimeline: View {
                 model.scrub(to: time(value.location.x))
             }.onEnded { _ in model.endScrub() })
         }
-        .frame(height: height + 8)
+        .frame(height: height + 8 + laneGap + laneHeight)
     }
 
     private func filmstrip(width: CGFloat) -> some View {
@@ -124,5 +137,59 @@ private struct ResizeCursorOnHover: ViewModifier {
                 if pushed { NSCursor.pop() }
                 pushed = false
             }
+    }
+}
+
+/// One zoom on the timeline: drag it to move it, click to select it, the x or Delete to remove it.
+private struct ZoomBlock: View {
+    @ObservedObject var model: VideoEditorModel
+    let zoom: ZoomSegment
+    let pointsPerSecond: CGFloat
+    @State private var dragStart: Double?
+    @State private var hovering = false
+
+    private var selected: Bool { model.selectedZoom == zoom.id }
+
+    var body: some View {
+        ZStack(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .fill(Color.purple.opacity(selected ? 0.95 : 0.65))
+                .overlay(RoundedRectangle(cornerRadius: 4, style: .continuous).strokeBorder(.white.opacity(selected ? 0.9 : 0), lineWidth: 1.5))
+            HStack(spacing: 3) {
+                Image(systemName: zoom.isAuto ? "cursorarrow.click" : "plus.magnifyingglass")
+                Text(String(format: "%.1fx", zoom.zoom ?? model.edit.zoomStrength))
+                    .monospacedDigit()
+                Spacer(minLength: 0)
+                if hovering {
+                    Button { model.deleteZoom(zoom.id) } label: {
+                        Image(systemName: "xmark").font(.system(size: 8, weight: .bold))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Delete Zoom")
+                }
+            }
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 5)
+            .lineLimit(1)
+        }
+        .clipped()
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+        .highPriorityGesture(DragGesture(minimumDistance: 2, coordinateSpace: .named("strip")).onChanged { value in
+            if dragStart == nil {
+                dragStart = zoom.start
+                model.selectedZoom = zoom.id
+            }
+            model.moveZoom(zoom.id, to: (dragStart ?? zoom.start) + Double(value.translation.width / max(pointsPerSecond, 0.001)))
+        }.onEnded { _ in dragStart = nil })
+        .simultaneousGesture(TapGesture().onEnded { model.selectedZoom = selected ? nil : zoom.id })
+        .contextMenu {
+            Button("Delete Zoom") { model.deleteZoom(zoom.id) }
+            Button("Remove All Zooms") { model.removeAllZooms() }
+        }
+        .help(zoom.isAuto
+              ? "Zoom on a click\nFollows the cursor. Drag to move it, Delete or the x to remove it."
+              : "Zoom\nStays on the region you picked. Drag to move it, Delete or the x to remove it.")
     }
 }

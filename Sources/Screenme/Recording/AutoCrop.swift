@@ -72,7 +72,7 @@ enum AutoCrop {
                 break
             }
         }
-        let cursor = events.cursor ?? []
+        let cursor = events.pointer ?? []
         for (index, sample) in cursor.enumerated() where sample.count == 3 {
             // The pointer counts from when it got here (or from `from`, when it was already resting) until it moved on.
             let start = max(sample[0], from)

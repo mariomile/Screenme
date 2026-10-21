@@ -98,7 +98,9 @@ struct RecordingEvents: Codable, Equatable {
     var windows: [WindowSnapshot]?
     /// Where the pointer was, `[time, x, y]` in points from the top-left corner of the area, about 20 times a second
     /// while it moves inside the area.
-    var cursor: [[Double]]?
+    var pointer: [[Double]]?
+    /// The pointer's path and button presses, for the video editor's zoom and Smooth cursor. Nil in older recordings.
+    var cursor: CursorTrack? = nil
 
     /// `.Screenme 2026-10-21 at 10.22.33.mp4.events.json` next to the recording. Hidden, so neither History
     /// nor the command line's capture list ever shows it as a capture.
@@ -158,7 +160,7 @@ final class RecordingEventRecorder {
     private let time: () -> Double?
     private(set) var events: [RecordingEvent] = []
     private var windows: [WindowSnapshot] = []
-    private var cursor: [[Double]] = []
+    private var pointer: [[Double]] = []
     private var monitors: [Any] = []
     private var poll: Timer?
     private var cursorPoll: Timer?
@@ -176,7 +178,7 @@ final class RecordingEventRecorder {
 
     var recorded: RecordingEvents {
         RecordingEvents(width: area.width, height: area.height, events: events.sorted { $0.time < $1.time },
-                        windows: recordsWindows ? windows : nil, cursor: recordsWindows ? cursor : nil)
+                        windows: recordsWindows ? windows : nil, pointer: recordsWindows ? pointer : nil)
     }
 
     func start() {
@@ -224,7 +226,7 @@ final class RecordingEventRecorder {
     func reset() {
         events.removeAll()
         windows.removeAll()
-        cursor.removeAll()
+        pointer.removeAll()
         pressed = nil
         lastApp = nil
         take += 1
@@ -372,8 +374,8 @@ final class RecordingEventRecorder {
         let location = NSEvent.mouseLocation
         guard area.contains(location), let now = time() else { return }
         let point = local(location)
-        if let last = cursor.last, abs(last[1] - point.x) < 1, abs(last[2] - point.y) < 1 { return }
-        cursor.append([(now * 100).rounded() / 100, point.x.rounded(), point.y.rounded()])
+        if let last = pointer.last, abs(last[1] - point.x) < 1, abs(last[2] - point.y) < 1 { return }
+        pointer.append([(now * 100).rounded() / 100, point.x.rounded(), point.y.rounded()])
     }
 
     private static func frontWindowTitle(of pid: pid_t) -> String? {
