@@ -45,7 +45,7 @@ private final class EditorWindow: NSObject, NSWindowDelegate, NSToolbarDelegate 
         self.controller = controller
         self.onClose = onClose
 
-        let visible = NSScreen.main?.visibleFrame.size ?? CGSize(width: 1440, height: 900)
+        let visible = WindowPresenter.activeScreen?.visibleFrame.size ?? CGSize(width: 1440, height: 900)
         let imageSize = CGSize(width: controller.source.size.width / controller.unit, height: controller.source.size.height / controller.unit)
         let size = CGSize(width: min(max(imageSize.width + 140, 1020), visible.width * 0.92),
                           height: min(max(imageSize.height + 52 + 140, 640), visible.height * 0.9))
@@ -71,7 +71,7 @@ private final class EditorWindow: NSObject, NSWindowDelegate, NSToolbarDelegate 
         toolbar.allowsUserCustomization = false
         window.toolbar = toolbar
         window.toolbarStyle = .unified
-        window.center()
+        WindowPresenter.center(window)
 
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }

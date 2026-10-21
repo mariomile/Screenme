@@ -160,7 +160,7 @@ struct ToolbarTrailing: View {
             DragThumb(controller: c)
                 .frame(width: 44, height: 30)
 
-            IconButton(symbol: "doc.on.doc", help: "Copy (⌘C)\nPuts the edited image on the clipboard without closing the editor.", enabled: true) { c.copyImage() }
+            IconButton(symbol: "doc.on.doc", help: Prefs[Pref.editorCloseAfterCopy] ? "Copy (⌘C)\nPuts the edited image on the clipboard, saves it and closes the editor." : "Copy (⌘C)\nPuts the edited image on the clipboard without closing the editor.", enabled: true) { c.copyImage() }
             IconButton(symbol: "square.and.arrow.up", help: "Share\nSends the edited image with AirDrop, Messages, Mail and more.", enabled: true) { if let url = c.dragFile() { Share.show(url) } }
 
             Button("Done") { c.save() }

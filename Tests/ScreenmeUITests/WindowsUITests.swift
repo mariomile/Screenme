@@ -30,3 +30,27 @@ final class WindowsUITests: ScreenmeUITestCase {
         }
     }
 }
+
+/// The annotation editor opened after a capture.
+final class EditorUITests: ScreenmeUITestCase {
+    func testEditorOpensOnThePointersScreenAndCopyCanClose() throws {
+        prefs["afterShotOpenEditor"] = "<true/>"
+        prefs["editor.closeAfterCopy"] = "<true/>"
+        launch()
+        run("capture-area", area: CGRect(x: 300, y: 300, width: 400, height: 260))
+        let capture = try XCTUnwrap(waitForCaptures(1).first)
+        let editor = window(capture.lastPathComponent)
+
+        let pointer = NSEvent.mouseLocation
+        let screen = try XCTUnwrap(NSScreen.screens.first { NSMouseInRect(pointer, $0.frame, false) })
+        // XCUI frames are top-left points from the top of the first screen.
+        let top = NSScreen.screens[0].frame.maxY
+        let center = CGPoint(x: editor.frame.midX, y: top - editor.frame.midY)
+        XCTAssertTrue(screen.frame.contains(center), "the editor should open on the screen the pointer is on")
+
+        NSPasteboard.general.clearContents()
+        editor.typeKey("c", modifierFlags: .command)
+        XCTAssertTrue(eventually { NSPasteboard.general.data(forType: .png) != nil }, "the image should be copied")
+        XCTAssertTrue(eventually { !editor.exists }, "the editor should close after copying")
+    }
+}

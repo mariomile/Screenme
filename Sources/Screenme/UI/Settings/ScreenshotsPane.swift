@@ -42,6 +42,10 @@ struct ScreenshotsPane: View {
                 }
             }
 
+            Section("Editor") {
+                PrefToggle("Close editor after copying", Pref.editorCloseAfterCopy, detail: "Copy also saves your edits to the screenshot and closes the editor.")
+            }
+
             Section {
                 PrefToggle("Add watermark", Pref.watermarkEnabled, detail: "On new screenshots and recordings.")
                 if watermarkEnabled {

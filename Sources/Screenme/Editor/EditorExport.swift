@@ -24,25 +24,12 @@ extension EditorController {
 
     /// Done: flattens, overwrites the capture file in place, tells the rest of the app, closes.
     func save() {
-        canvas?.finishTextEditing()
-        if mode.crop != nil { applyCrop() }
-        guard let (image, type) = flatten(for: item.url), let data = encode(image, as: type) else {
-            alert("Screenme could not render the image.")
-            return
-        }
-        do {
-            try data.write(to: item.url, options: .atomic)
-        } catch {
-            alert("Screenme could not save the image: \(error.localizedDescription)")
-            return
-        }
-        markSaved()
-        NotificationCenter.default.post(name: .captureUpdated, object: item.url)
+        guard writeToCapture() else { return }
         if Prefs[Pref.afterShotCopy] { Clipboard.copyImage(at: item.url) }
         window?.close()
     }
 
-    /// Copies the flattened image without closing.
+    /// Copies the flattened image. With "Close editor after copying" it also saves and closes, like Done.
     func copyImage() {
         canvas?.finishTextEditing()
         guard let image = EditorRenderer.flatten(state: state, source: source, opaque: false),
@@ -51,6 +38,26 @@ extension EditorController {
         board.clearContents()
         board.setData(data, forType: .png)
         CaptureAction.copy.confirm()
+        if Prefs[Pref.editorCloseAfterCopy], writeToCapture() { window?.close() }
+    }
+
+    /// Overwrites the capture file with the document and tells the rest of the app. False on failure, after an alert.
+    private func writeToCapture() -> Bool {
+        canvas?.finishTextEditing()
+        if mode.crop != nil { applyCrop() }
+        guard let (image, type) = flatten(for: item.url), let data = encode(image, as: type) else {
+            alert("Screenme could not render the image.")
+            return false
+        }
+        do {
+            try data.write(to: item.url, options: .atomic)
+        } catch {
+            alert("Screenme could not save the image: \(error.localizedDescription)")
+            return false
+        }
+        markSaved()
+        NotificationCenter.default.post(name: .captureUpdated, object: item.url)
+        return true
     }
 
     func saveAs() {
