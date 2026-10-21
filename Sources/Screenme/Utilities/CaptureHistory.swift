@@ -77,7 +77,11 @@ final class CaptureHistory: ObservableObject {
         var kept: [CaptureItem] = []
         for item in items {
             if let cutoff, item.date < cutoff {
-                if isOwnCapture(item.url) { try? FileManager.default.trashItem(at: item.url, resultingItemURL: nil) }
+                if isOwnCapture(item.url) {
+                    try? FileManager.default.trashItem(at: item.url, resultingItemURL: nil)
+                    // A recording's hidden events file goes with it.
+                    if item.kind == .video { try? FileManager.default.trashItem(at: RecordingEvents.sidecarURL(for: item.url), resultingItemURL: nil) }
+                }
                 continue
             }
             if FileManager.default.fileExists(atPath: item.url.path) { kept.append(item) }

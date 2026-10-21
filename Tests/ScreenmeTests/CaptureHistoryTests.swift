@@ -35,6 +35,7 @@ final class CaptureHistoryTests: PrefsSandboxTestCase {
         Prefs[Pref.historyDays] = 30
         let now = Date()
         let old = try file("old.mov", in: captures)
+        let oldEvents = try file(".old.mov.events.json", in: captures)
         let recent = try file("recent.png", in: captures)
         let history = history()
         history.add(CaptureItem(url: old, kind: .video, date: now.addingTimeInterval(-31 * 86_400)))
@@ -44,6 +45,7 @@ final class CaptureHistoryTests: PrefsSandboxTestCase {
 
         XCTAssertEqual(history.items.map(\.url), [recent])
         XCTAssertFalse(FileManager.default.fileExists(atPath: old.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: oldEvents.path), "the events sidecar goes with its recording")
         XCTAssertTrue(FileManager.default.fileExists(atPath: recent.path))
     }
 
