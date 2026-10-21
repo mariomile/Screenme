@@ -121,12 +121,17 @@ final class GIFPaletteBuilder {
 
 /// Writes a GIF89a: one global palette, ordered dithering, and for every frame only the rectangle that changed,
 /// with unchanged pixels left transparent. Frames identical to the previous one only extend its delay.
+/// With an `output` file the bytes stream to it as frames are made, so a long GIF is never held whole in memory.
 final class GIFEncoder {
     private let width: Int
     private let height: Int
     private let palette: GIFPalette
     private let dither: Bool
+    /// Bytes not yet written to `output` (all of them without one).
     private var file = [UInt8]()
+    private let output: FileHandle?
+    private var outputError: Error?
+    private static let flushSize = 1 << 20
     private var previous: [UInt8]?
     private var current: [UInt8]
     private var pending: PendingFrame?
@@ -141,11 +146,12 @@ final class GIFEncoder {
         var time: Double
     }
 
-    init(width: Int, height: Int, palette: GIFPalette, dither: Bool) {
+    init(width: Int, height: Int, palette: GIFPalette, dither: Bool, output: FileHandle? = nil) {
         self.width = width
         self.height = height
         self.palette = palette
         self.dither = dither
+        self.output = output
         current = [UInt8](repeating: 0, count: width * height)
         let matrix = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5]
         bayer = matrix.map { Int((Double($0) - 7.5) * 0.8) }
@@ -208,16 +214,36 @@ final class GIFEncoder {
         previous = current
     }
 
-    /// Finishes the file. The last frame is shown until `endTime`.
+    /// Finishes a GIF made in memory and returns its bytes. The last frame is shown until `endTime`.
     func finish(endTime: Double) -> Data {
         flushPending(until: endTime)
         file.append(0x3B)
         return Data(file)
     }
 
+    /// Finishes a GIF streamed to `output`. The last frame is shown until `endTime`. Throws when a write failed.
+    func finishFile(endTime: Double) throws {
+        flushPending(until: endTime)
+        file.append(0x3B)
+        write()
+        if let outputError { throw outputError }
+    }
+
     // MARK: Frames
 
+    /// Hands the bytes made so far to `output`. The first failure is kept for `finishFile`.
+    private func write() {
+        guard let output, outputError == nil, !file.isEmpty else { return }
+        do {
+            try output.write(contentsOf: file)
+            file.removeAll(keepingCapacity: true)
+        } catch {
+            outputError = error
+        }
+    }
+
     private func flushPending(until next: Double) {
+        defer { if file.count >= Self.flushSize { write() } }
         guard let frame = pending else { return }
         pending = nil
         let origin = originTime ?? 0

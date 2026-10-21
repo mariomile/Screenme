@@ -107,6 +107,28 @@ final class GIFEncoderTests: XCTestCase {
         XCTAssertGreaterThan(rest.0, 200, "unchanged pixels must show the previous frame through the transparent index")
     }
 
+    func testStreamingToAFileWritesTheSameBytes() throws {
+        let frames = [(frame(red), 0.0), (frame(red, block: blue), 0.2), (frame(green), 0.3)]
+        let inMemory = encode(frames, endTime: 0.5)
+
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).gif")
+        FileManager.default.createFile(atPath: url.path, contents: nil)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let handle = try FileHandle(forWritingTo: url)
+        let builder = GIFPaletteBuilder()
+        for (pixels, _) in frames {
+            pixels.withUnsafeBufferPointer { builder.add($0.baseAddress!, width: width, height: height, bytesPerRow: width * 4) }
+        }
+        let encoder = GIFEncoder(width: width, height: height, palette: builder.build(colors: 64), dither: false, output: handle)
+        for (pixels, time) in frames {
+            pixels.withUnsafeBufferPointer { encoder.add($0.baseAddress!, bytesPerRow: width * 4, at: time) }
+        }
+        try encoder.finishFile(endTime: 0.5)
+        try handle.close()
+
+        XCTAssertEqual(try Data(contentsOf: url), inMemory)
+    }
+
     func testPaletteHonoursRequestedColourCount() {
         let builder = GIFPaletteBuilder()
         let pixels = frame(red, block: blue)
