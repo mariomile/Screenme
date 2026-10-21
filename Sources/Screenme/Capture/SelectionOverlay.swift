@@ -4,8 +4,8 @@ import ScreenCaptureKit
 
 enum SelectionMode { case screenshot, window, recording, scrolling, text }
 
-/// What the picker returns. `frozenImage` is set when the screen was frozen during selection:
-/// it is already cropped to the target and should be used instead of a fresh capture.
+/// What the picker returns. `frozenImage` is set when the screen was frozen during an area selection:
+/// it is already cropped to the target and should be used instead of a fresh capture. A window is always captured fresh.
 struct SelectionResult {
     let target: CaptureTarget
     let frozenImage: CGImage?
@@ -32,6 +32,10 @@ final class SelectionSession {
 
     private var windowMode: Bool
     private var snapshot = ScreenSnapshot()
+    /// False until the window list is in `snapshot` (it arrives after the picker shows when the screen is not frozen).
+    private var windowsLoaded = false
+    /// A window click that came before the window list: picked as soon as the list arrives.
+    private var pendingWindowClick: CGPoint?
     private var panels: [OverlayPanel] = []
     private var views: [OverlayView] = []
 
@@ -70,6 +74,7 @@ final class SelectionSession {
         // A frozen picker needs the picture before it can show. Otherwise show at once and fill in later.
         if freeze {
             snapshot = await SnapshotLoader.load(screens: screens, images: true, showsCursor: Prefs[Pref.showCursorInShots])
+            windowsLoaded = true
         }
         present(screens)
         if !freeze {
@@ -98,6 +103,12 @@ final class SelectionSession {
         let loaded = await SnapshotLoader.load(screens: screens, images: showMagnifier, showsCursor: false)
         guard !finished else { return }
         snapshot = loaded
+        windowsLoaded = true
+        if let click = pendingWindowClick {
+            pendingWindowClick = nil
+            pickWindow(at: click)
+            if finished { return }
+        }
         for view in views { view.source = loaded.images[view.screen.displayID] }
         refresh()
     }
@@ -237,9 +248,7 @@ final class SelectionSession {
 
     private func mouseUp() {
         if windowMode {
-            if let entry = window(at: pointer) {
-                finish(SelectionResult(target: .window(entry.window), frozenImage: frozenImage(forWindow: entry.frame)))
-            }
+            if windowsLoaded { pickWindow(at: pointer) } else { pendingWindowClick = pointer }
             return
         }
         guard dragging, let screen = dragScreen else { return }
@@ -354,15 +363,11 @@ final class SelectionSession {
         return image.cropped(to: rect, on: screen, retina: retina)
     }
 
-    private func frozenImage(forWindow frame: CGRect) -> CGImage? {
-        guard freeze else { return nil }
-        // The display that holds most of the window.
-        let best = NSScreen.screens.max { lhs, rhs in
-            let a = lhs.frame.intersection(frame), b = rhs.frame.intersection(frame)
-            return (a.isNull ? 0 : a.width * a.height) < (b.isNull ? 0 : b.width * b.height)
-        }
-        guard let screen = best, let image = snapshot.images[screen.displayID] else { return nil }
-        return image.cropped(to: frame, on: screen, retina: retina)
+    /// A window is never cut from the frozen screen, which would hold the windows overlapping it and lose its shadow:
+    /// the capture takes the window on its own (`SCContentFilter(desktopIndependentWindow:)`), frozen or not.
+    private func pickWindow(at point: CGPoint) {
+        guard let entry = window(at: point) else { return }
+        finish(SelectionResult(target: .window(entry.window), frozenImage: nil))
     }
 
     // MARK: Drawing
