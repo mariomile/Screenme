@@ -41,5 +41,7 @@
 	<string>MIT License</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Screenme records your voice with screen recordings when you turn the microphone on.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Screenme transcribes what you say in a recording, on this Mac, when you make a Bug Report.</string>
 </dict>
 </plist>

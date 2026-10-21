@@ -85,6 +85,8 @@ final class RecordingController {
         guard let session = takeRunning() else { return nil }
         let size = session.size
         guard let url = await end(session, keep: true) else { return nil }
+        // The recorded app and window, for Bug Report.
+        CaptureContexts.record(session.target, for: url)
         if session.settings.format == .gif { return await convertToGIF(url, size: size) }
         return CaptureItem(url: url, kind: .video)
     }
