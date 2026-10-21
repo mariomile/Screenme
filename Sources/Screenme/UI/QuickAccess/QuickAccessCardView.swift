@@ -104,7 +104,8 @@ struct QuickAccessCardView: View {
 
             VStack {
                 HStack {
-                    HUDCircle(symbol: "xmark", label: "Close", help: "Close\nHides this card. The capture stays in History.") { card?.dismiss() }
+                    SymbolButton(symbol: "xmark", help: "Close\nHides this card. The capture stays in History.", style: .circle,
+                                 label: "Close") { card?.dismiss() }
                     Spacer()
                     circle(.copyForAI)
                     circle(.reportForAI)
@@ -124,65 +125,18 @@ struct QuickAccessCardView: View {
     }
 
     private func pill(_ action: CaptureAction) -> some View {
-        HUDPill(title: action.title(for: model.item.kind), symbol: action.symbol(for: model.item.kind),
-                help: action.tooltip(for: model.item.kind)) { card?.perform(action) }
+        Button { card?.perform(action) } label: {
+            Label(action.title(for: model.item.kind), systemImage: action.symbol(for: model.item.kind))
+        }
+        .buttonStyle(HUDButtonStyle(.pill))
+        .help(action.tooltip(for: model.item.kind))
     }
 
     @ViewBuilder
     private func circle(_ action: CaptureAction) -> some View {
         if action.isAvailable(for: model.item.kind) {
-            HUDCircle(symbol: action.symbol(for: model.item.kind), label: action.title(for: model.item.kind),
-                      help: action.tooltip(for: model.item.kind)) { card?.perform(action) }
+            SymbolButton(symbol: action.symbol(for: model.item.kind), help: action.tooltip(for: model.item.kind), style: .circle,
+                         label: action.title(for: model.item.kind)) { card?.perform(action) }
         }
-    }
-}
-
-private struct HUDPill: View {
-    let title: String
-    let symbol: String
-    let help: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Label(title, systemImage: symbol)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.black)
-                .frame(width: 84, height: 28)
-                .background(.white, in: Capsule())
-                .shadow(color: .black.opacity(0.25), radius: 3, y: 1)
-        }
-        .buttonStyle(HUDPressStyle())
-        .help(help)
-    }
-}
-
-private struct HUDCircle: View {
-    let symbol: String
-    let label: String
-    let help: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(width: 24, height: 24)
-                .background(.black.opacity(0.55), in: Circle())
-                .overlay(Circle().strokeBorder(.white.opacity(0.25), lineWidth: 0.5))
-        }
-        .buttonStyle(HUDPressStyle())
-        .help(help)
-        .accessibilityLabel(label)
-    }
-}
-
-private struct HUDPressStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed ? 0.93 : 1)
-            .brightness(configuration.isPressed ? -0.08 : 0)
-            .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
     }
 }

@@ -68,10 +68,10 @@ private struct SelectionActions: View {
 
     var body: some View {
         HStack(spacing: 2) {
-            IconButton(symbol: "square.3.layers.3d.top.filled", help: "Bring forward (⌘])\nPuts the selected item above the ones it overlaps.") { c.arrange(.forward) }
-            IconButton(symbol: "square.3.layers.3d.bottom.filled", help: "Send backward (⌘[)\nPuts the selected item below the ones it overlaps.") { c.arrange(.backward) }
-            IconButton(symbol: "plus.square.on.square", help: "Duplicate (⌘D)\nMakes a copy of the selected item.") { c.duplicateSelection() }
-            IconButton(symbol: "trash", help: "Delete (⌫)\nRemoves the selected item.") { c.deleteSelection() }
+            SymbolButton(symbol: "square.3.layers.3d.top.filled", help: "Bring forward (⌘])\nPuts the selected item above the ones it overlaps.") { c.arrange(.forward) }
+            SymbolButton(symbol: "square.3.layers.3d.bottom.filled", help: "Send backward (⌘[)\nPuts the selected item below the ones it overlaps.") { c.arrange(.backward) }
+            SymbolButton(symbol: "plus.square.on.square", help: "Duplicate (⌘D)\nMakes a copy of the selected item.") { c.duplicateSelection() }
+            SymbolButton(symbol: "trash", help: "Delete (⌫)\nRemoves the selected item.") { c.deleteSelection() }
         }
     }
 }

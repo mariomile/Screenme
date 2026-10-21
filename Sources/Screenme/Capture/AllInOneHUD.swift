@@ -192,7 +192,7 @@ private struct HUDBarView: View {
                         .padding(.horizontal, 5)
                 }
                 Button { model.choose(index) } label: { HUDButtonLabel(item: item) }
-                    .buttonStyle(HUDButtonStyle(focused: model.focus == index))
+                    .buttonStyle(HUDButtonStyle(.tile(focused: model.focus == index)))
                     .help(item.tooltip)
                     .onHover { inside in if inside { model.focus = index } }
             }
@@ -227,19 +227,5 @@ private struct HUDButtonLabel: View {
         }
         .frame(width: 82, height: 64)
         .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-}
-
-private struct HUDButtonStyle: ButtonStyle {
-    let focused: Bool
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Color.primary.opacity(configuration.isPressed ? 0.18 : focused ? 0.09 : 0))
-            )
-            .animation(.easeOut(duration: 0.12), value: focused)
-            .animation(.easeOut(duration: 0.08), value: configuration.isPressed)
     }
 }
