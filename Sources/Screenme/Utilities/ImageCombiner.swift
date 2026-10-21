@@ -21,23 +21,22 @@ enum ImageCombiner {
         case .sideBySide: CGSize(width: sizes.map(\.width).reduce(0, +), height: sizes[0].height)
         case .stacked: CGSize(width: sizes[0].width, height: sizes.map(\.height).reduce(0, +))
         }
-        guard let context = CGContext(data: nil, width: Int(total.width.rounded()), height: Int(total.height.rounded()),
-                                      bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
-                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
-        context.interpolationQuality = .high
-        // Left to right, or top to bottom in a bottom-left origin context.
-        var cursor: CGFloat = layout == .stacked ? total.height : 0
-        for (image, size) in zip(images, sizes) {
-            switch layout {
-            case .sideBySide:
-                context.draw(image, in: CGRect(x: cursor, y: 0, width: size.width, height: size.height))
-                cursor += size.width
-            case .stacked:
-                cursor -= size.height
-                context.draw(image, in: CGRect(x: 0, y: cursor, width: size.width, height: size.height))
+        return CGImage.drawn(width: Int(total.width.rounded()), height: Int(total.height.rounded()),
+                             colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!) { context in
+            context.interpolationQuality = .high
+            // Left to right, or top to bottom in a bottom-left origin context.
+            var cursor: CGFloat = layout == .stacked ? total.height : 0
+            for (image, size) in zip(images, sizes) {
+                switch layout {
+                case .sideBySide:
+                    context.draw(image, in: CGRect(x: cursor, y: 0, width: size.width, height: size.height))
+                    cursor += size.width
+                case .stacked:
+                    cursor -= size.height
+                    context.draw(image, in: CGRect(x: 0, y: cursor, width: size.width, height: size.height))
+                }
             }
         }
-        return context.makeImage()
     }
 
     /// Combines `items`, oldest first, into a new capture and opens it in the editor.
@@ -49,7 +48,7 @@ enum ImageCombiner {
             return
         }
         let item = CaptureItem(url: url, kind: .image)
-        CaptureHistory.shared.add(item)
+        CaptureCoordinator.shared.record(item)
         AnnotationEditor.open(item)
     }
 }

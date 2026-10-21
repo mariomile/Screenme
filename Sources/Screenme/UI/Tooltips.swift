@@ -40,6 +40,7 @@ extension CaptureAction {
         case .save: return "Saves a copy to your save folder (Settings > General)."
         case .saveAs: return "Saves a copy where you choose, with the name you choose."
         case .reveal: return "Shows the file in Finder."
+        case .share: return "Sends it with AirDrop, Messages, Mail and more."
         case .edit: return kind == .image ? "Opens the editor: arrows, text, blur, highlights, crop and backgrounds." : "Opens the video editor: trim, mute, and export as video or GIF."
         case .pin: return "Keeps the image floating above all windows, as a reference while you work."
         case .trash: return "Moves the file to the Trash and removes it from History."

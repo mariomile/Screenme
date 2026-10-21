@@ -21,6 +21,7 @@ enum TranslateError: LocalizedError {
     case sameLanguage(String)
     case unsupported(from: String, to: String)
     case notInstalled(from: String, to: String)
+    case timedOut
 
     var errorDescription: String? {
         switch self {
@@ -28,6 +29,7 @@ enum TranslateError: LocalizedError {
         case .sameLanguage(let name): "The text is already in \(name)."
         case .unsupported(let from, let to): "Translating from \(from) to \(to) is not supported."
         case .notInstalled(let from, let to): "\(from) and \(to) are not downloaded for translation yet."
+        case .timedOut: "The translation took too long and was stopped."
         }
     }
 
@@ -37,6 +39,8 @@ enum TranslateError: LocalizedError {
             "Download both in System Settings > General > Language & Region > Translation Languages, then try again."
         case .unsupported:
             "Pick another language under Translate into in Screenme Settings > Text Recognition, or check System Settings > General > Language & Region > Translation Languages."
+        case .timedOut:
+            "Try again."
         case .unknownLanguage, .sameLanguage:
             nil
         }
@@ -123,20 +127,41 @@ enum TextTranslator {
 // MARK: - macOS 15
 
 /// Before macOS 26 a `TranslationSession` only comes from SwiftUI's `.translationTask`, so a tiny invisible
-/// window hosts one for the length of a single translation.
+/// window hosts one for the length of a single translation. A session that never answers gives up after
+/// 30 seconds, so the capture coordinator never stays busy.
 @MainActor
 private enum HiddenTranslationHost {
     static func translate(_ text: String, from source: Locale.Language, to target: Locale.Language) async throws -> String {
         let panel = FloatingPanel(frame: CGRect(x: 0, y: 0, width: 1, height: 1), level: .normal, hasShadow: false, ignoresMouse: true)
         defer { panel.orderOut(nil) }
         return try await withCheckedThrowingContinuation { continuation in
+            let reply = TranslationReply(continuation)
             let view = TranslationTaskView(configuration: TranslationSession.Configuration(source: source, target: target), text: text) { result in
-                continuation.resume(with: result)
+                reply.send(result)
             }
             panel.contentView = NSHostingView(rootView: view)
             panel.alphaValue = 0
             panel.orderFrontRegardless()
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(30))
+                reply.send(.failure(TranslateError.timedOut))
+            }
         }
+    }
+}
+
+/// Resumes the translation's continuation once: with the first result, the translation or the timeout.
+@MainActor
+private final class TranslationReply {
+    private var continuation: CheckedContinuation<String, Error>?
+
+    init(_ continuation: CheckedContinuation<String, Error>) {
+        self.continuation = continuation
+    }
+
+    func send(_ result: Result<String, Error>) {
+        continuation?.resume(with: result)
+        continuation = nil
     }
 }
 

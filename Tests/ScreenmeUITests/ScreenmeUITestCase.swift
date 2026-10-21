@@ -48,6 +48,16 @@ class ScreenmeUITestCase: XCTestCase {
         "recordingSystemAudio": "<false/>",
         "recordingHideDesktopIcons": "<false/>",
         "selfTimerSeconds": "<integer>3</integer>",
+        "showMenuBarIcon": "<true/>",
+        "retinaResolution": "<true/>",
+        "windowShadow": "<true/>",
+        "showCursorInShots": "<false/>",
+        "translateTarget": "",
+        "ocrLanguage": "",
+        "quickAccessSize": "medium",
+        "quickAccessAutoCloseSaves": "<false/>",
+        "recordingHideNotifications": "<true/>",
+        "colorFormat": "hex",
     ]
 
     override func setUpWithError() throws {
@@ -159,6 +169,17 @@ class ScreenmeUITestCase: XCTestCase {
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         }
         return condition()
+    }
+
+    /// Waits for text on the clipboard and returns it; empty when none arrived in time.
+    /// Clear the clipboard before the action that should fill it.
+    func waitForClipboardText(timeout: TimeInterval = 8) -> String {
+        var text = ""
+        eventually(timeout: timeout) {
+            text = NSPasteboard.general.string(forType: .string) ?? ""
+            return !text.isEmpty
+        }
+        return text
     }
 
     // MARK: Test window

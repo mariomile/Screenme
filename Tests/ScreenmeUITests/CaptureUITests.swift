@@ -8,7 +8,11 @@ final class CaptureUITests: ScreenmeUITestCase {
         NSPasteboard.general.clearContents()
         run("capture-fullscreen")
         let file = waitForCaptures(1)[0]
-        XCTAssertEqual(pixelSize(file), CGSize(width: screenFrame.width * backingScale, height: screenFrame.height * backingScale))
+        // Fullscreen captures the screen under the pointer, as the app picks it.
+        let pointer = NSEvent.mouseLocation
+        let screen = NSScreen.screens.first { $0.frame.insetBy(dx: -0.5, dy: -0.5).contains(pointer) } ?? NSScreen.screens[0]
+        XCTAssertEqual(pixelSize(file), CGSize(width: screen.frame.width * screen.backingScaleFactor,
+                                               height: screen.frame.height * screen.backingScaleFactor))
         XCTAssertTrue(eventually { NSPasteboard.general.availableType(from: [.png, .tiff]) != nil }, "the capture should be on the clipboard")
         XCTAssertTrue(app.dialogs.firstMatch.waitForExistence(timeout: 5), "a Quick Access card should appear")
     }
@@ -26,8 +30,9 @@ final class CaptureUITests: ScreenmeUITestCase {
 
     func testEscapeCancelsTheSelection() {
         launch()
+        let before = app.windows.count + app.dialogs.count
         run("capture-area")
-        sleep(1)
+        XCTAssertTrue(eventually { self.app.windows.count + self.app.dialogs.count > before }, "the picker should open")
         app.typeKey(.escape, modifierFlags: [])
         sleep(1)
         XCTAssertTrue(newCaptures().isEmpty)
@@ -50,8 +55,8 @@ final class CaptureUITests: ScreenmeUITestCase {
         launch()
         NSPasteboard.general.clearContents()
         run("capture-text", area: window)
-        var text = ""
-        XCTAssertTrue(eventually { text = NSPasteboard.general.string(forType: .string) ?? ""; return !text.isEmpty })
+        let text = waitForClipboardText()
+        XCTAssertFalse(text.isEmpty, "the text should be copied")
         XCTAssertTrue(text.contains("SCREENME OCR CHECK 4821"), "OCR read: \(text)")
         XCTAssertTrue(text.lowercased().contains("quick brown fox"), "OCR read: \(text)")
         XCTAssertTrue(newCaptures().isEmpty, "text capture keeps no file")

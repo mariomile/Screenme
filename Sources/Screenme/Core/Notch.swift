@@ -18,16 +18,13 @@ enum Notch {
         let captured = target.cocoaFrame
         let band = CGRect(x: screen.frame.minX, y: screen.frame.maxY - menuBarHeight, width: screen.frame.width, height: menuBarHeight)
             .intersection(captured)
-        guard !band.isNull, !band.isEmpty, captured.width > 0,
-              let context = CGContext(data: nil, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: 0,
-                                      space: image.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!,
-                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return image }
+        guard !band.isNull, !band.isEmpty, captured.width > 0 else { return image }
         let scale = CGFloat(image.width) / captured.width
-        context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
-        context.setFillColor(.black)
-        // Both are bottom-left origin: Cocoa screen points and the bitmap context.
-        context.fill(CGRect(x: (band.minX - captured.minX) * scale, y: (band.minY - captured.minY) * scale,
-                            width: band.width * scale, height: band.height * scale).integral)
-        return context.makeImage() ?? image
+        return image.overdrawn { context, _ in
+            context.setFillColor(.black)
+            // Both are bottom-left origin: Cocoa screen points and the bitmap context.
+            context.fill(CGRect(x: (band.minX - captured.minX) * scale, y: (band.minY - captured.minY) * scale,
+                                width: band.width * scale, height: band.height * scale).integral)
+        }
     }
 }

@@ -26,7 +26,6 @@ struct ScreenshotsPane: View {
                     }
                 }
                 PrefToggle("Save at Retina resolution", Pref.retinaResolution, detail: "Turn off to save at 1x, which makes smaller files.")
-                SaveFolderRow()
             }
 
             Section("Capture") {

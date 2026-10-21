@@ -93,10 +93,11 @@ final class QuickAccessCard: NSObject {
 
     // MARK: Actions from the views
 
-    /// Runs `action` on the capture. The card goes away once it did something, except Show in Finder.
+    /// Runs `action` on the capture. The card goes away once it did something, except Show in Finder,
+    /// and Share, whose menu opens from the card.
     func perform(_ action: CaptureAction) {
         Task {
-            guard await action.perform(model.item), action != .reveal else { return }
+            guard await action.perform(model.item), action != .reveal, action != .share else { return }
             owner.dismiss(self)
         }
     }
@@ -211,7 +212,11 @@ final class QuickAccessCard: NSObject {
         let work = DispatchWorkItem { [weak self] in
             MainActor.assumeIsolated {
                 guard let self, !self.model.hovering, !self.model.dragging else { return }
-                if Prefs[Pref.quickAccessAutoCloseSaves] { _ = try? Storage.save(self.model.item.url) }
+                // Not a second copy of a capture already saved after capture.
+                if Prefs[Pref.quickAccessAutoCloseSaves] {
+                    let url = self.model.item.url
+                    _ = Storage.savedCopy(of: url) ?? (try? Storage.save(url))
+                }
                 self.owner.dismiss(self)
             }
         }

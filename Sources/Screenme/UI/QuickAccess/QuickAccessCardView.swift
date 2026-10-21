@@ -93,8 +93,7 @@ struct QuickAccessCardView: View {
                 HStack {
                     circle(.edit)
                     Spacer()
-                    HUDCircle(symbol: "square.and.arrow.up", label: "Share",
-                              help: "Share\nSends it with AirDrop, Messages, Mail and more.") { Share.show(model.item.url) }
+                    circle(.share)
                 }
             }
             .padding(8)
