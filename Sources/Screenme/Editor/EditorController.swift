@@ -21,6 +21,9 @@ final class EditorController: ObservableObject {
         didSet { canvas?.documentChanged() }
     }
     private var publishScheduled = false
+    /// Tool styles and the background changed by sliders since the last commit, saved to the preferences at commit.
+    private var unsavedStyles: Set<ToolKind> = []
+    private var backgroundUnsaved = false
     private(set) var savedState: EditState
     private var history = UndoHistory()
     private var annotationClipboard: [Annotation] = []
@@ -105,7 +108,20 @@ final class EditorController: ObservableObject {
     /// Makes everything since `before` one undo step (see `UndoHistory.commit`).
     func commit(since before: Checkpoint, coalesce key: String? = nil) {
         history.commit(from: before, to: state, coalesce: key)
+        saveRemembered()
         notify()
+    }
+
+    /// Writes the styles and background the user changed to the preferences, once per commit rather than per slider tick.
+    private func saveRemembered() {
+        for kind in unsavedStyles {
+            if let style = styles[kind] { EditorStore.save(style: style, for: kind) }
+        }
+        unsavedStyles.removeAll()
+        if backgroundUnsaved {
+            EditorStore.save(background: state.background)
+            backgroundUnsaved = false
+        }
     }
 
     /// A one-shot edit: one undo step.
@@ -192,7 +208,7 @@ final class EditorController: ObservableObject {
         var remembered = contextStyle ?? kind.traits.style
         change(&remembered)
         styles[kind] = remembered
-        EditorStore.save(style: remembered, for: kind)
+        unsavedStyles.insert(kind)
         guard !ids.isEmpty else { return }
         update { s in
             for i in s.annotations.indices where ids.contains(s.annotations[i].id) {
@@ -390,7 +406,7 @@ final class EditorController: ObservableObject {
     func applyBackground(_ change: (inout BackgroundSettings) -> Void) {
         update { change(&$0.background) }
         publishSoon()
-        EditorStore.save(background: state.background)
+        backgroundUnsaved = true
     }
 
     /// A background change as one undo step.

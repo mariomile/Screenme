@@ -27,4 +27,18 @@ final class EditorPublishingTests: PrefsSandboxTestCase {
         controller.redo()
         XCTAssertEqual(published, 3)
     }
+
+    @MainActor
+    func testSliderStylesAreSavedAtCommitNotPerTick() throws {
+        let image = try XCTUnwrap(CGImage.drawn(width: 40, height: 30, colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!) { _ in })
+        let controller = EditorController(item: CaptureItem(url: URL(fileURLWithPath: "/tmp/editor-test.png"), kind: .image),
+                                          source: ImageSource(image: image, unit: 1))
+        controller.choose(.draw(.arrow))
+        let before = controller.checkpoint()
+        for step in 1...10 { controller.applyStyle { $0.opacity = 1 - Double(step) / 20 } }
+        XCTAssertEqual(EditorStore.style(for: .arrow).opacity, 1)
+
+        controller.commit(since: before)
+        XCTAssertEqual(EditorStore.style(for: .arrow).opacity, 0.5, accuracy: 0.0001)
+    }
 }

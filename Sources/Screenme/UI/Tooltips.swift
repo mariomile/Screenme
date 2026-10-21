@@ -24,8 +24,8 @@ extension ShortcutAction {
     }
 
     /// Title, shortcut and what it does, for a tooltip.
-    var tooltip: String {
-        let shortcut = ShortcutStore.combo(for: self).map { "  \($0.display)" } ?? ""
+    @MainActor var tooltip: String {
+        let shortcut = ShortcutsModel.shared.combo(for: self).map { "  \($0.display)" } ?? ""
         return "\(title)\(shortcut)\n\(help)"
     }
 }

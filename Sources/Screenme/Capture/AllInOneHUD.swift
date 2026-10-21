@@ -36,7 +36,7 @@ private struct HUDItem: Identifiable {
     let startsGroup: Bool
     var id: String { action.rawValue }
 
-    static func all() -> [HUDItem] {
+    @MainActor static func all() -> [HUDItem] {
         let entries: [(ShortcutAction, String, Bool)] = [
             (.captureArea, "Area", false),
             (.captureWindow, "Window", false),
