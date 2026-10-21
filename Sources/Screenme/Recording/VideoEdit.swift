@@ -19,6 +19,9 @@ struct VideoSource {
         return CursorPath(track: track, width: events.width, height: events.height)
     }
 
+    /// Recorded with Smooth cursor: the cursor is not in the picture and the editor can draw it.
+    var cursorHidden: Bool { events?.cursor?.hidden == true }
+
     /// Video pixels per point of the recorded screen: 2 on a Retina display.
     var pixelsPerPoint: CGFloat {
         if let events, events.width > 0 { return size.width / events.width }
@@ -32,9 +35,15 @@ struct VideoEdit: Equatable {
     var zooms: [ZoomSegment] = []
     /// How far automatic zooms go in.
     var zoomStrength = 1.8
+    var cursor = CursorStyle()
 
     /// True when the output is the recording's own picture, only trimmed or scaled.
-    var isPlain: Bool { !canvas.enabled && zooms.isEmpty }
+    func isPlain(for source: VideoSource) -> Bool { !canvas.enabled && zooms.isEmpty && !drawsCursor(for: source) }
+
+    /// The cursor is drawn when the recording left it out (Smooth cursor) and recorded where it went.
+    func drawsCursor(for source: VideoSource) -> Bool {
+        cursor.show && source.cursorHidden && source.cursor != nil
+    }
 
     /// The canvas the video sits on, in video pixels. Without a background, the video itself.
     func layout(for source: VideoSource) -> Layout {
@@ -62,7 +71,11 @@ struct VideoEdit: Equatable {
         }
         let camera = zoomed && !zooms.isEmpty
             ? CameraPath(segments: zooms, strength: zoomStrength, cursor: source.cursor, duration: duration) : nil
+        var overlay: CursorOverlay?
+        if drawsCursor(for: source), let path = source.cursor, let track = source.events?.cursor {
+            overlay = CursorOverlay(path: path, track: track, style: cursor, pixelsPerPoint: source.pixelsPerPoint)
+        }
         return FrameRenderer(renderSize: renderSize, timeOffset: timeOffset, speed: speed, contentRect: content,
-                             background: background, mask: mask, camera: camera)
+                             background: background, mask: mask, camera: camera, cursor: overlay)
     }
 }

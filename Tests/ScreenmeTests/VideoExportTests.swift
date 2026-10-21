@@ -75,8 +75,9 @@ final class VideoExportTests: XCTestCase {
     }
 }
 
-/// The renderer the timing test exports with: a gradient background with padding, corners and shadow, and
-/// an automatic zoom every 6 seconds following a cursor that circles the screen.
+/// The renderer the timing test exports with: a gradient background with padding, corners and shadow,
+/// an automatic zoom every 6 seconds following a cursor that circles the screen, and that cursor drawn smooth
+/// with its click highlights.
 @MainActor
 enum TimingFixture {
     static func renderer(sourceSize: CGSize, duration: Double) -> FrameRenderer {
@@ -91,6 +92,8 @@ enum TimingFixture {
             clicks.append(.click(at: CGPoint(x: points.width * (0.5 + 0.35 * cos(t)), y: points.height * (0.5 + 0.35 * sin(t))),
                                  right: false, time: t))
         }
+        track.down = clicks.map(\.time)
+        track.up = clicks.map { $0.time + 0.2 }
         var events = RecordingEvents(width: points.width, height: points.height, events: clicks)
         events.cursor = track
         let source = VideoSource(size: sourceSize, events: events)

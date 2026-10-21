@@ -19,9 +19,12 @@ final class FrameRenderer: @unchecked Sendable {
     let mask: CIImage?
     /// Zooms; nil shows the whole video all along.
     let camera: CameraPath?
+    /// The smooth cursor, drawn on the recording before the zoom so it zooms with it.
+    let cursor: CursorOverlay?
 
     init(renderSize: CGSize, timeOffset: Double = 0, speed: Double = 1, contentRect: CGRect? = nil,
-         background: CIImage? = nil, mask: CIImage? = nil, camera: CameraPath? = nil) {
+         background: CIImage? = nil, mask: CIImage? = nil, camera: CameraPath? = nil, cursor: CursorOverlay? = nil) {
+        self.cursor = cursor
         self.renderSize = renderSize
         self.timeOffset = timeOffset
         self.speed = speed
@@ -47,7 +50,8 @@ final class FrameRenderer: @unchecked Sendable {
         let transform = CGAffineTransform(translationX: -visible.minX, y: -visible.minY)
             .concatenating(CGAffineTransform(scaleX: contentRect.width / visible.width, y: contentRect.height / visible.height))
             .concatenating(CGAffineTransform(translationX: contentRect.minX, y: contentRect.minY))
-        let video = source.clampedToExtent().transformed(by: transform, highQualityDownsample: true).cropped(to: contentRect)
+        let picture = cursor?.draw(over: source, at: time) ?? source
+        let video = picture.clampedToExtent().transformed(by: transform, highQualityDownsample: true).cropped(to: contentRect)
         guard let background else { return video }
         guard let mask else { return video.composited(over: background) }
         return video.applyingFilter("CIBlendWithMask", parameters: [kCIInputBackgroundImageKey: background, kCIInputMaskImageKey: mask])

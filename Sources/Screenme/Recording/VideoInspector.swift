@@ -10,11 +10,13 @@ struct VideoInspector: View {
     enum Tab: String, CaseIterable, Identifiable {
         case background = "Background"
         case zoom = "Zoom"
+        case cursor = "Cursor"
         var id: String { rawValue }
 
         var help: String {
             switch self {
             case .background: "Background\nPuts the video on a gradient, color, wallpaper or image, with padding, rounded corners and a shadow."
+            case .cursor: "Cursor\nDraws a smooth cursor with click highlights, for recordings made with Smooth cursor."
             case .zoom: "Zoom\nZooms in on your clicks, or on regions you pick, and back out."
             }
         }
@@ -37,6 +39,7 @@ struct VideoInspector: View {
                     switch tab {
                     case .background: BackgroundControls(model: model)
                     case .zoom: VideoZoomControls(model: model)
+                    case .cursor: CursorControls(model: model)
                     }
                 }
                 .padding(.vertical, 8)
@@ -130,6 +133,47 @@ private struct VideoZoomControls: View {
             Button("Remove All", systemImage: "trash") { model.removeAllZooms() }
                 .disabled(model.edit.zooms.isEmpty)
                 .help("Remove All Zooms\nDeletes every zoom and turns Auto zoom off.")
+        }
+        .controlSize(.small)
+    }
+}
+
+// MARK: - Cursor
+
+private struct CursorControls: View {
+    @ObservedObject var model: VideoEditorModel
+
+    private var style: Binding<CursorStyle> { $model.edit.cursor }
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Group {
+                Toggle("Smooth cursor", isOn: style.show)
+                    .toggleStyle(.switch)
+                    .help("Smooth cursor\nDraws the cursor along a smoothed path of where it went. Off leaves the video without a cursor.")
+                HStack(spacing: 6) {
+                    Text("Size").font(.system(size: 11)).foregroundStyle(.secondary)
+                    Slider(value: style.size, in: CursorStyle.sizeRange).frame(width: 100)
+                    Text(String(format: "%.1fx", model.edit.cursor.size))
+                        .font(.system(size: 11).monospacedDigit()).foregroundStyle(.secondary).frame(width: 30, alignment: .leading)
+                }
+                .help("Size\nHow big the cursor is, from its size on screen (1x) to three times that.")
+                .disabled(!model.edit.cursor.show)
+                Toggle("Click highlight", isOn: style.clickHighlight)
+                    .help("Click highlight\nA yellow ring that pops on each click, like Highlight clicks while recording.")
+                    .disabled(!model.edit.cursor.show)
+                Toggle("Hide when idle", isOn: style.hideWhenIdle)
+                    .help("Hide when idle\nFades the cursor out when it rests for 2 seconds, and back in when it moves.")
+                    .disabled(!model.edit.cursor.show)
+            }
+            .disabled(!model.canDrawCursor)
+
+            if !model.canDrawCursor {
+                Text("The cursor is part of this recording. Turn on Settings > Recording > Smooth cursor before recording to edit it here.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
+            }
         }
         .controlSize(.small)
     }

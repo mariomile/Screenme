@@ -53,6 +53,7 @@ final class VideoEditorModel: ObservableObject {
             guard edit != oldValue else { return }
             if edit.canvas != oldValue.canvas { VideoCanvas.saved = edit.canvas }
             if edit.zoomStrength != oldValue.zoomStrength { Prefs[Pref.videoZoomStrength] = edit.zoomStrength }
+            if edit.cursor != oldValue.cursor { CursorStyle.saved = edit.cursor }
             updatePreview()
         }
     }
@@ -81,6 +82,7 @@ final class VideoEditorModel: ObservableObject {
         cursorPath = VideoSource.cursorPath(of: events)
         asset = AVURLAsset(url: item.url)
         edit.canvas = VideoCanvas.saved
+        edit.cursor = CursorStyle.saved
         edit.zoomStrength = min(max(Prefs[Pref.videoZoomStrength], AutoZoom.strengthRange.lowerBound), AutoZoom.strengthRange.upperBound)
         player.replaceCurrentItem(with: AVPlayerItem(asset: asset))
         player.actionAtItemEnd = .pause
@@ -232,7 +234,7 @@ final class VideoEditorModel: ObservableObject {
     /// True when the output would be a byte-for-byte copy of the recording.
     private var isUnmodified: Bool {
         format == .mp4 && trimStart <= 0.001 && trimEnd >= duration - 0.001 && resolution == .original
-            && (!mute || !hasAudio) && quality == .high && codec == .h264 && edit.isPlain
+            && (!mute || !hasAudio) && quality == .high && codec == .h264 && edit.isPlain(for: source)
     }
 
     enum Action {
@@ -334,6 +336,9 @@ final class VideoEditorModel: ObservableObject {
         let content = layout.contentRect
         return CGRect(x: origin.x + content.minX * k, y: origin.y + content.minY * k, width: content.width * k, height: content.height * k)
     }
+
+    /// Recorded with Smooth cursor, so the editor draws the cursor. Otherwise it is in the picture already.
+    var canDrawCursor: Bool { events?.cursor?.hidden == true && cursorPath != nil }
 
     // MARK: Zoom
 
