@@ -4,7 +4,7 @@ import SwiftUI
 /// What the user can do with a finished capture, from Quick Access, History, pins and the editors.
 /// Every surface takes its titles, symbols, availability and confirmation toasts from here.
 enum CaptureAction: CaseIterable {
-    case copy, copyForAI, bugReport, copyMarkdown, copyPath, save, saveAs, reveal, share, edit, pin, trash
+    case copy, copyForAI, bugReport, copyMarkdown, copyPath, save, saveAs, reveal, share, uploadLink, edit, pin, trash
 
     func title(for kind: CaptureItem.Kind) -> String {
         switch self {
@@ -17,6 +17,7 @@ enum CaptureAction: CaseIterable {
         case .saveAs: "Save As…"
         case .reveal: "Show in Finder"
         case .share: "Share…"
+        case .uploadLink: "Upload & Copy Link"
         case .edit: kind == .image ? "Annotate" : "Edit Video"
         case .pin: "Pin to Screen"
         case .trash: "Move to Trash"
@@ -34,6 +35,7 @@ enum CaptureAction: CaseIterable {
         case .saveAs: "square.and.arrow.down.on.square"
         case .reveal: "folder"
         case .share: "square.and.arrow.up"
+        case .uploadLink: "link.icloud"
         case .edit: kind == .image ? "pencil.and.scribble" : "scissors"
         case .pin: "pin"
         case .trash: "trash"
@@ -94,6 +96,8 @@ enum CaptureAction: CaseIterable {
             NSWorkspace.shared.activateFileViewerSelecting([item.url])
         case .share:
             Share.show(item.url)
+        case .uploadLink:
+            return await UploadLink.run(item)
         case .edit:
             item.kind == .image ? AnnotationEditor.open(item) : VideoEditor.open(item)
         case .pin:
@@ -125,7 +129,7 @@ enum CaptureAction: CaseIterable {
             Toast.show("Saved to \(url?.deletingLastPathComponent().lastPathComponent ?? "folder")", symbol: "square.and.arrow.down.fill")
         case .trash:
             Toast.show("Moved to Trash", symbol: "trash.fill")
-        case .reveal, .share, .edit, .pin:
+        case .reveal, .share, .uploadLink, .edit, .pin:
             break
         }
     }

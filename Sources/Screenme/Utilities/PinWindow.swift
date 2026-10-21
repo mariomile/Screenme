@@ -175,7 +175,7 @@ private final class PinWindowController: NSObject {
     func makeMenu() -> NSMenu {
         let menu = NSMenu()
         menu.autoenablesItems = false
-        for (action, key) in [(CaptureAction.copy, "c"), (.copyForAI, ""), (.copyMarkdown, ""), (.copyPath, ""), (.save, "s"), (.edit, ""), (.share, "")]
+        for (action, key) in [(CaptureAction.copy, "c"), (.copyForAI, ""), (.copyMarkdown, ""), (.copyPath, ""), (.save, "s"), (.edit, ""), (.uploadLink, ""), (.share, "")]
             where action.isAvailable(for: item.kind) {
             // The share menu lists the services as a submenu.
             if action == .share {

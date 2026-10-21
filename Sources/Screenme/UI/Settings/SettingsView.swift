@@ -17,7 +17,7 @@ enum SettingsWindow {
 }
 
 enum SettingsTab: String, CaseIterable, Identifiable {
-    case general, screenshots, quickAccess, recording, text, shortcuts, permissions, history, about
+    case general, screenshots, quickAccess, recording, upload, text, shortcuts, permissions, history, about
 
     var id: String { rawValue }
 
@@ -27,6 +27,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .screenshots: "Screenshots"
         case .quickAccess: "Quick Access"
         case .recording: "Recording"
+        case .upload: "Upload"
         case .text: "Text Recognition"
         case .shortcuts: "Shortcuts"
         case .permissions: "Permissions"
@@ -41,6 +42,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .screenshots: "camera.viewfinder"
         case .quickAccess: "rectangle.on.rectangle"
         case .recording: "record.circle.fill"
+        case .upload: "link.icloud.fill"
         case .text: "text.viewfinder"
         case .shortcuts: "command"
         case .permissions: "lock.shield.fill"
@@ -55,6 +57,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .screenshots: .blue
         case .quickAccess: .indigo
         case .recording: .red
+        case .upload: .cyan
         case .text: .teal
         case .shortcuts: .orange
         case .permissions: .green
@@ -111,6 +114,7 @@ struct SettingsView: View {
         case .screenshots: ScreenshotsPane()
         case .quickAccess: QuickAccessPane()
         case .recording: RecordingPane()
+        case .upload: UploadPane()
         case .text: TextRecognitionPane()
         case .shortcuts: ShortcutsPane()
         case .permissions: PermissionsPane()

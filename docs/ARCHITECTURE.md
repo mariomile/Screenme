@@ -43,6 +43,7 @@ Use these instead of writing your own. If one does not fit, extend it in Core ra
 | Links | `Core/ActionLink.swift` | `ActionLink(url:)`: `.perform(action, target)` or `.settings(tab)`. `ActionLink.Target.captureTarget()` turns a link's area (cut to its screen) or app into a `CaptureTarget`. |
 | Bitmaps | `Core/ImageDrawing.swift` | `CGImage.drawn(width:height:colorSpace:_:)` for a new RGBA bitmap, `overdrawn(_:)` to draw over an image at its own size and color space. |
 | Share | `Core/Share.swift` | `Share.show(_:)` at the current click, `Share.menuItem(for:)` for AppKit menus. |
+| Upload link | `Core/S3Upload.swift` | `UploadLink.run(_:)` (the `.uploadLink` action): a SigV4-signed PUT to the user's own S3-compatible bucket (R2, B2, AWS) with CryptoKit, link copied. `UploadSettings` (prefs plus the secret in the Keychain), `SigV4`, `S3Upload.test(settings:)`. |
 | Windows | `Core/WindowPresenter.swift` | `show(_:title:size:style:content:)`, `focus(_:) -> Bool`, `close(_:)`. |
 | Previews and small helpers | `Core/Thumbnails.swift`, `Core/Duration.swift`, `Core/WallpaperLoader.swift`, `Core/InputDevices.swift` | `Thumbnails.make(for:maxPixelSize:)` / `cached` / `decodeImage(at:maxPixelSize:)` / `aspectRatio(of:)`, `Duration.format(_:tenths:)`, `WallpaperLoader.pictureURL(for:)` / `snapshot`, `InputDevices.microphones()` / `cameras()`. |
 

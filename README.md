@@ -11,6 +11,24 @@ A lightweight, native macOS capture tool. Capture, drop it where it goes, move o
 - **Copy for AI** (Quick Access, History, pins, editor `⇧⌘C`): copies the image plus a text block for Claude, ChatGPT or Cursor: the app, window and browser page it came from, the text in it, and the notes you wrote on annotations in the editor (select an annotation, type in Note for AI). Paste into a chat for the image, or into a terminal for the text with the file path.
 - **Bug Report** (recordings, from Quick Access, History or the video editor): record the screen while you explain the bug, then pick Bug Report. Screenme transcribes what you said on this Mac, takes a frame at each step and writes a `Bug Report` folder in your save folder with the video, the frames and `report.md`: environment, timestamped transcript, numbered steps with their frames, and a prompt for a coding agent. The report is also copied, with absolute paths, ready to paste into GitHub, Linear or Claude Code.
 
+## Share links (S3-compatible storage)
+
+**Upload & Copy Link** (Quick Access menu, History, pins) uploads a screenshot, GIF or recording to your own bucket and copies a public link. With Hide sensitive info when sharing on, images go up as the redacted copy. No Screenme server is involved: you bring the bucket. Cloudflare R2 and Backblaze B2 both have a 10 GB free tier; AWS S3 and any S3-compatible server work too. Links use a random 24-character name, so they cannot be guessed.
+
+Settings > Upload takes Endpoint URL, Region (`auto` for R2), Bucket, Access Key ID, Secret Access Key (kept in the Keychain) and Public URL. **Test Connection** uploads a tiny file and deletes it.
+
+**Cloudflare R2**
+1. In the Cloudflare dashboard, R2 > Create bucket.
+2. Open the bucket > Settings > Public Development URL > Enable (r2.dev), or connect a custom domain. That URL is the Public URL.
+3. R2 > Manage API Tokens > Create API token, permission Object Read & Write, limited to that bucket.
+4. Endpoint `https://<accountID>.r2.cloudflarestorage.com`, Region `auto`, then the token's Access Key ID and Secret Access Key.
+
+**Backblaze B2**
+1. Create a bucket and set it to Public.
+2. Create an Application Key limited to that bucket.
+3. Endpoint is the bucket's S3 endpoint (e.g. `https://s3.us-west-004.backblazeb2.com`), Region the part after `s3.` (e.g. `us-west-004`).
+4. Public URL `https://f00X.backblazeb2.com/file/<bucket>`, or the bucket's friendly URL.
+
 About 0.5 MB on disk, no dependencies, system frameworks only (ScreenCaptureKit, AVFoundation, AVKit, SwiftUI).
 
 ## Build
