@@ -47,9 +47,24 @@ final class VideoEditorModel: ObservableObject {
     @Published private(set) var exportProgress: Double?
     @Published private(set) var exportTitle = ""
 
+    /// What the editor draws on the recording. Every change redraws the preview; the canvas is remembered for next time.
+    @Published var edit = VideoEdit() {
+        didSet {
+            guard edit != oldValue else { return }
+            if edit.canvas != oldValue.canvas { VideoCanvas.saved = edit.canvas }
+            updatePreview()
+        }
+    }
+    /// The recording's clicks and cursor, when it was recorded with them.
+    let events: RecordingEvents?
+
+    var source: VideoSource { VideoSource(size: videoSize, events: events) }
+
     init(item: CaptureItem) {
         self.item = item
+        events = RecordingEvents.events(for: item.url)
         asset = AVURLAsset(url: item.url)
+        edit.canvas = VideoCanvas.saved
         player.replaceCurrentItem(with: AVPlayerItem(asset: asset))
         player.actionAtItemEnd = .pause
 
@@ -193,13 +208,13 @@ final class VideoEditorModel: ObservableObject {
 
     // MARK: Export
 
-    var outputSize: CGSize { resolution.outputSize(for: videoSize) }
+    var outputSize: CGSize { edit.outputSize(for: source, resolution: resolution) }
     var clipDuration: Double { trimEnd - trimStart }
 
     /// True when the output would be a byte-for-byte copy of the recording.
     private var isUnmodified: Bool {
         format == .mp4 && trimStart <= 0.001 && trimEnd >= duration - 0.001 && resolution == .original
-            && (!mute || !hasAudio) && quality == .high && codec == .h264
+            && (!mute || !hasAudio) && quality == .high && codec == .h264 && edit.isPlain
     }
 
     enum Action {
@@ -285,17 +300,23 @@ final class VideoEditorModel: ObservableObject {
 
     /// The renderer for an output of `size`. Exports start at the trim start; the preview plays the whole recording.
     private func makeRenderer(size: CGSize, timeOffset: Double, speed: Double) -> FrameRenderer {
-        FrameRenderer(renderSize: size, timeOffset: timeOffset, speed: speed)
+        edit.renderer(for: source, renderSize: size, timeOffset: timeOffset, speed: speed)
     }
 
-    /// The preview draws through the same compositor as the export, at a size a window shows: at most 1920 pixels wide.
+    /// The pixel size of the preview: the full-size output, at most 1920 pixels wide.
+    var previewSize: CGSize {
+        let full = edit.outputSize(for: source, resolution: .original)
+        let scale = min(1, 1920 / max(full.width, full.height, 1))
+        return CGSize(width: max(2, (full.width * scale).rounded()), height: max(2, (full.height * scale).rounded()))
+    }
+
+    /// The preview draws through the same compositor as the export, so what it shows is what gets exported.
     private func updatePreview() {
         guard let playerItem = player.currentItem, videoTrackID != kCMPersistentTrackID_Invalid else { return }
-        let full = outputSize
-        let scale = min(1, 1920 / max(full.width, full.height, 1))
-        let size = CGSize(width: max(2, (full.width * scale).rounded()), height: max(2, (full.height * scale).rounded()))
-        playerItem.videoComposition = EditedVideo.videoComposition(renderer: makeRenderer(size: size, timeOffset: 0, speed: 1),
+        playerItem.videoComposition = EditedVideo.videoComposition(renderer: makeRenderer(size: previewSize, timeOffset: 0, speed: 1),
                                                                    trackID: videoTrackID, duration: CMTime(seconds: duration, preferredTimescale: 600),
                                                                    fps: fps)
+        // A paused player keeps showing the old frame until it seeks.
+        if !isPlaying { seek(to: currentTime) }
     }
 }

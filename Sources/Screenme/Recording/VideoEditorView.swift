@@ -10,11 +10,11 @@ enum VideoEditor {
         let id = "videoEditor-\(item.id.uuidString)"
         if WindowPresenter.shared.focus(id) { return }
         let model = VideoEditorModel(item: item)
-        let window = WindowPresenter.shared.show(id, title: item.url.lastPathComponent, size: CGSize(width: 940, height: 680),
+        let window = WindowPresenter.shared.show(id, title: item.url.lastPathComponent, size: CGSize(width: 960, height: 780),
                                                  style: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]) {
             VideoEditorView(model: model)
         }
-        window.minSize = CGSize(width: 780, height: 560)
+        window.minSize = CGSize(width: 820, height: 660)
         model.attach(to: window)
     }
 }
@@ -35,6 +35,8 @@ struct VideoEditorView: View {
                     .padding(.horizontal, 6)
                     .padding(.top, 6)
                 Divider().padding(.top, 14)
+                VideoInspector(model: model)
+                Divider()
                 options
                     .padding(.horizontal, 20)
                     .padding(.vertical, 14)
@@ -52,7 +54,7 @@ struct VideoEditorView: View {
         }
         .animation(.easeOut(duration: 0.15), value: model.exportProgress == nil)
         .background(keyboardShortcuts)
-        .frame(minWidth: 780, minHeight: 560)
+        .frame(minWidth: 820, minHeight: 660)
     }
 
     private var player: some View {
