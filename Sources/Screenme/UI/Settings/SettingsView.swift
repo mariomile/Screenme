@@ -75,7 +75,6 @@ struct SettingsView: View {
         HStack(spacing: 0) {
             sidebar
                 .frame(width: 214)
-                .background(VisualEffectBackground(material: .sidebar, state: .followsWindowActiveState).ignoresSafeArea())
             Divider().ignoresSafeArea()
             VStack(alignment: .leading, spacing: 0) {
                 Text(tab.title)
@@ -94,39 +93,18 @@ struct SettingsView: View {
         .frame(minWidth: 720, minHeight: 480)
     }
 
+    /// A native sidebar list: clicking a row or using the arrow keys selects it.
     private var sidebar: some View {
-        VStack(spacing: 2) {
-            ForEach(SettingsTab.allCases) { item in
-                Button { tab = item } label: {
-                    HStack(spacing: 9) {
-                        SymbolTile(symbol: item.symbol, color: item.color, size: 22)
-                        Text(item.title).font(.system(size: 13.5)).lineLimit(1)
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.horizontal, 8)
-                    .frame(height: 32)
-                    .foregroundStyle(item == tab ? Color.white : Color.primary)
-                    .background(item == tab ? Color.accentColor : Color.clear, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(item == tab ? .isSelected : [])
+        List(SettingsTab.allCases, selection: Binding<SettingsTab?>(get: { tab }, set: { if let new = $0 { tab = new } })) { item in
+            Label {
+                Text(item.title).font(.system(size: 13.5))
+            } icon: {
+                SymbolTile(symbol: item.symbol, color: item.color, size: 22)
             }
-            Spacer()
+            .padding(.vertical, 3)
+            .tag(item)
         }
-        .padding(.horizontal, 10)
-        .padding(.top, 20)
-        .focusable()
-        .focusEffectDisabled()
-        .onMoveCommand { direction in
-            let all = SettingsTab.allCases
-            guard let index = all.firstIndex(of: tab) else { return }
-            switch direction {
-            case .up: tab = all[max(index - 1, 0)]
-            case .down: tab = all[min(index + 1, all.count - 1)]
-            default: break
-            }
-        }
+        .listStyle(.sidebar)
     }
 
     @ViewBuilder

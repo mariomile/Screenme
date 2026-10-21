@@ -16,7 +16,8 @@ struct CaptureSetup {
     static func make(for target: CaptureTarget, settings: RecordingSettings, overlays: [NSWindow]) async throws -> CaptureSetup {
         let profile = settings.profile
         let (filter, config) = try await target.streamSetup(showsCursor: settings.showCursor, retina: profile.retina,
-                                                            including: overlays.map { CGWindowID($0.windowNumber) })
+                                                            including: overlays.map { CGWindowID($0.windowNumber) },
+                                                            hidingNotifications: settings.hideNotifications)
         var width = CGFloat(config.width)
         var height = CGFloat(config.height)
         let longest = max(width, height)

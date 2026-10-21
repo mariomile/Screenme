@@ -190,11 +190,12 @@ struct AfterCaptureSection: View {
             PrefToggle("Copy to clipboard", Pref.afterShotCopy)
             PrefToggle("Save to folder", Pref.afterShotSave)
             PrefToggle("Open in editor", Pref.afterShotOpenEditor)
+            PrefToggle("Pin to screen", Pref.afterShotPin)
         } header: {
             Text(title)
         } footer: {
             if showsFooter {
-                Text("Pick any combination. With Open in editor on, the editor opens instead of Quick Access.")
+                Text("Pick any combination. Copy puts the image on the clipboard, Save puts a file in your save folder (Settings > General). With Open in editor on, the editor opens instead of Quick Access.")
             }
         }
     }

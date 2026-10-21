@@ -10,7 +10,7 @@ struct PrefKey<Value> {
 }
 
 enum Prefs {
-    static let store = UserDefaults.standard
+    static var store = UserDefaults.standard // var so tests can swap in a throwaway suite
 
     static subscript<Value>(key: PrefKey<Value>) -> Value {
         get { store.object(forKey: key.name) as? Value ?? key.defaultValue }
@@ -31,7 +31,8 @@ enum Prefs {
 /// Every preference in the app. Modules that need more add `extension Pref { static let … }` in their own files.
 enum Pref {
     // General
-    static let playSounds = PrefKey(name: "playSounds", defaultValue: true)
+    static let playSounds = PrefKey(name: "playSounds", defaultValue: false)
+    static let showMenuBarIcon = PrefKey(name: "showMenuBarIcon", defaultValue: true)
     static let settingsTab = PrefKey(name: "settingsSelectedTab", defaultValue: SettingsTab.general)
     /// JSON `[action: KeyCombo?]`, owned by `ShortcutStore`. Empty means every action uses its default.
     static let shortcuts = PrefKey(name: "shortcuts", defaultValue: Data())
@@ -41,11 +42,13 @@ enum Pref {
     static let afterShotCopy = PrefKey(name: "afterShotCopy", defaultValue: true)
     static let afterShotSave = PrefKey(name: "afterShotSave", defaultValue: false)
     static let afterShotOpenEditor = PrefKey(name: "afterShotOpenEditor", defaultValue: false)
+    static let afterShotPin = PrefKey(name: "afterShotPin", defaultValue: false)
 
     // After a recording
     static let afterRecordingQuickAccess = PrefKey(name: "afterRecordingQuickAccess", defaultValue: true)
     static let afterRecordingCopy = PrefKey(name: "afterRecordingCopy", defaultValue: false)
     static let afterRecordingSave = PrefKey(name: "afterRecordingSave", defaultValue: false)
+    static let afterRecordingOpenEditor = PrefKey(name: "afterRecordingOpenEditor", defaultValue: false)
 
     // Files
     static let saveDirectory = PrefKey(name: "saveDirectory", defaultValue: FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask)[0].path)
@@ -60,11 +63,16 @@ enum Pref {
     static let showMagnifier = PrefKey(name: "showMagnifier", defaultValue: true)
     static let showCrosshair = PrefKey(name: "showCrosshair", defaultValue: true)
     static let windowShadow = PrefKey(name: "windowShadow", defaultValue: true)
+    static let hideNotch = PrefKey(name: "hideNotch", defaultValue: false)
+    static let hideDesktopIconsInShots = PrefKey(name: "hideDesktopIconsInShots", defaultValue: false)
     static let selfTimerSeconds = PrefKey(name: "selfTimerSeconds", defaultValue: 5)
 
     // Quick Access
     static let quickAccessPosition = PrefKey(name: "quickAccessPosition", defaultValue: QuickAccessPosition.bottomLeft)
     static let quickAccessAutoClose = PrefKey(name: "quickAccessAutoClose", defaultValue: 0) // seconds, 0 = never
+    static let quickAccessAutoCloseSaves = PrefKey(name: "quickAccessAutoCloseSaves", defaultValue: false)
+    static let quickAccessCloseAfterDrag = PrefKey(name: "quickAccessCloseAfterDrag", defaultValue: true)
+    static let quickAccessSize = PrefKey(name: "quickAccessSize", defaultValue: QuickAccessSize.medium)
 
     // Recording
     static let recordingFPS = PrefKey(name: "recordingFPS", defaultValue: 30) // 30 | 60
@@ -78,10 +86,12 @@ enum Pref {
     static let recordingWebcam = PrefKey(name: "recordingWebcam", defaultValue: false)
     static let recordingCountdown = PrefKey(name: "recordingCountdown", defaultValue: 3)
     static let recordingHideDesktopIcons = PrefKey(name: "recordingHideDesktopIcons", defaultValue: false)
+    static let recordingHideNotifications = PrefKey(name: "recordingHideNotifications", defaultValue: true)
 
     // Text recognition
     static let ocrKeepLineBreaks = PrefKey(name: "ocrKeepLineBreaks", defaultValue: true)
     static let ocrDetectQR = PrefKey(name: "ocrDetectQR", defaultValue: true)
+    static let ocrLanguage = PrefKey(name: "ocrLanguage", defaultValue: "") // "" = detect automatically
 
     // History
     static let historyDays = PrefKey(name: "historyDays", defaultValue: 30) // 0 = keep forever
@@ -109,6 +119,19 @@ enum ImageFormat: String, CaseIterable, Identifiable {
 
 enum QuickAccessPosition: String {
     case bottomLeft, bottomRight
+}
+
+enum QuickAccessSize: String, CaseIterable, Identifiable {
+    case small, medium, large
+    var id: String { rawValue }
+    var title: String { rawValue.capitalized }
+    var cardWidth: CGFloat {
+        switch self {
+        case .small: 180
+        case .medium: 224
+        case .large: 280
+        }
+    }
 }
 
 /// Encoder quality for recordings and video editor exports.

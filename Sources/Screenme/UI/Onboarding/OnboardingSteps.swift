@@ -160,11 +160,9 @@ struct PreferencesStep: View {
             Form {
                 Section {
                     LaunchAtLoginToggle()
-                }
-                AfterCaptureSection(title: "After a screenshot", showsFooter: false)
-                Section {
                     SaveFolderRow()
                 }
+                AfterCaptureSection(title: "After a screenshot", showsFooter: false)
             }
             .formStyle(.grouped)
             .scrollContentBackground(.hidden)

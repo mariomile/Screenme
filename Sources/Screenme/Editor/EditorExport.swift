@@ -91,7 +91,7 @@ extension EditorController {
         }
     }
 
-    /// A file holding the flattened image, for dragging out of the toolbar.
+    /// A file holding the flattened image, for dragging out of the toolbar and sharing.
     func dragFile() -> URL? {
         canvas?.finishTextEditing()
         guard let (image, type) = flatten(for: item.url), let data = encode(image, as: type) else { return nil }

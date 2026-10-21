@@ -19,7 +19,7 @@ final class CardModel: ObservableObject {
     }
 }
 
-/// The card's face: the preview, and on hover Copy, Save, Close, Pin and Edit.
+/// The card's face: the preview, and on hover Copy, Save, Close, Pin, Edit and Share.
 struct QuickAccessCardView: View {
     @ObservedObject var model: CardModel
     let size: CGSize
@@ -93,6 +93,7 @@ struct QuickAccessCardView: View {
                 HStack {
                     circle(.edit)
                     Spacer()
+                    HUDCircle(symbol: "square.and.arrow.up", label: "Share") { Share.show(model.item.url) }
                 }
             }
             .padding(8)

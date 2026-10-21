@@ -33,8 +33,9 @@ final class QuickAccessCard: NSObject {
     init(item: CaptureItem, screen: NSScreen, owner: QuickAccess) {
         self.screen = screen
         self.owner = owner
-        let width = QuickAccess.cardWidth
-        let height = CGFloat.minimum(220, CGFloat.maximum(140, width * Thumbnails.aspectRatio(of: item)))
+        let width = Prefs[Pref.quickAccessSize].cardWidth
+        // Between 140 and 220 points tall at the medium width, in proportion for the other sizes.
+        let height = CGFloat.minimum(width * 220 / 224, CGFloat.maximum(width * 140 / 224, width * Thumbnails.aspectRatio(of: item)))
         size = CGSize(width: width, height: height)
         model = CardModel(item: item)
 
@@ -141,7 +142,7 @@ final class QuickAccessCard: NSObject {
 
     func dragEnded(dropped: Bool) {
         model.dragging = false
-        if dropped {
+        if dropped && Prefs[Pref.quickAccessCloseAfterDrag] {
             owner.dismiss(self)
         } else {
             scheduleAutoClose()
@@ -210,6 +211,7 @@ final class QuickAccessCard: NSObject {
         let work = DispatchWorkItem { [weak self] in
             MainActor.assumeIsolated {
                 guard let self, !self.model.hovering, !self.model.dragging else { return }
+                if Prefs[Pref.quickAccessAutoCloseSaves] { _ = try? Storage.save(self.model.item.url) }
                 self.owner.dismiss(self)
             }
         }

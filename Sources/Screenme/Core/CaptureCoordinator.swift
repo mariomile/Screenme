@@ -45,8 +45,12 @@ final class CaptureCoordinator {
             break
         }
 
-        // While the All-in-One bar is open, only the bar starts a capture, once it has closed.
-        guard !busy, !AllInOneHUD.isOpen else { return }
+        // A capture shortcut pressed while the All-in-One bar is open picks that capture from the bar.
+        if AllInOneHUD.isOpen {
+            AllInOneHUD.choose(action)
+            return
+        }
+        guard !busy else { return }
         busy = true
         Task {
             defer { busy = false }
@@ -59,6 +63,15 @@ final class CaptureCoordinator {
     }
 
     private func capture(_ action: ShortcutAction) async throws {
+        // Recordings have their own setting; text recognition does not keep a picture.
+        let hidesIcons = Prefs[Pref.hideDesktopIconsInShots] && !DesktopIcons.isHidden
+            && action != .recordScreen && action != .captureText
+        if hidesIcons {
+            DesktopIcons.setHidden(true)
+            try? await Task.sleep(for: .milliseconds(700))
+        }
+        defer { if hidesIcons { DesktopIcons.setHidden(false) } }
+
         switch action {
         case .allInOne, .pinLastCapture, .openHistory, .toggleDesktopIcons:
             return // handled in `perform`
@@ -115,13 +128,13 @@ final class CaptureCoordinator {
     }
 
     private func image(for result: SelectionResult) async throws -> CGImage {
-        if let frozen = result.frozenImage { return frozen }
-        return try await Capturer.screenshot(result.target)
+        let image = if let frozen = result.frozenImage { frozen } else { try await Capturer.screenshot(result.target) }
+        return Notch.hidden(in: image, of: result.target)
     }
 
     /// Writes an image capture and runs the after-capture actions.
     func deliver(_ image: CGImage) throws {
-        let item = CaptureItem(url: try Storage.write(image), kind: .image)
+        let item = CaptureItem(url: try Storage.write(Watermark.applied(to: image)), kind: .image)
         Sounds.shutter()
         afterCapture(item)
     }
@@ -148,6 +161,7 @@ final class CaptureCoordinator {
         case .image:
             if Prefs[Pref.afterShotCopy] { Clipboard.copy(item) }
             if Prefs[Pref.afterShotSave] { _ = try? Storage.save(item.url) }
+            if Prefs[Pref.afterShotPin] { PinWindow.pin(item) }
             if Prefs[Pref.afterShotOpenEditor] {
                 AnnotationEditor.open(item)
             } else if Prefs[Pref.afterShotQuickAccess] {
@@ -156,7 +170,11 @@ final class CaptureCoordinator {
         case .video, .gif:
             if Prefs[Pref.afterRecordingCopy] { Clipboard.copy(item) }
             if Prefs[Pref.afterRecordingSave] { _ = try? Storage.save(item.url) }
-            if Prefs[Pref.afterRecordingQuickAccess] { QuickAccess.shared.show(item) }
+            if Prefs[Pref.afterRecordingOpenEditor] && item.kind == .video {
+                VideoEditor.open(item)
+            } else if Prefs[Pref.afterRecordingQuickAccess] {
+                QuickAccess.shared.show(item)
+            }
         }
     }
 

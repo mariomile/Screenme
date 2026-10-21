@@ -9,18 +9,29 @@ enum TextRecognizer {
     static func recognize(_ image: CGImage) async throws -> String {
         let keepLineBreaks = Prefs[Pref.ocrKeepLineBreaks]
         let detectCodes = Prefs[Pref.ocrDetectQR]
+        let language = Prefs[Pref.ocrLanguage]
         return try await Task.detached(priority: .userInitiated) {
-            try run(image, keepLineBreaks: keepLineBreaks, detectCodes: detectCodes)
+            try run(image, keepLineBreaks: keepLineBreaks, detectCodes: detectCodes, language: language)
         }.value
     }
 
     // MARK: Pipeline
 
-    private static func run(_ image: CGImage, keepLineBreaks: Bool, detectCodes: Bool) throws -> String {
+    /// Languages Vision reads, as identifiers ("it-IT") for `Pref.ocrLanguage`.
+    static var supportedLanguages: [String] {
+        (try? VNRecognizeTextRequest().supportedRecognitionLanguages()) ?? []
+    }
+
+    /// `language` is a Vision identifier, or empty to detect it.
+    private static func run(_ image: CGImage, keepLineBreaks: Bool, detectCodes: Bool, language: String) throws -> String {
         let textRequest = VNRecognizeTextRequest()
         textRequest.recognitionLevel = .accurate
         textRequest.usesLanguageCorrection = true
-        textRequest.automaticallyDetectsLanguage = true
+        if language.isEmpty {
+            textRequest.automaticallyDetectsLanguage = true
+        } else {
+            textRequest.recognitionLanguages = [language]
+        }
 
         var requests: [VNRequest] = [textRequest]
         let barcodeRequest = VNDetectBarcodesRequest()

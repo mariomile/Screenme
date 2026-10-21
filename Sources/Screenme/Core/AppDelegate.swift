@@ -17,12 +17,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var subscriptions: Set<AnyCancellable> = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Unit tests run inside the app: no menu bar item, shortcuts or onboarding next to the installed copy.
+        guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else { return }
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         let menu = NSMenu()
         menu.delegate = self
         statusItem.menu = menu
         AppState.shared.$isRecording
             .sink { [weak self] recording in self?.updateStatusIcon(recording: recording) }
+            .store(in: &subscriptions)
+        NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.updateStatusVisibility() }
             .store(in: &subscriptions)
 
         let hotKeys = HotKeyCenter.shared
@@ -40,7 +46,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: Status item
 
+    /// The icon can be hidden in Settings; it always shows while recording, as the Stop button.
+    /// `recording` defaults to the current state; `$isRecording` publishes before the property changes.
+    private func updateStatusVisibility(recording: Bool? = nil) {
+        let visible = Prefs[Pref.showMenuBarIcon] || (recording ?? AppState.shared.isRecording)
+        if statusItem.isVisible != visible { statusItem.isVisible = visible }
+    }
+
     private func updateStatusIcon(recording: Bool) {
+        defer { updateStatusVisibility(recording: recording) }
         let button = statusItem.button
         if recording {
             button?.image = NSImage(systemSymbolName: "stop.circle.fill", accessibilityDescription: "Stop recording")

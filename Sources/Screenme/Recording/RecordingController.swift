@@ -1,5 +1,6 @@
 import AppKit
 import AVFoundation
+import ScreenCaptureKit
 
 /// Screen recording: pre-record bar, countdown, capture with pause, and the controls around it.
 ///
@@ -168,10 +169,12 @@ final class RecordingController {
         }
     }
 
-    /// The stream or the writer failed: stop the way the user would, and tell them.
+    /// The stream stopped or the writer failed: stop the way the user would, which keeps what was recorded
+    /// when the file is still good, and tell them. Stopping from the macOS menu bar is not an error.
     fileprivate func recorderFailed(_ error: Error) async {
         guard running != nil else { return }
         await CaptureCoordinator.shared.stopRecording()
+        if (error as? SCStreamError)?.code == .userStopped { return }
         CaptureCoordinator.shared.report(error)
     }
 }
@@ -185,6 +188,7 @@ private final class Session {
     private var webcam: WebcamBubble?
     private var hidIcons = false
     private var effects: RecordingEffects?
+    private var watermark: WatermarkOverlay?
     private var recorder: StreamRecorder?
     private var outline: RecordingOutline?
     private var bar: RecordingControlBar?
@@ -222,7 +226,10 @@ private final class Session {
             effects = overlay
         }
 
-        let overlays: [NSWindow] = [effects?.panel, webcam?.panel].compactMap { $0 }
+        watermark = WatermarkOverlay(frame: frame)
+        watermark?.show()
+
+        let overlays: [NSWindow] = [effects?.panel, webcam?.panel, watermark?.panel].compactMap { $0 }
         // Let the window server register the overlay windows before ScreenCaptureKit looks for them.
         if !overlays.isEmpty { try? await Task.sleep(for: .milliseconds(200)) }
         recorder = try await makeRecorder(CaptureSetup.make(for: target, settings: settings, overlays: overlays))
@@ -290,6 +297,8 @@ private final class Session {
         let url = await recorder?.finish(discard: !keep)
         effects?.stop()
         effects = nil
+        watermark?.close()
+        watermark = nil
         webcam?.close()
         webcam = nil
         if hidIcons { DesktopIcons.setHidden(false) }

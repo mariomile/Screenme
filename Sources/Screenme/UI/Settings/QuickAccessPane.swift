@@ -2,6 +2,8 @@ import SwiftUI
 
 struct QuickAccessPane: View {
     @AppStorage(Pref.quickAccessPosition.name) private var position = Pref.quickAccessPosition.defaultValue
+    @AppStorage(Pref.quickAccessSize.name) private var size = Pref.quickAccessSize.defaultValue
+    @AppStorage(Pref.quickAccessAutoClose.name) private var autoClose = Pref.quickAccessAutoClose.defaultValue
 
     var body: some View {
         Form {
@@ -20,8 +22,16 @@ struct QuickAccessPane: View {
             }
 
             Section {
+                Picker("Card size", selection: $size) {
+                    ForEach(QuickAccessSize.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
                 PrefIntPicker("Close automatically", Pref.quickAccessAutoClose,
                               options: [("Never", 0), ("After 3 seconds", 3), ("After 5 seconds", 5), ("After 10 seconds", 10), ("After 15 seconds", 15), ("After 30 seconds", 30)])
+                if autoClose > 0 {
+                    PrefToggle("Save to folder when it closes automatically", Pref.quickAccessAutoCloseSaves)
+                }
+                PrefToggle("Close after dragging into an app", Pref.quickAccessCloseAfterDrag)
             } header: {
                 Text("Behavior")
             } footer: {

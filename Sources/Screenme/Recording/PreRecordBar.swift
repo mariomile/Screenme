@@ -259,6 +259,7 @@ private struct PreRecordBar: View {
             }
             Divider()
             Toggle("Hide Desktop Icons", isOn: $model.settings.hideDesktopIcons)
+            Toggle("Hide Notifications", isOn: $model.settings.hideNotifications)
             Picker("Countdown", selection: $model.settings.countdown) {
                 Text("No Countdown").tag(0)
                 Text("3 Seconds").tag(3)

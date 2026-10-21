@@ -27,6 +27,8 @@ struct RecordingSettings {
     var webcamID: String
     var countdown: Int
     var hideDesktopIcons: Bool
+    /// Leaves notification banners out of the video; they still show on screen.
+    var hideNotifications: Bool
 
     /// The settings as last saved.
     static var saved: RecordingSettings {
@@ -44,7 +46,8 @@ struct RecordingSettings {
             webcamSize: Prefs[Pref.recordingWebcamSize],
             webcamID: Prefs[Pref.recordingWebcamID],
             countdown: max(0, Prefs[Pref.recordingCountdown]),
-            hideDesktopIcons: Prefs[Pref.recordingHideDesktopIcons])
+            hideDesktopIcons: Prefs[Pref.recordingHideDesktopIcons],
+            hideNotifications: Prefs[Pref.recordingHideNotifications])
     }
 
     /// Saves what the pre-record bar edits. Frame rate and quality belong to Settings and are left alone.
@@ -61,6 +64,7 @@ struct RecordingSettings {
         Prefs[Pref.recordingWebcamID] = webcamID
         Prefs[Pref.recordingCountdown] = countdown
         Prefs[Pref.recordingHideDesktopIcons] = hideDesktopIcons
+        Prefs[Pref.recordingHideNotifications] = hideNotifications
     }
 
     /// How the stream is filmed for the chosen format. GIFs are filmed at 1x, at most 30 fps and without sound:

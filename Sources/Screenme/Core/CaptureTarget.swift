@@ -53,8 +53,10 @@ extension CaptureTarget {
     /// scrolling capture and the picker's snapshot. Screenme's own windows are excluded, except the desktop
     /// icon covers (or hidden icons come back in the picture) and `extraWindows`, which the caller wants filmed.
     /// `retina: false` produces 1x output (one pixel per point). Window shadows follow `Pref.windowShadow`.
+    /// `hidingNotifications` leaves notification banners out of display and area captures.
     func streamSetup(showsCursor: Bool = false, retina: Bool = true,
-                     including extraWindows: [CGWindowID] = []) async throws -> (SCContentFilter, SCStreamConfiguration) {
+                     including extraWindows: [CGWindowID] = [],
+                     hidingNotifications: Bool = false) async throws -> (SCContentFilter, SCStreamConfiguration) {
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
         let extras = content.windows.filter { extraWindows.contains($0.windowID) }
         let config = SCStreamConfiguration()
@@ -93,8 +95,10 @@ extension CaptureTarget {
             }
             let coverIDs = await MainActor.run { DesktopIcons.coverWindowIDs }
             let kept = content.windows.filter { coverIDs.contains($0.windowID) } + extras
-            let ownApps = content.applications.filter { $0.bundleIdentifier == Bundle.main.bundleIdentifier }
-            let filter = SCContentFilter(display: display, excludingApplications: ownApps, exceptingWindows: kept)
+            // Excluding Notification Center leaves out banners that arrive later too, not just the ones on screen now.
+            let excludedIDs = [Bundle.main.bundleIdentifier] + (hidingNotifications ? ["com.apple.notificationcenterui"] : [])
+            let excluded = content.applications.filter { excludedIDs.contains($0.bundleIdentifier) }
+            let filter = SCContentFilter(display: display, excludingApplications: excluded, exceptingWindows: kept)
             let scale = retina ? screen.backingScaleFactor : 1
             var size = screen.frame.size
             if case .area(let rect, _) = self {

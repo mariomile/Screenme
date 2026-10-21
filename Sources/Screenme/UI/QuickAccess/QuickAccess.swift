@@ -9,7 +9,6 @@ final class QuickAccess {
 
     /// Room around the visible card for its shadow.
     static let inset: CGFloat = 24
-    static let cardWidth: CGFloat = 224
     private let margin: CGFloat = 16
     private let gap: CGFloat = 12
 

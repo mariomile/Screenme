@@ -18,6 +18,11 @@ enum AllInOneHUD {
         Self.controller = controller
         controller.present()
     }
+
+    /// Closes the bar and runs `action` as if it had been picked from the bar, e.g. when its shortcut is pressed.
+    static func choose(_ action: ShortcutAction) {
+        controller?.choose(action)
+    }
 }
 
 // MARK: - Model
@@ -77,7 +82,10 @@ private final class HUDController {
         self.perform = perform
         self.released = released
         panel = FloatingPanel(frame: .zero, level: .statusBar, canBeKey: true, collectionBehavior: [.canJoinAllSpaces, .fullScreenAuxiliary])
-        model.choose = { [weak self] index in self?.choose(index) }
+        model.choose = { [weak self] index in
+            guard let self else { return }
+            self.choose(self.model.items[index].action)
+        }
     }
 
     func present() {
@@ -132,9 +140,8 @@ private final class HUDController {
 
     // `close` drops the last strong reference to this controller (`released`), so the completions
     // capture what they need by value instead of reaching back through a weak self.
-    private func choose(_ index: Int) {
+    func choose(_ action: ShortcutAction) {
         guard !closing else { return }
-        let action = model.items[index].action
         let previousApp = previousApp
         let perform = perform
         close {

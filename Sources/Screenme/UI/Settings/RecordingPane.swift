@@ -7,6 +7,7 @@ struct RecordingPane: View {
     @AppStorage(Pref.recordingShowKeystrokes.name) private var keystrokes = Pref.recordingShowKeystrokes.defaultValue
     @AppStorage(Pref.recordingWebcam.name) private var webcam = Pref.recordingWebcam.defaultValue
     @AppStorage(Pref.recordingQuality.name) private var quality = Pref.recordingQuality.defaultValue
+    @AppStorage(Pref.recordingFormat.name) private var format = Pref.recordingFormat.defaultValue
     @ObservedObject private var permissions = Permissions.shared
     @State private var devices: [AVCaptureDevice] = []
 
@@ -16,11 +17,19 @@ struct RecordingPane: View {
                 PrefToggle("Show Quick Access", Pref.afterRecordingQuickAccess)
                 PrefToggle("Copy file to clipboard", Pref.afterRecordingCopy)
                 PrefToggle("Save to folder", Pref.afterRecordingSave)
+                PrefToggle("Open in video editor", Pref.afterRecordingOpenEditor)
             } header: {
                 Text("After recording")
+            } footer: {
+                Text("With Open in video editor on, the editor opens instead of Quick Access. GIFs have no editor and go to Quick Access.")
             }
 
             Section("Video") {
+                Picker("Format", selection: $format) {
+                    Text("Video (MP4)").tag(RecordingFormat.video)
+                    Text("GIF").tag(RecordingFormat.gif)
+                }
+                .pickerStyle(.segmented)
                 PrefIntPicker("Frame rate", Pref.recordingFPS, options: [("30 fps", 30), ("60 fps", 60)])
                 Picker("Quality", selection: $quality) {
                     ForEach(VideoQuality.allCases) { Text($0.title).tag($0) }
@@ -33,6 +42,7 @@ struct RecordingPane: View {
                 }
                 PrefIntPicker("Countdown", Pref.recordingCountdown, options: [("Off", 0), ("3 seconds", 3), ("5 seconds", 5), ("10 seconds", 10)])
                 PrefToggle("Hide desktop icons while recording", Pref.recordingHideDesktopIcons)
+                PrefToggle("Hide notifications", Pref.recordingHideNotifications, detail: "Banners stay on your screen but are left out of the video.")
             }
 
             Section("Audio and camera") {

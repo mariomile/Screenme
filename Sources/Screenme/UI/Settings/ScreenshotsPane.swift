@@ -3,12 +3,9 @@ import SwiftUI
 struct ScreenshotsPane: View {
     @AppStorage(Pref.imageFormat.name) private var format = Pref.imageFormat.defaultValue
     @AppStorage(Pref.jpegQuality.name) private var quality = Pref.jpegQuality.defaultValue
-    @AppStorage(Pref.fileNamePrefix.name) private var prefix = Pref.fileNamePrefix.defaultValue
-
-    /// The name the next capture would get, from the rule `Storage` uses. Redrawn as the prefix changes.
-    private var exampleName: String {
-        Storage.newURL(extension: format.fileExtension).lastPathComponent
-    }
+    @AppStorage(Pref.watermarkEnabled.name) private var watermarkEnabled = Pref.watermarkEnabled.defaultValue
+    @AppStorage(Pref.watermarkText.name) private var watermarkText = Pref.watermarkText.defaultValue
+    @AppStorage(Pref.watermarkCorner.name) private var watermarkCorner = Pref.watermarkCorner.defaultValue
 
     var body: some View {
         Form {
@@ -28,22 +25,32 @@ struct ScreenshotsPane: View {
                     }
                 }
                 PrefToggle("Save at Retina resolution", Pref.retinaResolution, detail: "Turn off to save at 1x, which makes smaller files.")
-                LabeledContent("File name prefix") {
-                    TextField("File name prefix", text: $prefix, prompt: Text("Screenme")).labelsHidden().textFieldStyle(.roundedBorder).frame(width: 200)
-                }
-                LabeledContent("Example") {
-                    Text(exampleName).font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
-                }
                 SaveFolderRow()
             }
 
             Section("Capture") {
                 PrefToggle("Show cursor", Pref.showCursorInShots)
                 PrefToggle("Capture window shadow", Pref.windowShadow)
+                PrefToggle("Hide notch", Pref.hideNotch, detail: "Fills the menu bar with black on screens with a notch.")
+                PrefToggle("Hide desktop icons while capturing", Pref.hideDesktopIconsInShots)
                 PrefToggle("Freeze screen while selecting", Pref.freezeScreen)
                 PrefToggle("Show crosshair", Pref.showCrosshair)
                 PrefToggle("Show magnifier", Pref.showMagnifier)
                 PrefIntPicker("Self-timer", Pref.selfTimerSeconds, options: [("3 seconds", 3), ("5 seconds", 5), ("10 seconds", 10), ("15 seconds", 15)])
+            }
+
+            Section {
+                PrefToggle("Add watermark", Pref.watermarkEnabled, detail: "On new screenshots and recordings.")
+                if watermarkEnabled {
+                    LabeledContent("Text") {
+                        TextField("Text", text: $watermarkText, prompt: Text("@yourname")).labelsHidden().textFieldStyle(.roundedBorder).frame(width: 200)
+                    }
+                    Picker("Position", selection: $watermarkCorner) {
+                        ForEach(WatermarkCorner.allCases) { Text($0.title).tag($0) }
+                    }
+                }
+            } header: {
+                Text("Watermark")
             }
         }
         .formStyle(.grouped)

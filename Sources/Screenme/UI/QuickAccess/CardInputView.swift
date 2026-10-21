@@ -129,6 +129,7 @@ final class CardInputView: NSView, NSDraggingSource {
             item.representedObject = CaptureAction.allCases.firstIndex(of: action)
             item.image = NSImage(systemSymbolName: action.symbol(for: kind), accessibilityDescription: nil)
             menu.addItem(item)
+            if action == .reveal { menu.addItem(Share.menuItem(for: model.item.url)) }
         }
         return menu
     }

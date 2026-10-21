@@ -18,7 +18,7 @@
 | Check | Command | Healthy output |
 |-------|---------|----------------|
 | Build | `xcodegen generate && xcodebuild -project Screenme.xcodeproj -scheme Screenme -configuration Release -derivedDataPath build/DerivedData build` | `** BUILD SUCCEEDED **`, 0 warnings in Sources/ |
-| Test | none yet: no test target | |
+| Test | `xcodegen generate && xcodebuild test -project Screenme.xcodeproj -scheme Screenme -destination 'platform=macOS' -derivedDataPath build/tests` | `** TEST SUCCEEDED **`, 0 failures |
 | Lint | none yet | |
 
 ## Technical constraints

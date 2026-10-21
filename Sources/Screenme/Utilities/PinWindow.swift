@@ -180,6 +180,7 @@ private final class PinWindowController: NSObject {
             entry.representedObject = CaptureAction.allCases.firstIndex(of: action)
             menu.addItem(entry)
         }
+        menu.addItem(Share.menuItem(for: item.url))
         menu.addItem(.separator())
 
         let opacity = NSMenu()

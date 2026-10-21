@@ -79,7 +79,8 @@ private struct HistoryGridView: View {
     @ObservedObject private var history = CaptureHistory.shared
     @State private var filter: HistoryFilter = .all
     @State private var query = ""
-    @State private var selection: UUID?
+    /// Click selects one capture, ⌘-click adds or removes one.
+    @State private var selection: Set<UUID> = []
 
     private var groups: [HistoryDayGroup] {
         let tokens = query.lowercased().split(whereSeparator: \.isWhitespace).map(String.init)
@@ -115,10 +116,36 @@ private struct HistoryGridView: View {
             .labelsHidden()
             .frame(width: 270)
             Spacer(minLength: 8)
+            combineMenu
             searchField
         }
         .padding(.horizontal, 16)
         .frame(height: 52)
+    }
+
+    private var selectedImages: [CaptureItem] {
+        history.items.filter { selection.contains($0.id) && $0.kind == .image }
+    }
+
+    @ViewBuilder
+    private var combineMenu: some View {
+        let images = selectedImages
+        if images.count >= 2 {
+            Menu("Combine \(images.count)") {
+                Button("Side by Side") { ImageCombiner.combineAndEdit(images, layout: .sideBySide) }
+                Button("Stacked") { ImageCombiner.combineAndEdit(images, layout: .stacked) }
+            }
+            .fixedSize()
+            .help("Join the selected screenshots into one image")
+        }
+    }
+
+    private func select(_ item: CaptureItem) {
+        if NSEvent.modifierFlags.contains(.command) {
+            if selection.remove(item.id) == nil { selection.insert(item.id) }
+        } else {
+            selection = [item.id]
+        }
     }
 
     private var searchField: some View {
@@ -168,7 +195,7 @@ private struct HistoryGridView: View {
                             LazyVGrid(columns: [GridItem(.adaptive(minimum: 190, maximum: 260), spacing: 16, alignment: .top)], spacing: 18) {
                                 ForEach(group.items) { item in
                                     HistoryGridCell(item: item, revision: history.revision(of: item.url),
-                                                isSelected: selection == item.id) { selection = item.id }
+                                                isSelected: selection.contains(item.id)) { select(item) }
                                 }
                             }
                             .padding(.horizontal, 20)
@@ -181,7 +208,7 @@ private struct HistoryGridView: View {
                 .padding(.bottom, 12)
             }
             .contentShape(Rectangle())
-            .onTapGesture { selection = nil }
+            .onTapGesture { selection = [] }
         }
     }
 }
@@ -282,6 +309,7 @@ private struct HistoryGridCell: View {
                 ForEach([CaptureAction.copy, .save, .pin, .edit, .trash].filter { $0.isAvailable(for: item.kind) }, id: \.self) { action in
                     HistoryActionButton(symbol: action.symbol(for: item.kind), help: action.title(for: item.kind)) { perform(action) }
                 }
+                HistoryActionButton(symbol: "square.and.arrow.up", help: "Share") { Share.show(item.url) }
             }
             .padding(.bottom, 9)
         }
@@ -294,6 +322,7 @@ private struct HistoryGridCell: View {
             if action == .edit || action == .trash { Divider() }
             Button(action.title(for: item.kind), systemImage: action.symbol(for: item.kind),
                    role: action == .trash ? .destructive : nil) { perform(action) }
+            if action == .reveal { ShareLink(item: item.url) }
         }
     }
 

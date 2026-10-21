@@ -1,5 +1,6 @@
 import AppKit
 import ScreenCaptureKit
+import UniformTypeIdentifiers
 
 /// The desktop picture, for the desktop icon covers and the editor's Wallpaper background.
 /// Decode the file with `Thumbnails.decodeImage(at:maxPixelSize:)`.
@@ -12,7 +13,7 @@ enum WallpaperLoader {
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue else { return url }
         let files = (try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil)) ?? []
-        return files.filter { ["jpg", "jpeg", "png", "heic", "tiff"].contains($0.pathExtension.lowercased()) }
+        return files.filter { UTType(filenameExtension: $0.pathExtension)?.conforms(to: .image) == true }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }.first
     }
 

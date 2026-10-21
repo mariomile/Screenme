@@ -155,6 +155,7 @@ struct ToolbarTrailing: View {
                 .frame(width: 44, height: 30)
 
             IconButton(symbol: "doc.on.doc", help: "Copy to clipboard (⌘C)", enabled: true) { c.copyImage() }
+            IconButton(symbol: "square.and.arrow.up", help: "Share", enabled: true) { if let url = c.dragFile() { Share.show(url) } }
 
             Button("Done") { c.save() }
                 .buttonStyle(.borderedProminent)

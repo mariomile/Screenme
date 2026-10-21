@@ -10,7 +10,7 @@ final class StreamRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
     let url: URL
     let setup: CaptureSetup
 
-    /// Called once, on an arbitrary thread, when the stream or the writer fails.
+    /// Called on an arbitrary thread when the stream stops on its own or the writer fails.
     var onFailure: (@Sendable (Error) -> Void)?
 
     private let queue = DispatchQueue(label: "dev.mariomiletta.screenme.recorder", qos: .userInitiated)
@@ -140,8 +140,9 @@ final class StreamRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
         }
     }
 
+    /// The file written so far is still good: report it and leave the writer open, so `finish` keeps the take.
     func stream(_ stream: SCStream, didStopWithError error: Error) {
-        queue.async { self.fail(error) }
+        onFailure?(error)
     }
 
     /// Starts the file at the first picture. Audio captured before it is dropped.
