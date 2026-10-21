@@ -1,7 +1,7 @@
 import AVFoundation
 import Speech
 
-/// On-device transcription of an audio file, in timed segments. SpeechAnalyzer on macOS 26 and later,
+/// On-device transcription of an audio file, in timed segments and timed words. SpeechAnalyzer on macOS 26 and later,
 /// SFSpeechRecognizer limited to on-device recognition before that. Nothing leaves the Mac.
 enum Transcription {
     enum Failure: LocalizedError {
@@ -25,7 +25,7 @@ enum Transcription {
         return SFSpeechRecognizer.authorizationStatus() == .authorized
     }
 
-    static func transcribe(_ audio: URL) async throws -> [TranscriptSegment] {
+    static func transcribe(_ audio: URL) async throws -> Transcript {
         guard await authorize() else { throw Failure.notAllowed }
         if #available(macOS 26, *), SpeechTranscriber.isAvailable,
            let locale = await SpeechTranscriber.supportedLocale(equivalentTo: .current) {
@@ -37,18 +37,28 @@ enum Transcription {
     // MARK: macOS 26
 
     @available(macOS 26, *)
-    private static func analyze(_ audio: URL, locale: Locale) async throws -> [TranscriptSegment] {
-        let transcriber = SpeechTranscriber(locale: locale, preset: .transcription)
+    private static func analyze(_ audio: URL, locale: Locale) async throws -> Transcript {
+        // The time of each word, for the keyframes: who said what while which frame was on screen.
+        let transcriber = SpeechTranscriber(locale: locale, transcriptionOptions: [], reportingOptions: [], attributeOptions: [.audioTimeRange])
         // The language model downloads once, the first time a language is used.
         if let install = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
             try await install.downloadAndInstall()
         }
         let file = try AVAudioFile(forReading: audio)
         let analyzer = SpeechAnalyzer(modules: [transcriber])
-        async let collected = transcriber.results.reduce(into: [TranscriptSegment]()) { segments, result in
+        async let collected = transcriber.results.reduce(into: Transcript()) { transcript, result in
             let text = String(result.text.characters).trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else { return }
-            segments.append(TranscriptSegment(start: result.range.start.seconds, end: result.range.end.seconds, text: text))
+            let segment = TranscriptSegment(start: result.range.start.seconds, end: result.range.end.seconds, text: text)
+            transcript.segments.append(segment)
+            var words: [TranscriptSegment] = []
+            for run in result.text.runs {
+                guard let range = run[AttributeScopes.SpeechAttributes.TimeRangeAttribute.self] else { continue }
+                let piece = TranscriptSegment(start: range.start.seconds, end: range.end.seconds,
+                                              text: String(result.text[run.range].characters))
+                words += TranscriptSegment.words(in: [piece])
+            }
+            transcript.words += words.isEmpty ? TranscriptSegment.words(in: [segment]) : words
         }
         if let last = try await analyzer.analyzeSequence(from: file) {
             try await analyzer.finalizeAndFinish(through: last)
@@ -60,7 +70,7 @@ enum Transcription {
 
     // MARK: macOS 15
 
-    private static func recognize(_ audio: URL) async throws -> [TranscriptSegment] {
+    private static func recognize(_ audio: URL) async throws -> Transcript {
         guard let recognizer = SFSpeechRecognizer(), recognizer.supportsOnDeviceRecognition else { throw Failure.unavailable }
         let request = SFSpeechURLRecognitionRequest(url: audio)
         request.requiresOnDeviceRecognition = true
@@ -73,7 +83,7 @@ enum Transcription {
         }
         // The delegate is held here until the task has finished.
         withExtendedLifetime(collector) {}
-        return TranscriptSegment.sentences(from: words)
+        return Transcript(segments: TranscriptSegment.sentences(from: words), words: words)
     }
 
     /// Long files come back as several final results; the task says when the last one is in.

@@ -3,7 +3,7 @@ import AVFoundation
 import UniformTypeIdentifiers
 
 /// Report for AI: turns a recording, what was said and what happened during it into a folder in the save folder
-/// (the video, key frames, `events.json` and `report.md`) and copies the report, with absolute paths, ready to paste
+/// (the video, keyframes, `events.json` and `report.md`) and copies the report, with absolute paths, ready to paste
 /// into an agent, GitHub or Linear. The work runs off the main thread; only the toast and the pasteboard are on it.
 enum AIReporter {
     /// Makes the report, copies it and shows the folder. Returns false when it failed, which an alert says.
@@ -50,7 +50,7 @@ enum AIReporter {
         if let events { try events.json().write(to: folder.appendingPathComponent(AIReport.eventsName)) }
         progress(0.1)
 
-        var transcript: [TranscriptSegment] = []
+        var transcript = Transcript()
         var noNarration = "No speech was recognized in the recording."
         if let audio = try await audioFile(of: asset) {
             defer { try? FileManager.default.removeItem(at: audio) }
@@ -62,7 +62,10 @@ enum AIReporter {
         } else {
             noNarration = "The recording has no audio."
         }
-        progress(0.7)
+        progress(0.6)
+        // Small pictures of the whole video, for the screen changes and for telling pictures apart.
+        let samples = try await FrameSampler.samples(of: asset, duration: duration)
+        progress(0.75)
 
         let os = ProcessInfo.processInfo.operatingSystemVersion
         let dateFormatter = DateFormatter()
@@ -74,7 +77,7 @@ enum AIReporter {
             video: "\(Int(abs(natural.width)))×\(Int(abs(natural.height))) px, \(Duration.format(duration))",
             date: dateFormatter.string(from: date))
         var report = AIReport(folder: folder, environment: environment, transcript: transcript, noNarration: noNarration, events: events)
-        report.makeTimeline(duration: duration)
+        report.makeKeyframes(duration: duration, samples: samples)
 
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
@@ -82,10 +85,10 @@ enum AIReporter {
         generator.maximumSize = CGSize(width: 1920, height: 1920)
         generator.requestedTimeToleranceBefore = .zero
         generator.requestedTimeToleranceAfter = .zero
-        for (index, time) in report.frameTimes.enumerated() {
-            let image = try await generator.image(at: CMTime(seconds: time, preferredTimescale: 600)).image
+        for (index, keyframe) in report.keyframes.enumerated() {
+            let image = try await generator.image(at: CMTime(seconds: keyframe.time, preferredTimescale: 600)).image
             try writePNG(image, to: folder.appendingPathComponent(AIReport.frameName(index)))
-            progress(0.7 + 0.3 * Double(index + 1) / Double(report.frameTimes.count))
+            progress(0.75 + 0.25 * Double(index + 1) / Double(report.keyframes.count))
         }
 
         try report.markdown(absoluteLinks: false).write(to: folder.appendingPathComponent("report.md"), atomically: true, encoding: .utf8)

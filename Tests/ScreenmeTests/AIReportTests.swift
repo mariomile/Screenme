@@ -3,12 +3,31 @@ import AVFoundation
 import XCTest
 @testable import Screenme
 
-/// Report for AI: narration and events into one timeline, where the frames go, report.md, the events sidecar,
-/// and the folder made from a real (silent) video.
+/// Report for AI: the words of the narration, where the keyframes go and what each one owns, report.md,
+/// the events sidecar, and the folder made from a real (silent) video.
 @MainActor
 final class AIReportTests: XCTestCase {
     private func segment(_ start: Double, _ text: String) -> TranscriptSegment {
         TranscriptSegment(start: start, end: start + 1, text: text)
+    }
+
+    /// Timed words, each 0.25 s long.
+    private func words(_ list: [(String, Double)]) -> [TranscriptSegment] {
+        list.map { TranscriptSegment(start: $0.1, end: $0.1 + 0.25, text: $0.0) }
+    }
+
+    /// A 9 × 8 picture: 0 brightens to the right, 1 darkens to the right, 2 has stripes.
+    private func picture(_ time: Double, _ kind: Int) -> FrameSample {
+        FrameSample(time: time, width: 9, height: 8, luma: (0..<72).map { pixel(kind, $0) })
+    }
+
+    private func pixel(_ kind: Int, _ index: Int) -> UInt8 {
+        let column = index % 9
+        switch kind {
+        case 0: return UInt8(column * 20)
+        case 1: return UInt8((8 - column) * 20)
+        default: return column % 2 == 0 ? 0 : 200
+        }
     }
 
     private func report(transcript: [TranscriptSegment], events: RecordingEvents?, duration: Double = 10) -> AIReport {
@@ -16,9 +35,10 @@ final class AIReportTests: XCTestCase {
                                                system: "27.0.1", screen: "1512×982 points at 2x",
                                                video: "3024×1964 px, 0:12", date: "21 October 2026 at 10:22")
         var report = AIReport(folder: URL(fileURLWithPath: "/Users/me/Desktop/Report 1", isDirectory: true),
-                              environment: environment, transcript: transcript,
+                              environment: environment,
+                              transcript: Transcript(segments: transcript, words: TranscriptSegment.words(in: transcript)),
                               noNarration: "The recording has no audio.", events: events)
-        report.makeTimeline(duration: duration)
+        report.makeKeyframes(duration: duration, samples: [])
         return report
     }
 
@@ -34,9 +54,8 @@ final class AIReportTests: XCTestCase {
     // MARK: Narration
 
     func testWordsBecomeSentencesAtPunctuationAndPauses() {
-        let words = [("I", 0.0), ("click", 0.3), ("save.", 0.6), ("Nothing", 1.2), ("happens", 1.5),
-                     ("then", 4.0), ("it", 4.3), ("crashes", 4.6)]
-            .map { TranscriptSegment(start: $0.1, end: $0.1 + 0.25, text: $0.0) }
+        let words = words([("I", 0.0), ("click", 0.3), ("save.", 0.6), ("Nothing", 1.2), ("happens", 1.5),
+                           ("then", 4.0), ("it", 4.3), ("crashes", 4.6)])
         XCTAssertEqual(TranscriptSegment.sentences(from: words), [
             TranscriptSegment(start: 0, end: 0.85, text: "I click save."),
             TranscriptSegment(start: 1.2, end: 1.75, text: "Nothing happens"),
@@ -44,51 +63,114 @@ final class AIReportTests: XCTestCase {
         ])
     }
 
-    // MARK: Timeline
-
-    func testNarrationAndEventsMergeInTimeOrder() {
-        let timeline = AIReport.timeline(transcript: [segment(1, "Look at this total."), segment(6, "It should be 42.")],
-                                         events: sampleEvents, duration: 10)
-        XCTAssertEqual(timeline.moments.map(\.time), [0, 1, 2, 3, 4, 6, 8])
-        XCTAssertEqual(timeline.moments.map(\.text), [
-            "In Safari, window \"Checkout\"",
-            "Said: \"Look at this total.\"",
-            "Clicked button \"Pay\" at 412, 300",
-            "Pressed ⌘R",
-            "Drew a red arrow at the top right, pointing at 790, 50",
-            "Said: \"It should be 42.\"",
-            "Switched to window \"Receipt\" in Safari",
-        ])
+    func testSegmentsAreSpreadIntoWordsByLength() {
+        let words = TranscriptSegment.words(in: [TranscriptSegment(start: 2, end: 4, text: "ab  cdef ab"), segment(9, "one")])
+        XCTAssertEqual(words.map(\.text), ["ab", "cdef", "ab", "one"])
+        XCTAssertEqual(words.map(\.start), [2, 2.5, 3.5, 9])
+        XCTAssertEqual(words.map(\.end), [2.5, 3.5, 4, 10])
     }
 
-    func testNarrationComesFirstAtTheSameTime() {
-        let events = RecordingEvents(width: 100, height: 100, events: [.shortcut("⌘S", time: 2)])
-        let moments = AIReport.timeline(transcript: [segment(2, "Saving now.")], events: events, duration: 5).moments
-        XCTAssertEqual(moments.map(\.text), ["Said: \"Saving now.\"", "Pressed ⌘S"])
+    // MARK: Screen changes
+
+    func testPicturesHaveHashesAndDifferences() {
+        XCTAssertEqual(picture(0, 0).hash, UInt64.max, "every cell is darker than its right neighbour")
+        XCTAssertEqual(picture(0, 1).hash, 0)
+        XCTAssertEqual(picture(0, 2).hash.nonzeroBitCount, 32)
+        XCTAssertEqual(picture(0, 0).difference(from: picture(1, 0)), 0)
+        XCTAssertEqual(picture(0, 0).difference(from: picture(1, 1)), 64.0 / 72, accuracy: 0.001, "only the middle column is the same")
+        XCTAssertEqual(picture(0, 0).difference(from: FrameSample(time: 0, width: 4, height: 4, luma: [UInt8](repeating: 0, count: 16))), 1)
     }
 
-    func testClicksWithoutAccessibilityAndAppSwitchesReadWell() {
+    func testChangesEndAtTheSettledView() {
+        let samples = [0, 0, 1, 1, 1, 2, 0].enumerated().map { picture(Double($0.offset) * 0.5, $0.element) }
+        XCTAssertEqual(Keyframes.changes(in: samples), [
+            Keyframes.Change(start: 0.5, settled: 1.0),
+            Keyframes.Change(start: 2.0, settled: 3.0),
+        ], "the second change runs to the end: its last picture is its settled view")
+        XCTAssertEqual(Keyframes.changes(in: [picture(0, 0)]), [])
+    }
+
+    // MARK: Keyframes
+
+    func testKeyframesAtTheStartDrawingsClicksAndAppSwitches() {
+        let keyframes = Keyframes.select(words: [], events: sampleEvents, samples: [], duration: 10)
+        // The first app switch (0.3 s) is the start's frame; shortcuts never cut.
+        XCTAssertEqual(keyframes.map(\.reason), [.start, .click, .drawing, .app])
+        XCTAssertEqual(keyframes.map(\.time), [0.3, 2.4, 4.2, 8.3])
+        XCTAssertEqual(keyframes.map(\.moment), [0, 2, 4, 8])
+        XCTAssertEqual(keyframes.map(\.events), [[0], [1, 2], [3], [4]])
+    }
+
+    func testDragsAndScrollsCutWhenTheyEnd() {
         let events = RecordingEvents(width: 100, height: 100, events: [
-            .app("Notes", window: nil, time: 0),
-            .click(at: CGPoint(x: 10.4, y: 20.6), right: true, time: 1),
-            .app("Safari", window: "Docs", time: 2),
+            RecordingEvent(time: 2, kind: .drag, x: 10, y: 10, toX: 80, toY: 10, until: 3),
+            RecordingEvent(time: 5, kind: .scroll, x: 50, y: 50, until: 6.5, direction: "down"),
         ])
-        XCTAssertEqual(AIReport.timeline(transcript: [], events: events, duration: 5).moments.map(\.text),
-                       ["In Notes", "Right-clicked at 10, 21", "Switched to Safari, window \"Docs\""])
+        let keyframes = Keyframes.select(words: [], events: events, samples: [], duration: 10)
+        XCTAssertEqual(keyframes.map(\.reason), [.start, .drag, .scroll])
+        XCTAssertEqual(keyframes.map(\.time), [0.3, 3.3, 6.8])
+        XCTAssertEqual(AIReport.describe(events), ["Dragged from 10, 10 to 80, 10", "Scrolled down at 50, 50"])
     }
 
-    func testDrawingsSayWhatAndWhere() {
-        let area = CGRect(x: 0, y: 0, width: 900, height: 600)
-        let events = RecordingEvents(width: area.width, height: area.height, events: [
-            .drawing(.rectangle, color: .blue, box: CGRect(x: 10, y: 400, width: 100, height: 50), tip: nil, time: 1),
-            .drawing(.highlighter, color: .yellow, box: CGRect(x: 400, y: 250, width: 100, height: 20), tip: nil, time: 2),
-            .drawing(.pen, color: .green, box: CGRect(x: 800, y: 280, width: 50, height: 40), tip: nil, time: 3),
+    func testAScreenChangeCutsAtItsSettledViewOnlyWhenThePictureIsNew() {
+        // Kinds 0, 1, 2, then back to 1: the last change shows a picture that already has a keyframe.
+        let kinds = [0, 0, 0, 1, 1, 1, 2, 2, 2, 1, 1]
+        let samples = kinds.enumerated().map { picture(Double($0.offset) * 0.5, $0.element) }
+        let keyframes = Keyframes.select(words: [], events: nil, samples: samples, duration: 5.5)
+        XCTAssertEqual(keyframes.map(\.reason), [.start, .change, .change])
+        XCTAssertEqual(keyframes.map(\.time), [0.3, 1.5, 3.0])
+        XCTAssertEqual(keyframes.map(\.moment), [0, 1.0, 2.5])
+    }
+
+    func testAFadingDrawingIsNotAScreenChange() {
+        let events = RecordingEvents(width: 100, height: 100, events: [
+            .drawing(.pen, color: .red, box: CGRect(x: 0, y: 0, width: 20, height: 20), tip: nil, time: 1),
         ])
-        XCTAssertEqual(AIReport.timeline(transcript: [], events: events, duration: 5).moments.map(\.text), [
-            "Drew a blue rectangle at the bottom left (10, 400, 100×50)",
-            "Highlighted in yellow in the middle (400, 250, 100×20)",
-            "Drew in green on the right (800, 280, 50×40)",
-        ])
+        // The ink appears at 1 s and fades at 4 s.
+        let samples = [0, 0, 0, 2, 2, 2, 2, 2, 2, 1, 1, 1].enumerated().map { picture(Double($0.offset) * 0.5, $0.element) }
+        let keyframes = Keyframes.select(words: [], events: events, samples: samples, duration: 6)
+        XCTAssertEqual(keyframes.map(\.reason), [.start, .drawing])
+    }
+
+    func testSpokenCuesCutOnlyANewPictureAndPausesNeverCut() {
+        // The screen turns from picture 0 into picture 1 one pixel every half second: never a material change.
+        var luma = (0..<72).map { pixel(0, $0) }
+        var samples = [FrameSample(time: 0, width: 9, height: 8, luma: luma)]
+        for index in 0..<72 {
+            luma[index] = pixel(1, index)
+            samples.append(FrameSample(time: Double(index + 1) * 0.5, width: 9, height: 8, luma: luma))
+        }
+        XCTAssertEqual(Keyframes.changes(in: samples), [])
+        let said = words([("Look", 2), ("here.", 2.3), ("Long", 10), ("pause", 10.3), ("then", 20), ("this", 37), ("now", 37.5)])
+        let keyframes = Keyframes.select(words: said, events: nil, samples: samples, duration: 37)
+        // "Look here" shows the same picture as the start; "this" is filler without a change; "now" is new.
+        XCTAssertEqual(keyframes.map(\.reason), [.start, .cue])
+        XCTAssertEqual(keyframes[1].time, 36.9, accuracy: 0.001, "kept inside the video")
+        XCTAssertEqual(keyframes[1].text, "this now", "from the start of the clause in progress")
+        XCTAssertEqual(keyframes[0].text, "Look here. Long pause then")
+        XCTAssertEqual(Keyframes.select(words: said, events: nil, samples: [], duration: 37).count, 1, "no pictures, no cues")
+    }
+
+    func testEachKeyframeOwnsTheSpeechFromTheClauseInProgressUntilTheNext() {
+        let events = RecordingEvents(width: 100, height: 100, events: [.click(at: CGPoint(x: 5, y: 5), right: false, time: 2)])
+        let said = words([("Open", 0.5), ("the", 0.8), ("menu.", 1.0), ("Then", 1.8), ("click", 2.1), ("save.", 2.4),
+                          ("It", 4.0), ("fails.", 4.3)])
+        let keyframes = Keyframes.select(words: said, events: events, samples: [], duration: 6)
+        XCTAssertEqual(keyframes.map(\.text), ["Open the menu.", "Then click save. It fails."])
+        XCTAssertEqual(keyframes.map(\.events), [[], [0]])
+        XCTAssertEqual(Keyframes.clauseStart(before: 2, in: said), 1.8)
+        XCTAssertEqual(Keyframes.clauseStart(before: 3.5, in: said), 3.5, "nothing was being said")
+    }
+
+    func testKeyframesAreCappedByPriorityAndInsideTheVideo() {
+        var list = (0..<30).map { RecordingEvent.click(at: .zero, right: false, time: Double($0)) }
+        list.append(.drawing(.pen, color: .red, box: CGRect(x: 0, y: 0, width: 20, height: 20), tip: nil, time: 29.95))
+        let keyframes = Keyframes.select(words: [], events: RecordingEvents(width: 100, height: 100, events: list), samples: [], duration: 30)
+        XCTAssertEqual(keyframes.count, Keyframes.maxFrames)
+        XCTAssertEqual(keyframes.map(\.time), keyframes.map(\.time).sorted())
+        XCTAssertEqual(keyframes.last?.reason, .drawing)
+        XCTAssertEqual(keyframes.last?.time, 29.9, "the drawing's frame is kept and moved inside the video")
+        XCTAssertFalse(keyframes.contains { $0.reason == .start }, "clicks win over the start")
     }
 
     func testPlaceNames() {
@@ -101,46 +183,22 @@ final class AIReportTests: XCTestCase {
         XCTAssertEqual(AIReport.placeName(of: .zero, in: .zero), "on the screen")
     }
 
-    // MARK: Frames
-
-    func testFramesAtNarrationDrawingsAndAppSwitches() {
-        let timeline = AIReport.timeline(transcript: [segment(1, "Look at this total."), segment(6, "It should be 42.")],
-                                         events: sampleEvents, duration: 10)
-        // The first app's frame (0.3 s) is too close to the narration at 1 s; the arrow's comes just after it is drawn.
-        XCTAssertEqual(timeline.frameTimes.map { ($0 * 10).rounded() / 10 }, [1, 4.2, 6, 8.3])
-        XCTAssertEqual(timeline.moments.map(\.frame), [nil, 0, nil, nil, 1, 2, 3])
-    }
-
-    func testADrawingWinsOverNarrationAtTheSameMoment() {
-        let events = RecordingEvents(width: 100, height: 100, events: [
-            .drawing(.pen, color: .red, box: CGRect(x: 0, y: 0, width: 20, height: 20), tip: nil, time: 3),
+    func testEventsReadWell() {
+        let events = RecordingEvents(width: 900, height: 600, events: [
+            .app("Notes", window: nil, time: 0),
+            .click(at: CGPoint(x: 10.4, y: 20.6), right: true, time: 1),
+            .app("Safari", window: "Docs", time: 2),
+            .app("Safari", window: "Docs 2", time: 3),
+            .drawing(.rectangle, color: .blue, box: CGRect(x: 10, y: 400, width: 100, height: 50), tip: nil, time: 4),
+            .drawing(.highlighter, color: .yellow, box: CGRect(x: 400, y: 250, width: 100, height: 20), tip: nil, time: 5),
+            .drawing(.pen, color: .green, box: CGRect(x: 800, y: 280, width: 50, height: 40), tip: nil, time: 6),
         ])
-        let timeline = AIReport.timeline(transcript: [segment(3, "Here.")], events: events, duration: 10)
-        XCTAssertEqual(timeline.frameTimes.count, 1)
-        XCTAssertEqual(timeline.frameTimes[0], 3.2, accuracy: 0.001)
-        XCTAssertEqual(timeline.moments.map(\.frame), [nil, 0])
-    }
-
-    func testFramesAreCappedSpacedAndInsideTheVideo() {
-        let transcript = (0..<30).map { segment(Double($0), "s\($0)") }
-        let events = RecordingEvents(width: 100, height: 100, events: [
-            .drawing(.pen, color: .red, box: CGRect(x: 0, y: 0, width: 20, height: 20), tip: nil, time: 29.95),
+        XCTAssertEqual(AIReport.describe(events), [
+            "In Notes", "Right-clicked at 10, 21", "Switched to Safari, window \"Docs\"", "Switched to window \"Docs 2\" in Safari",
+            "Drew a blue rectangle at the bottom left (10, 400, 100×50)",
+            "Highlighted in yellow in the middle (400, 250, 100×20)",
+            "Drew in green on the right (800, 280, 50×40)",
         ])
-        let timeline = AIReport.timeline(transcript: transcript, events: events, duration: 30)
-        XCTAssertEqual(timeline.frameTimes.count, AIReport.maxFrames)
-        XCTAssertEqual(timeline.frameTimes, timeline.frameTimes.sorted())
-        XCTAssertEqual(timeline.frameTimes.last, 29.9, "the drawing's frame is kept and moved inside the video")
-        XCTAssertEqual(timeline.moments.compactMap(\.frame), Array(0..<AIReport.maxFrames))
-    }
-
-    func testWithNothingToShowFramesAreSpreadEvenly() {
-        let timeline = AIReport.timeline(transcript: [], events: nil, duration: 4)
-        XCTAssertTrue(timeline.moments.isEmpty)
-        XCTAssertEqual(timeline.frameTimes, [1, 3])
-        XCTAssertEqual(AIReport.evenFrameTimes(duration: 0.5), [0.25])
-        let long = AIReport.evenFrameTimes(duration: 120)
-        XCTAssertEqual(long.count, AIReport.maxFrames)
-        XCTAssertEqual(long.first, 5)
     }
 
     // MARK: report.md
@@ -161,66 +219,56 @@ final class AIReportTests: XCTestCase {
         - Recorded area: 1000×600 points
         - Date: 21 October 2026 at 10:22
 
-        ## Timeline
+        ## Keyframes
 
-        Times are positions in the video. Positions are points from the top-left corner of the recorded area.
+        Each keyframe `#N [time]` has what was said while it was on screen, then what happened, with the time of each event. Positions are points from the top-left corner of the recorded area.
 
-        - [0:00] In Safari, window "Checkout"
-        - [0:01] Said: "Look at this total."
+        - #1 [0:00] "Look at this total."
+          - 0:00 In Safari, window "Checkout"
 
-          ![Frame 1 at 0:01](frames/01.png)
+          ![#1 at 0:00](frames/01.png)
 
-        - [0:02] Clicked button "Pay" at 412, 300
-        - [0:03] Pressed ⌘R
-        - [0:04] Drew a red arrow at the top right, pointing at 790, 50
+        - #2 [0:02] (nothing said)
+          - 0:02 Clicked button "Pay" at 412, 300
+          - 0:03 Pressed ⌘R
 
-          ![Frame 2 at 0:04](frames/02.png)
+          ![#2 at 0:02](frames/02.png)
 
-        - [0:06] Said: "It should be 42."
+        - #3 [0:04] "It should be 42."
+          - 0:04 Drew a red arrow at the top right, pointing at 790, 50
 
-          ![Frame 3 at 0:06](frames/03.png)
+          ![#3 at 0:04](frames/03.png)
 
-        - [0:08] Switched to window "Receipt" in Safari
+        - #4 [0:08] (nothing said)
+          - 0:08 Switched to window "Receipt" in Safari
 
-          ![Frame 4 at 0:08](frames/04.png)
-
-        ## Transcript
-
-        - [0:01] Look at this total.
-        - [0:06] It should be 42.
-
-        ## Video
-
-        [recording.mp4](recording.mp4)
+          ![#4 at 0:08](frames/04.png)
 
         ## For an AI agent
 
         The user recorded the screen while talking, to show you something and ask for something. What they said is the request; the clicks, shortcuts and app switches are what they did; the drawings mark what they are pointing at.
-        Read the timeline in order and look at every frame before you act (they are PNG files your Read tool can open). The events file has the exact time and position of every click, shortcut, app switch and drawing. If the request is still unclear, ask the user before you change anything.
+        Read the keyframes in order and look at every frame before you act (they are PNG files your Read tool can open). The events file has the exact time and position of every click, drag, scroll, shortcut, app switch and drawing. If the request is still unclear, ask the user before you change anything.
 
         - Video: `/Users/me/Desktop/Report 1/recording.mp4`
         - Events: `/Users/me/Desktop/Report 1/events.json`
-        - Frame 1 at 0:01: `/Users/me/Desktop/Report 1/frames/01.png`
-        - Frame 2 at 0:04: `/Users/me/Desktop/Report 1/frames/02.png`
-        - Frame 3 at 0:06: `/Users/me/Desktop/Report 1/frames/03.png`
-        - Frame 4 at 0:08: `/Users/me/Desktop/Report 1/frames/04.png`
+        - #1 at 0:00: `/Users/me/Desktop/Report 1/frames/01.png`
+        - #2 at 0:02: `/Users/me/Desktop/Report 1/frames/02.png`
+        - #3 at 0:04: `/Users/me/Desktop/Report 1/frames/03.png`
+        - #4 at 0:08: `/Users/me/Desktop/Report 1/frames/04.png`
 
         """)
     }
 
     func testClipboardVersionLinksAbsolutePaths() {
         let markdown = report(transcript: [segment(2, "It breaks.")], events: nil).markdown(absoluteLinks: true)
-        XCTAssertTrue(markdown.contains("![Frame 1 at 0:02](</Users/me/Desktop/Report 1/frames/01.png>)"))
-        XCTAssertTrue(markdown.contains("[recording.mp4](</Users/me/Desktop/Report 1/recording.mp4>)"))
+        XCTAssertTrue(markdown.contains("![#1 at 0:00](</Users/me/Desktop/Report 1/frames/01.png>)"))
         XCTAssertFalse(markdown.contains("](frames/"))
     }
 
-    func testReportWithoutEventsOrNarrationShowsFramesAndSaysWhy() {
+    func testReportWithoutEventsOrNarrationSaysWhy() {
         let markdown = report(transcript: [], events: nil, duration: 4).markdown(absoluteLinks: false)
         XCTAssertTrue(markdown.hasPrefix("# Report: Safari\n"))
-        XCTAssertTrue(markdown.contains("## Timeline\n\nNothing to show moment by moment"))
-        XCTAssertTrue(markdown.contains("## Frames\n\n![Frame 1 at 0:01](frames/01.png)\n\n![Frame 2 at 0:03](frames/02.png)\n\n## Transcript"))
-        XCTAssertTrue(markdown.contains("## Transcript\n\nNo narration. The recording has no audio.\n"))
+        XCTAssertTrue(markdown.contains("No narration. The recording has no audio.\n\n- #1 [0:00] (the start)\n"))
         XCTAssertTrue(markdown.contains("without narration"))
         XCTAssertFalse(markdown.contains("events.json"))
         XCTAssertFalse(markdown.contains("Recorded area"))
@@ -288,9 +336,19 @@ final class AIReportTests: XCTestCase {
 
     // MARK: Folder
 
+    func testSamplesAVideoAtTwoFramesASecond() async throws {
+        let directory = try Self.temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let video = directory.appendingPathComponent("input.mp4")
+        try await Self.writeSilentVideo(to: video, seconds: 3)
+        let samples = try await FrameSampler.samples(of: AVURLAsset(url: video), duration: 3)
+        XCTAssertEqual(samples.map(\.time), [0, 0.5, 1, 1.5, 2, 2.5])
+        XCTAssertEqual(samples.first?.width, 64)
+        XCTAssertEqual(samples.first?.height, 48)
+    }
+
     func testWritesFolderFromASilentRecording() async throws {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("AIReportTests-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let directory = try Self.temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let video = directory.appendingPathComponent("input.mp4")
         try await Self.writeSilentVideo(to: video, seconds: 3)
@@ -303,11 +361,12 @@ final class AIReportTests: XCTestCase {
 
         XCTAssertEqual(report.folder.deletingLastPathComponent().standardizedFileURL, directory.standardizedFileURL)
         XCTAssertTrue(report.folder.lastPathComponent.hasPrefix("Report "))
-        XCTAssertEqual(report.frameTimes.count, 1)
-        XCTAssertEqual(report.frameTimes[0], 1.2, accuracy: 0.001)
+        // The video only gets brighter: a change, but every picture looks the same as the start's.
+        XCTAssertEqual(report.keyframes.map(\.reason), [.start, .drawing])
+        XCTAssertEqual(report.keyframes[1].time, 1.2, accuracy: 0.001)
         let files = FileManager.default
         XCTAssertTrue(files.fileExists(atPath: report.folder.appendingPathComponent("recording.mp4").path))
-        let image = try XCTUnwrap(NSImage(contentsOf: report.folder.appendingPathComponent("frames/01.png")))
+        let image = try XCTUnwrap(NSImage(contentsOf: report.folder.appendingPathComponent("frames/02.png")))
         XCTAssertEqual(image.size, CGSize(width: 320, height: 240))
         let written = try JSONDecoder().decode(RecordingEvents.self, from: Data(contentsOf: report.folder.appendingPathComponent("events.json")))
         XCTAssertEqual(written, events)
@@ -316,17 +375,23 @@ final class AIReportTests: XCTestCase {
         XCTAssertTrue(markdown.contains("No narration. The recording has no audio."))
         XCTAssertTrue(markdown.contains("- App: Notes\n- Window: Ideas\n"))
         XCTAssertTrue(markdown.contains("- Recording: 320×240 px, 0:03"))
-        XCTAssertTrue(markdown.contains("- [0:01] Drew a red rectangle at the top left (10, 10, 100×50)\n\n  ![Frame 1 at 0:01](frames/01.png)"))
+        XCTAssertTrue(markdown.contains("- #2 [0:01] (nothing said)\n  - 0:01 Drew a red rectangle at the top left (10, 10, 100×50)"))
 
         // A second report from the same second gets its own folder; without events there is no events.json.
         let again = try await AIReporter.write(video, context: CaptureContext(), events: nil, recordedAt: Date(), in: directory)
         XCTAssertNotEqual(again.folder, report.folder)
         XCTAssertFalse(files.fileExists(atPath: again.folder.appendingPathComponent("events.json").path))
-        XCTAssertEqual(again.frameTimes, [0.75, 2.25])
+        XCTAssertEqual(again.keyframes.map(\.time), [0.3])
     }
 
-    /// A gray H.264 video with no audio track, 10 frames a second.
-    private static func writeSilentVideo(to url: URL, seconds: Int) async throws {
+    static func temporaryDirectory() throws -> URL {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("AIReportTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
+    }
+
+    /// A gray H.264 video with no audio track, 10 frames a second, a little brighter every frame.
+    static func writeSilentVideo(to url: URL, seconds: Int) async throws {
         let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
             AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: 320, AVVideoHeightKey: 240,

@@ -30,10 +30,36 @@ struct TranscriptSegment: Equatable {
         if let open = current { segments.append(open) }
         return segments
     }
+
+    /// The words of each segment, with times spread over it by length. A segment that is already one word stays.
+    /// For recognizers that only time whole stretches of speech.
+    static func words(in segments: [TranscriptSegment]) -> [TranscriptSegment] {
+        segments.flatMap { segment -> [TranscriptSegment] in
+            let parts = segment.text.split(whereSeparator: \.isWhitespace).map(String.init)
+            let letters = parts.reduce(0) { $0 + $1.count }
+            guard parts.count > 1, letters > 0 else {
+                return parts.map { TranscriptSegment(start: segment.start, end: segment.end, text: $0) }
+            }
+            let perLetter = max(segment.end - segment.start, 0) / Double(letters)
+            var start = segment.start
+            return parts.map { part in
+                let end = start + perLetter * Double(part.count)
+                defer { start = end }
+                return TranscriptSegment(start: start, end: end, text: part)
+            }
+        }
+    }
 }
 
-/// A report for an AI agent made from a recording: a folder with the video, key frames, the events and `report.md`,
-/// which tells moment by moment what was said, clicked, pressed, switched to and drawn.
+/// What was said in a recording: sentences or stretches of speech, and every word with its time.
+struct Transcript: Equatable {
+    var segments: [TranscriptSegment] = []
+    var words: [TranscriptSegment] = []
+}
+
+
+/// A report for an AI agent made from a recording: a folder with the video, keyframes, the events and `report.md`,
+/// which tells keyframe by keyframe what was said, clicked, pressed, switched to and drawn.
 /// Everything here is plain data; `AIReporter` does the transcription, the frames and the files.
 struct AIReport {
     /// What the recording shows and where it was made.
@@ -47,15 +73,6 @@ struct AIReport {
         var date: String
     }
 
-    /// One line of the timeline, and the frame that shows it, if it got one.
-    struct Moment: Equatable {
-        var time: Double
-        var text: String
-        /// Index into `frameTimes`.
-        var frame: Int?
-    }
-
-    static let maxFrames = 12
     static let videoName = "recording.mp4"
     static let eventsName = "events.json"
 
@@ -63,84 +80,53 @@ struct AIReport {
     var folder: URL
     var environment: Environment
     /// Everything said, in order. Empty when there was no narration.
-    var transcript: [TranscriptSegment]
+    var transcript: Transcript
     /// Why there is no transcript ("The recording has no audio."), when it is empty.
     var noNarration: String
     /// What happened during the recording. Nil for a recording made without them; `events.json` is written only then.
     var events: RecordingEvents?
-    /// The timeline, in time order.
-    var moments: [Moment] = []
-    /// The time of each frame, `frames/01.png` first.
-    var frameTimes: [Double] = []
+    /// The keyframes in time order, `frames/01.png` first, each with what was said and done while it was on screen.
+    var keyframes: [Keyframe] = []
 
     static func frameName(_ index: Int) -> String {
         String(format: "frames/%02d.png", index + 1)
     }
 
-    // MARK: Timeline
-
-    /// Fills `moments` and `frameTimes` for a video of `duration` seconds.
-    mutating func makeTimeline(duration: Double) {
-        (moments, frameTimes) = Self.timeline(transcript: transcript, events: events, duration: duration)
+    /// Fills `keyframes` for a video of `duration` seconds, sampled as `samples`.
+    mutating func makeKeyframes(duration: Double, samples: [FrameSample]) {
+        keyframes = Keyframes.select(words: transcript.words, events: events, samples: samples, duration: duration)
     }
 
-    /// Narration and events merged into one timeline in time order (narration first at the same time), and the frames:
-    /// at the start of each narration segment, just after each drawing (so it shows) and each app switch, at most
-    /// `maxFrames`. Drawings win over narration, narration over app switches, and two frames are never closer than
-    /// 0.75 s. Without any of those, frames are spread evenly over the video and belong to no moment.
-    static func timeline(transcript: [TranscriptSegment], events: RecordingEvents?, duration: Double,
-                         maxFrames: Int = maxFrames) -> (moments: [Moment], frameTimes: [Double]) {
-        // (moment, frame time, priority): a lower priority number is more important.
-        var entries: [(moment: Moment, frameAt: Double?, priority: Int)] = transcript.map {
-            (Moment(time: $0.start, text: "Said: \"\($0.text)\""), $0.start, 1)
-        }
+    // MARK: Events
+
+    /// One line for each event, in the order of `events`.
+    var eventTexts: [String] {
+        Self.describe(events)
+    }
+
+    /// "Clicked button "Pay" at 412, 300", "Switched to Safari": a line for each event, in order.
+    static func describe(_ events: RecordingEvents?) -> [String] {
+        guard let events else { return [] }
+        let area = CGSize(width: events.width, height: events.height)
         var lastApp: String?
-        for event in events?.events ?? [] {
-            let text: String
-            var frameAt: Double?
-            var priority = 3
+        return events.events.map { event in
             switch event.kind {
             case .click:
-                text = clickText(event)
+                return clickText(event)
+            case .drag:
+                let from = "\(Int(event.x ?? 0)), \(Int(event.y ?? 0))", to = "\(Int(event.toX ?? 0)), \(Int(event.toY ?? 0))"
+                return "Dragged " + (event.element.map { "\($0) " } ?? "") + "from \(from) to \(to)"
+            case .scroll:
+                return "Scrolled \(event.direction ?? "down") at \(Int(event.x ?? 0)), \(Int(event.y ?? 0))"
             case .shortcut:
-                text = "Pressed \(event.keys ?? "a shortcut")"
+                return "Pressed \(event.keys ?? "a shortcut")"
             case .app:
-                text = appText(event, previous: lastApp)
-                lastApp = event.app
-                frameAt = event.time + 0.3
-                priority = 2
+                defer { lastApp = event.app }
+                return appText(event, previous: lastApp)
             case .drawing:
-                text = drawingText(event, area: CGSize(width: events?.width ?? 0, height: events?.height ?? 0))
-                frameAt = event.time + 0.2
-                priority = 0
+                return drawingText(event, area: area)
             }
-            entries.append((Moment(time: event.time, text: text), frameAt, priority))
         }
-        // Stable: at the same time, narration (added first) comes first.
-        entries = entries.enumerated().sorted { ($0.element.moment.time, $0.offset) < ($1.element.moment.time, $1.offset) }.map(\.element)
-
-        let last = max(duration - 0.1, 0)
-        let candidates = entries.indices.compactMap { index -> (index: Int, time: Double, priority: Int)? in
-            entries[index].frameAt.map { (index, min(max($0, 0), last), entries[index].priority) }
-        }
-        var chosen: [(index: Int, time: Double)] = []
-        for candidate in candidates.sorted(by: { ($0.priority, $0.time) < ($1.priority, $1.time) }) where chosen.count < maxFrames {
-            if chosen.contains(where: { abs($0.time - candidate.time) < 0.75 }) { continue }
-            chosen.append((candidate.index, candidate.time))
-        }
-        chosen.sort { $0.time < $1.time }
-
-        var moments = entries.map(\.moment)
-        for (frame, pick) in chosen.enumerated() { moments[pick.index].frame = frame }
-        if chosen.isEmpty { return (moments, evenFrameTimes(duration: duration, maxCount: maxFrames)) }
-        return (moments, chosen.map(\.time))
-    }
-
-    /// About one frame every two seconds, at most `maxCount`, always inside the video.
-    static func evenFrameTimes(duration: Double, maxCount: Int = maxFrames) -> [Double] {
-        let last = max(duration - 0.1, 0)
-        let count = min(max(Int((duration / 2).rounded(.up)), 1), maxCount)
-        return (0..<count).map { min((Double($0) + 0.5) * duration / Double(count), last) }
     }
 
     private static func clickText(_ event: RecordingEvent) -> String {
@@ -187,10 +173,19 @@ struct AIReport {
         }
     }
 
+    /// What a keyframe with nothing said shows, by why it was cut.
+    static func silentText(_ reason: Keyframe.Reason) -> String {
+        switch reason {
+        case .start: "(the start)"
+        case .change, .scroll: "(the screen changed)"
+        case .cue, .drawing, .click, .drag, .app: "(nothing said)"
+        }
+    }
+
     // MARK: Markdown
 
     var title: String {
-        guard let first = transcript.first?.text else {
+        guard let first = transcript.segments.first?.text else {
             return environment.app.map { "Report: \($0)" } ?? "Report"
         }
         let words = first.split(separator: " ")
@@ -223,52 +218,36 @@ struct AIReport {
         if let events { lines.append("- Recorded area: \(Int(events.width))×\(Int(events.height)) points") }
         lines.append("- Date: \(environment.date)")
 
-        heading("Timeline")
-        if events != nil {
-            lines += ["Times are positions in the video. Positions are points from the top-left corner of the recorded area.", ""]
+        heading("Keyframes")
+        lines.append("Each keyframe `#N [time]` has what was said while it was on screen, then what happened, with the time of each event."
+            + (events == nil ? "" : " Positions are points from the top-left corner of the recorded area."))
+        if transcript.segments.isEmpty { lines.append("No narration. \(noNarration)") }
+        lines.append("")
+        let texts = eventTexts
+        let recorded = events?.events ?? []
+        for (index, keyframe) in keyframes.enumerated() {
+            let said = keyframe.text.isEmpty ? Self.silentText(keyframe.reason) : "\"\(keyframe.text)\""
+            lines.append("- #\(index + 1) [\(time(keyframe.time))] \(said)")
+            for event in keyframe.events { lines.append("  - \(time(recorded[event].time)) \(texts[event])") }
+            lines.append("")
+            lines.append("  ![#\(index + 1) at \(time(keyframe.time))](\(link(Self.frameName(index))))")
+            lines.append("")
         }
-        if moments.isEmpty {
-            lines.append("Nothing to show moment by moment: no narration, clicks, shortcuts, app switches or drawings.")
-        }
-        for moment in moments {
-            lines.append("- [\(time(moment.time))] \(moment.text)")
-            if let frame = moment.frame {
-                lines.append("")
-                lines.append("  ![Frame \(frame + 1) at \(time(frameTimes[frame]))](\(link(Self.frameName(frame))))")
-                lines.append("")
-            }
-        }
-        if !moments.contains(where: { $0.frame != nil }) {
-            heading("Frames")
-            for (index, at) in frameTimes.enumerated() {
-                lines.append("![Frame \(index + 1) at \(time(at))](\(link(Self.frameName(index))))")
-                lines.append("")
-            }
-        }
-
-        heading("Transcript")
-        if transcript.isEmpty {
-            lines.append("No narration. \(noNarration)")
-        } else {
-            lines += transcript.map { "- [\(time($0.start))] \($0.text)" }
-        }
-        heading("Video")
-        lines.append("[\(Self.videoName)](\(link(Self.videoName)))")
 
         heading("For an AI agent")
-        if transcript.isEmpty {
-            lines.append("The user recorded the screen without narration to show you something. Work out what they are showing from the frames, clicks, shortcuts and drawings, and ask them what they want if that is unclear.")
+        if transcript.segments.isEmpty {
+            lines.append("The user recorded the screen without narration to show you something. Work out what they are showing from the keyframes, clicks, shortcuts and drawings, and ask them what they want if that is unclear.")
         } else {
             lines.append("The user recorded the screen while talking, to show you something and ask for something. What they said is the request; the clicks, shortcuts and app switches are what they did; the drawings mark what they are pointing at.")
         }
-        lines.append("Read the timeline in order and look at every frame before you act (they are PNG files your Read tool can open)."
-            + (events == nil ? "" : " The events file has the exact time and position of every click, shortcut, app switch and drawing.")
+        lines.append("Read the keyframes in order and look at every frame before you act (they are PNG files your Read tool can open)."
+            + (events == nil ? "" : " The events file has the exact time and position of every click, drag, scroll, shortcut, app switch and drawing.")
             + " If the request is still unclear, ask the user before you change anything.")
         lines.append("")
         lines.append("- Video: `\(path(Self.videoName))`")
         if events != nil { lines.append("- Events: `\(path(Self.eventsName))`") }
-        for (index, at) in frameTimes.enumerated() {
-            lines.append("- Frame \(index + 1) at \(time(at)): `\(path(Self.frameName(index)))`")
+        for (index, keyframe) in keyframes.enumerated() {
+            lines.append("- #\(index + 1) at \(time(keyframe.time)): `\(path(Self.frameName(index)))`")
         }
         return lines.joined(separator: "\n") + "\n"
     }

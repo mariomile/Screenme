@@ -5,7 +5,7 @@ import ApplicationServices
 /// Positions are points from the top-left corner of the recorded area.
 struct RecordingEvent: Codable, Equatable {
     enum Kind: String, Codable {
-        case click, shortcut, app, drawing
+        case click, drag, scroll, shortcut, app, drawing
     }
 
     struct Box: Codable, Equatable {
@@ -17,9 +17,16 @@ struct RecordingEvent: Codable, Equatable {
 
     var time: Double
     var kind: Kind
-    /// Click: where. Arrow: where it points.
+    /// Click: where. Drag: where it started. Scroll: where the pointer was. Arrow: where it points.
     var x: Double?
     var y: Double?
+    /// Drag: where it was let go.
+    var toX: Double?
+    var toY: Double?
+    /// Drag and scroll: when it ended, in seconds of the video.
+    var until: Double?
+    /// Scroll: "down" (further down the page), "up", "left" or "right".
+    var direction: String?
     /// Click: "right" for a right click, nil for a left one.
     var button: String?
     /// Click: the element under the pointer, `button "Save"`, when Accessibility is allowed.
@@ -36,6 +43,10 @@ struct RecordingEvent: Codable, Equatable {
 
     static func click(at point: CGPoint, right: Bool, time: Double) -> RecordingEvent {
         RecordingEvent(time: time, kind: .click, x: point.x.rounded(), y: point.y.rounded(), button: right ? "right" : nil)
+    }
+
+    static func scroll(at point: CGPoint, direction: String, time: Double) -> RecordingEvent {
+        RecordingEvent(time: time, kind: .scroll, x: point.x.rounded(), y: point.y.rounded(), until: time, direction: direction)
     }
 
     static func shortcut(_ keys: String, time: Double) -> RecordingEvent {
@@ -137,6 +148,13 @@ final class RecordingEventRecorder {
             let right = event.type == .rightMouseDown
             MainActor.assumeIsolated { self?.click(right: right) }
         }) { monitors.append(monitor) }
+        if let monitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseUp, handler: { [weak self] _ in
+            MainActor.assumeIsolated { self?.mouseUp() }
+        }) { monitors.append(monitor) }
+        if let monitor = NSEvent.addGlobalMonitorForEvents(matching: .scrollWheel, handler: { [weak self] event in
+            let delta = CGVector(dx: event.scrollingDeltaX, dy: event.scrollingDeltaY)
+            MainActor.assumeIsolated { self?.scroll(delta) }
+        }) { monitors.append(monitor) }
         // Key events reach other apps' monitors only with Accessibility.
         if Permission.accessibility.isGranted, let monitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown, handler: { [weak self] event in
             let keys = RecordingEvents.shortcut(keyCode: event.keyCode, flags: event.modifierFlags, characters: event.charactersIgnoringModifiers)
@@ -158,6 +176,7 @@ final class RecordingEventRecorder {
     /// A restart: the events so far belong to the take that was thrown away.
     func reset() {
         events.removeAll()
+        pressed = nil
         lastApp = nil
         take += 1
         checkFrontApp()
@@ -174,11 +193,20 @@ final class RecordingEventRecorder {
 
     // MARK: Clicks
 
+    /// The left click in progress: its event and where it went down, to turn it into a drag when it moves.
+    private var pressed: (index: Int, point: CGPoint)?
+
+    /// A point in global Cocoa coordinates, in points from the top-left corner of the area.
+    private func local(_ location: CGPoint) -> CGPoint {
+        CGPoint(x: location.x - area.minX, y: area.maxY - location.y)
+    }
+
     private func click(right: Bool) {
         let location = NSEvent.mouseLocation
         guard area.contains(location), let now = time() else { return }
-        let point = CGPoint(x: location.x - area.minX, y: area.maxY - location.y)
+        let point = local(location)
         events.append(.click(at: point, right: right, time: now))
+        pressed = right ? nil : (events.count - 1, point)
         guard Permission.accessibility.isGranted else { return }
         let index = events.count - 1, take = self.take
         // Accessibility asks the clicked app, which is busy with the click: never on the main thread.
@@ -190,6 +218,32 @@ final class RecordingEventRecorder {
                 self.events[index].element = name
             }
         }
+    }
+
+    /// A press that moved more than 12 points before it was let go was a drag: its click becomes one.
+    private func mouseUp() {
+        guard let pressed, pressed.index < events.count else { return }
+        self.pressed = nil
+        let end = local(NSEvent.mouseLocation)
+        guard hypot(end.x - pressed.point.x, end.y - pressed.point.y) > 12, let now = time() else { return }
+        events[pressed.index].kind = .drag
+        events[pressed.index].toX = end.x.rounded()
+        events[pressed.index].toY = end.y.rounded()
+        events[pressed.index].until = now
+    }
+
+    // MARK: Scrolls
+
+    /// Scrolling over the area. Wheel events less than 0.6 s apart are one scroll, which ends at the last of them.
+    private func scroll(_ delta: CGVector) {
+        let location = NSEvent.mouseLocation
+        guard delta != .zero, area.contains(location), let now = time() else { return }
+        if let index = events.indices.last, events[index].kind == .scroll, now - (events[index].until ?? events[index].time) < 0.6 {
+            events[index].until = now
+            return
+        }
+        let direction = abs(delta.dy) >= abs(delta.dx) ? (delta.dy < 0 ? "down" : "up") : (delta.dx < 0 ? "right" : "left")
+        events.append(.scroll(at: local(location), direction: direction, time: now))
     }
 
     /// `button "Save"`: the role and the title or description of the element at a point in global top-left
