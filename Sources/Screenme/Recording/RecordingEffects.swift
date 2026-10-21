@@ -20,7 +20,9 @@ final class RecordingEffects {
     init(frame: CGRect, highlightClicks: Bool, showKeystrokes: Bool, drawing: LiveDrawing) {
         self.highlightClicks = highlightClicks
         self.showKeystrokes = showKeystrokes
-        panel = FloatingPanel(frame: frame, level: .popUpMenu, hasShadow: false, ignoresMouse: true,
+        // Below the controls and the draw palette: a click while drawing raises the overlay within its level,
+        // and at their level it would then cover them.
+        panel = FloatingPanel(frame: frame, level: .statusBar, hasShadow: false, ignoresMouse: true,
                               collectionBehavior: [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle])
         root = NSView(frame: CGRect(origin: .zero, size: frame.size))
         root.wantsLayer = true

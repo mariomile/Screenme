@@ -140,6 +140,8 @@ final class DrawingCanvas: NSView {
         var tip: CGPoint?
         if case .segment(_, let p1, _) = view.annotation.shape { tip = p1 }
         drawing.onDrawing(currentTool, drawing.color, box.intersection(bounds), tip)
+        // A finished drawing keeps only its own area (plus room for the arrow's shadow), not a full-screen layer.
+        view.frame = box.insetBy(dx: -12, dy: -12).integral.intersection(bounds)
         if !drawing.keep { fade(view, after: Self.fadeDelay) }
     }
 
@@ -184,6 +186,8 @@ private final class AnnotationView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
+        // The annotation is in canvas coordinates.
+        ctx.translateBy(x: -frame.minX, y: -frame.minY)
         EditorRenderer.draw(annotation, number: 1, unit: 1, ctx: ctx, baseScale: window?.backingScaleFactor ?? 2)
     }
 }
