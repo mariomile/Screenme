@@ -14,12 +14,19 @@ enum AnnotationEditor {
         // A GIF would be flattened to its first frame and saved as PNG bytes over the animation.
         guard item.kind == .image else { return }
         if WindowPresenter.shared.focus(windowID(for: item)) { return }
-        guard let source = ImageSource.load(url: item.url) else {
+        guard let controller = controller(for: item) else {
             Feedback.failure("Screenme could not open \(item.url.lastPathComponent)", duration: 3.2)
             return
         }
-        let controller = EditorController(item: item, source: source)
         editors[item.id] = EditorWindow(controller: controller) { editors[item.id] = nil }
+    }
+
+    /// The document for a capture. One saved from the editor before opens as it was captured,
+    /// with its annotations live again (`EditSidecar`). Nil when the image cannot be read.
+    static func controller(for item: CaptureItem) -> EditorController? {
+        let saved = EditSidecar.load(for: item.url)
+        guard let source = ImageSource.load(url: saved?.original ?? item.url) else { return nil }
+        return EditorController(item: item, source: source, saved: saved?.state)
     }
 }
 

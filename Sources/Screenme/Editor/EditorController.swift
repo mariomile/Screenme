@@ -43,12 +43,18 @@ final class EditorController: ObservableObject {
     let exportFolder = FileManager.default.temporaryDirectory
         .appendingPathComponent("ScreenmeEditorDrag/\(UUID().uuidString)", isDirectory: true)
 
-    init(item: CaptureItem, source: ImageSource) {
+    /// The document came back from the capture's edit sidecar: the annotations saved with Done are live again.
+    let reopened: Bool
+
+    /// `saved` is the document from the capture's edit sidecar, drawn over `source`, the pixels as captured.
+    init(item: CaptureItem, source: ImageSource, saved: EditState? = nil) {
         self.item = item
         self.source = source
+        reopened = saved != nil
         var initial = EditState(cropRect: source.bounds)
         initial.background = EditorStore.background()
         initial.spotlightDim = Prefs[Pref.editorSpotlightDim]
+        if let saved { initial = saved }
         state = initial
         savedState = initial
         styles = Dictionary(uniqueKeysWithValues: ToolKind.allCases.map { ($0, EditorStore.style(for: $0)) })

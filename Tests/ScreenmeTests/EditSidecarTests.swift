@@ -107,4 +107,31 @@ final class EditSidecarTests: PrefsSandboxTestCase {
         XCTAssertEqual(try Data(contentsOf: EditSidecar.originalURL(for: url)), captured, "a second Done keeps the original")
         XCTAssertEqual(EditSidecar.load(for: url)?.state.annotations.count, 2)
     }
+
+    @MainActor
+    func testReopeningASavedCaptureBringsBackTheAnnotationsOverTheOriginal() throws {
+        let url = try capture()
+        let item = CaptureItem(url: url, kind: .image)
+        let first = try XCTUnwrap(AnnotationEditor.controller(for: item))
+        XCTAssertFalse(first.reopened)
+        addBox(first, at: 2)
+        first.perform { $0.cropRect = CGRect(x: 1, y: 1, width: 30, height: 20) }
+        XCTAssertTrue(first.writeToCapture())
+
+        let reopened = try XCTUnwrap(AnnotationEditor.controller(for: item))
+        XCTAssertTrue(reopened.reopened)
+        XCTAssertEqual(reopened.state, first.state)
+        XCTAssertFalse(reopened.isDirty, "a reopened document has nothing to save yet")
+        // The source is the original, not the flattened crop the capture file now holds.
+        XCTAssertEqual(reopened.source.size, CGSize(width: 40, height: 30))
+        XCTAssertEqual(try XCTUnwrap(ImageSource.load(url: url)).size, CGSize(width: 30, height: 20))
+    }
+
+    @MainActor
+    func testACaptureNeverSavedFromTheEditorOpensAsToday() throws {
+        let controller = try XCTUnwrap(AnnotationEditor.controller(for: CaptureItem(url: try capture(), kind: .image)))
+        XCTAssertFalse(controller.reopened)
+        XCTAssertTrue(controller.state.annotations.isEmpty)
+        XCTAssertEqual(controller.state.cropRect, CGRect(x: 0, y: 0, width: 40, height: 30))
+    }
 }

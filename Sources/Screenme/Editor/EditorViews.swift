@@ -54,6 +54,13 @@ struct ToolbarLeading: View {
         HStack(spacing: 2) {
             SymbolButton(symbol: "arrow.uturn.backward", help: "Undo (⌘Z)\nTakes back your last change.", enabled: c.canUndo) { c.undo() }
             SymbolButton(symbol: "arrow.uturn.forward", help: "Redo (⇧⌘Z)\nBrings back what you undid.", enabled: c.canRedo) { c.redo() }
+            if c.reopened {
+                Text("Editing saved annotations")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 6)
+                    .help("The annotations you saved on this capture are editable again. Done saves over them.")
+            }
         }
         .padding(.horizontal, 2)
     }
