@@ -1,3 +1,4 @@
+import AVFoundation
 import CoreGraphics
 import ImageIO
 import UniformTypeIdentifiers
@@ -166,10 +167,11 @@ final class MCPServerTests: XCTestCase {
         XCTAssertEqual((tool?["error"] as? [String: Any])?["code"] as? Int, -32602)
     }
 
-    func testListsFourTools() async throws {
+    func testListsSixTools() async throws {
         let response = try await send(#"{"jsonrpc":"2.0","id":4,"method":"tools/list"}"#)
         let tools = try XCTUnwrap((response?["result"] as? [String: Any])?["tools"] as? [[String: Any]])
-        XCTAssertEqual(tools.compactMap { $0["name"] as? String }, ["take_screenshot", "get_latest_capture", "get_latest_report", "list_captures"])
+        XCTAssertEqual(tools.compactMap { $0["name"] as? String },
+                       ["take_screenshot", "get_latest_capture", "get_latest_report", "zoom_report", "inspect_report", "list_captures"])
         XCTAssertTrue(tools.allSatisfy { $0["inputSchema"] is [String: Any] })
     }
 
@@ -221,28 +223,13 @@ final class MCPServerTests: XCTestCase {
         XCTAssertThrowsError(try MCPServer.request(from: [:]))
     }
 
-    /// A report folder as Report for AI writes it, with `frames` PNG frames and summary.md last modified at `modified`.
-    @discardableResult
-    func writeReport(_ name: String, frames: Int, modified: Date) throws -> URL {
-        let report = folder.url.appendingPathComponent(name, isDirectory: true)
-        try FileManager.default.createDirectory(at: report.appendingPathComponent("frames"), withIntermediateDirectories: true)
-        for index in 0..<frames {
-            let image = try writeImage(width: 64, height: 40)
-            try FileManager.default.moveItem(at: image, to: report.appendingPathComponent(String(format: "frames/frame-%02d.png", index + 1)))
-        }
-        let markdown = report.appendingPathComponent("summary.md")
-        try "# \(name)\n".write(to: markdown, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.modificationDate: modified], ofItemAtPath: markdown.path)
-        return report
-    }
-
-    func testLatestReportReturnsTheMarkdownAndUpToSixFrames() async throws {
+    func testLatestReportReturnsTheSummaryAndTheContactSheet() async throws {
         let empty = try await send(#"{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"get_latest_report"}}"#)
         XCTAssertEqual((empty?["result"] as? [String: Any])?["isError"] as? Bool, true)
 
         let now = Date()
-        try writeReport("Report 2026-10-21 at 10.00.00", frames: 2, modified: now.addingTimeInterval(-60))
-        try writeReport("Report 2026-10-21 at 11.00.00", frames: 9, modified: now)
+        try ReportBundleTests.writeReport(in: folder.url, name: "Report 2026-10-21 at 10.00.00", video: false, modified: now.addingTimeInterval(-60))
+        try ReportBundleTests.writeReport(in: folder.url, name: "Report 2026-10-21 at 11.00.00", video: false, modified: now)
         // Not reports: another folder, and a report folder still being written (no summary.md yet).
         try FileManager.default.createDirectory(at: folder.url.appendingPathComponent("Screens"), withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: folder.url.appendingPathComponent("Report 2026-10-21 at 12.00.00"), withIntermediateDirectories: true)
@@ -252,13 +239,182 @@ final class MCPServerTests: XCTestCase {
         let result = try XCTUnwrap(response?["result"] as? [String: Any])
         XCTAssertNil(result["isError"])
         let content = try XCTUnwrap(result["content"] as? [[String: Any]])
-        XCTAssertEqual(content.first?["text"] as? String, "# Report 2026-10-21 at 11.00.00\n")
-        let images = content.filter { $0["type"] as? String == "image" }
-        XCTAssertEqual(images.count, MCPServer.maxReportFrames)
-        XCTAssertTrue(images.allSatisfy { $0["mimeType"] as? String == "image/png" })
-        // Spread over the recording, not just the first six.
-        let paths = content.compactMap { $0["text"] as? String }.filter { $0.hasSuffix(".png") }.map { URL(fileURLWithPath: $0).lastPathComponent }
-        XCTAssertEqual(paths, ["frame-01.png", "frame-02.png", "frame-04.png", "frame-05.png", "frame-07.png", "frame-08.png"])
+        XCTAssertEqual(content.map { $0["type"] as? String }, ["text", "image", "text", "text"])
+        XCTAssertEqual(content[0]["text"] as? String, "# Report 2026-10-21 at 11.00.00\n")
+        XCTAssertEqual(content[1]["mimeType"] as? String, "image/png")
+        XCTAssertEqual((content[2]["text"] as? String).map { URL(fileURLWithPath: $0).lastPathComponent }, "contact-sheet.png")
         XCTAssertTrue((content.last?["text"] as? String)?.hasSuffix("Report 2026-10-21 at 11.00.00") == true)
+    }
+
+    func testZoomAndInspectReport() async throws {
+        let report = try ReportBundleTests.writeReport(in: folder.url, name: "Report 2026-10-21 at 10.00.00", video: true, modified: Date())
+        try await ReportBundleTests.writeVideo(to: report.appendingPathComponent("recording.mp4"))
+
+        let zoom = try await send(#"{"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"zoom_report","arguments":{"phrase":"the total","grid":"2x2"}}}"#)
+        let content = try XCTUnwrap((zoom?["result"] as? [String: Any])?["content"] as? [[String: Any]])
+        XCTAssertEqual(content.map { $0["type"] as? String }, ["image", "text"])
+        let text = try XCTUnwrap(content[1]["text"] as? String)
+        XCTAssertTrue(text.contains("Around 0:01.4: #1 0:00.9, #2 0:01.6, #3 0:02.2, #4 0:02.9"), text)
+
+        let bad = try await send(#"{"jsonrpc":"2.0","id":13,"method":"tools/call","params":{"name":"zoom_report","arguments":{"mark":4}}}"#)
+        XCTAssertEqual((bad?["result"] as? [String: Any])?["isError"] as? Bool, true)
+
+        let inspect = try await send(#"{"jsonrpc":"2.0","id":14,"method":"tools/call","params":{"name":"inspect_report","arguments":{"json":true}}}"#)
+        let json = try XCTUnwrap((((inspect?["result"] as? [String: Any])?["content"] as? [[String: Any]])?.first?["text"] as? String))
+        XCTAssertTrue(json.contains("\"keyframes\""))
+        XCTAssertEqual(try MCPServer.zoomRequest(from: ["at": 12.5, "span": 4]), ZoomRequest(moment: .at(12.5), span: 4))
+        XCTAssertThrowsError(try MCPServer.zoomRequest(from: [:]))
+    }
+}
+
+/// Report folders read by `screenme zoom`, `frames` and `inspect`, from a generated silent video.
+final class ReportBundleTests: XCTestCase {
+    var folder: URL!
+
+    override func setUpWithError() throws {
+        folder = FileManager.default.temporaryDirectory.appendingPathComponent("ScreenmeReportTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    }
+
+    override func tearDownWithError() throws {
+        try? FileManager.default.removeItem(at: folder)
+    }
+
+    /// A report folder as Report for AI writes it: summary.md (modified at `modified`), report.json, a contact sheet,
+    /// and recording.mp4 when `video` is set (written by `writeVideo`). "Look at the total." is said from 1 s; mark 1 at 2 s.
+    @discardableResult
+    static func writeReport(in parent: URL, name: String, video: Bool, modified: Date) throws -> URL {
+        let report = parent.appendingPathComponent(name, isDirectory: true)
+        try FileManager.default.createDirectory(at: report.appendingPathComponent("frames"), withIntermediateDirectories: true)
+        let manifest = """
+        {"duration": 3, "video": "recording.mp4", "summary": "summary.md", "contactSheet": "contact-sheet.png",
+         "keyframes": [{"number": 1, "time": 0.3, "moment": 0, "reason": "start", "file": "frames/frame-01.png", "text": "Look at the total.", "events": []}],
+         "transcript": {"segments": [{"start": 1, "end": 2, "text": "Look at the total."}],
+                        "words": [{"start": 1, "end": 1.2, "text": "Look"}, {"start": 1.2, "end": 1.4, "text": "at"},
+                                  {"start": 1.4, "end": 1.6, "text": "the"}, {"start": 1.6, "end": 2, "text": "total."}]},
+         "marks": [{"number": 1, "time": 2, "keyframe": 1}], "events": []}
+        """
+        try manifest.write(to: report.appendingPathComponent("report.json"), atomically: true, encoding: .utf8)
+        let sheet = CGContext(data: nil, width: 64, height: 40, bitsPerComponent: 8, bytesPerRow: 0,
+                              space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        try ReportBundle.writePNG(sheet.makeImage()!, to: report.appendingPathComponent("contact-sheet.png"))
+        let summary = report.appendingPathComponent("summary.md")
+        try "# \(name)\n".write(to: summary, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: modified], ofItemAtPath: summary.path)
+        return report
+    }
+
+    /// A 3 second, 320 × 240 H.264 video with no audio, 10 frames a second, a little brighter every frame.
+    static func writeVideo(to url: URL) async throws {
+        let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
+        let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
+            AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: 320, AVVideoHeightKey: 240,
+        ])
+        let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+            kCVPixelBufferWidthKey as String: 320, kCVPixelBufferHeightKey as String: 240,
+        ])
+        writer.add(input)
+        XCTAssertTrue(writer.startWriting())
+        writer.startSession(atSourceTime: .zero)
+        for frame in 0..<30 {
+            while !input.isReadyForMoreMediaData { try await Task.sleep(for: .milliseconds(5)) }
+            var buffer: CVPixelBuffer?
+            CVPixelBufferPoolCreatePixelBuffer(nil, adaptor.pixelBufferPool!, &buffer)
+            let pixels = try XCTUnwrap(buffer)
+            CVPixelBufferLockBaseAddress(pixels, [])
+            memset(CVPixelBufferGetBaseAddress(pixels), Int32(frame * 8), CVPixelBufferGetDataSize(pixels))
+            CVPixelBufferUnlockBaseAddress(pixels, [])
+            adaptor.append(pixels, withPresentationTime: CMTime(value: CMTimeValue(frame), timescale: 10))
+        }
+        input.markAsFinished()
+        writer.endSession(atSourceTime: CMTime(value: 3, timescale: 1))
+        await writer.finishWriting()
+        XCTAssertEqual(writer.status, .completed)
+    }
+
+    func testParsesReportCommands() throws {
+        XCTAssertEqual(try Command.parse(["zoom", "--at", "0:12"]), .zoom(ZoomRequest(moment: .at(12))))
+        XCTAssertEqual(try Command.parse(["zoom", "/tmp/Report 1", "--at", "1:02:03.5", "--span", "4", "--grid", "4x2"]),
+                       .zoom(ZoomRequest(bundle: "/tmp/Report 1", moment: .at(3723.5), span: 4, columns: 4, rows: 2)))
+        XCTAssertEqual(try Command.parse(["zoom", "latest", "--at", "the width changes"]), .zoom(ZoomRequest(moment: .phrase("the width changes"))))
+        XCTAssertEqual(try Command.parse(["zoom", "--phrase", "here"]), .zoom(ZoomRequest(moment: .phrase("here"))))
+        XCTAssertEqual(try Command.parse(["zoom", "--mark", "2"]), .zoom(ZoomRequest(moment: .mark(2))))
+        XCTAssertEqual(try Command.parse(["frames", "R", "--from", "0:04", "--to", "6", "--fps", "2"]), .frames(bundle: "R", from: 4, to: 6, fps: 2))
+        XCTAssertEqual(try Command.parse(["frames", "--from", "1", "--to", "2"]), .frames(bundle: "latest", from: 1, to: 2, fps: 4))
+        XCTAssertEqual(try Command.parse(["inspect"]), .inspect(bundle: "latest", json: false))
+        XCTAssertEqual(try Command.parse(["inspect", "R", "--json"]), .inspect(bundle: "R", json: true))
+        for arguments in [["zoom"], ["zoom", "--at", "1", "--mark", "2"], ["zoom", "--mark", "x"], ["zoom", "--at", "1", "--grid", "9x1"],
+                          ["zoom", "--at", "1", "--span", "0"], ["zoom", "--at"], ["zoom", "--at", "1", "--full"], ["frames", "--from", "2"],
+                          ["frames", "--from", "3", "--to", "1"], ["frames", "--from", "1", "--to", "2", "--fps", "0"], ["inspect", "--yaml"],
+                          ["inspect", "a", "b"]] {
+            XCTAssertThrowsError(try Command.parse(arguments), "\(arguments)")
+        }
+    }
+
+    func testTimes() {
+        XCTAssertEqual(ReportBundle.parseTime("12.5"), 12.5)
+        XCTAssertEqual(ReportBundle.parseTime("1:05"), 65)
+        XCTAssertNil(ReportBundle.parseTime("here"))
+        XCTAssertNil(ReportBundle.parseTime("-1"))
+        XCTAssertEqual(ReportBundle.format(65.04), "1:05.0")
+        XCTAssertEqual(ReportBundle.format(3723.46), "1:02:03.5")
+    }
+
+    func testFindsMomentsByTimePhraseAndMark() throws {
+        let report = try ReportBundle(Self.writeReport(in: folder, name: "Report 1", video: false, modified: Date()))
+        XCTAssertEqual(try report.time(of: .at(9)), 3, "inside the video")
+        XCTAssertEqual(try report.time(of: .phrase("THE tot")), 1.4, "case does not matter; the last word may be cut short")
+        XCTAssertEqual(try report.time(of: .phrase("look, at")), 1)
+        XCTAssertThrowsError(try report.time(of: .phrase("nothing like it"))) {
+            XCTAssertEqual($0 as? ReportBundle.Failure, .phraseNotFound("nothing like it"))
+        }
+        XCTAssertEqual(try report.time(of: .mark(1)), 2)
+        XCTAssertThrowsError(try report.time(of: .mark(3))) { XCTAssertEqual($0 as? ReportBundle.Failure, .markNotFound(3, count: 1)) }
+        XCTAssertThrowsError(try ReportBundle(folder.appendingPathComponent("missing"))) {
+            XCTAssertEqual(($0 as? ReportBundle.Failure).map { "\($0)" }?.hasSuffix("is not a Report for AI folder (no report.json)"), true)
+        }
+        XCTAssertEqual(try ReportBundle.open("latest", reports: folder).url.lastPathComponent, "Report 1")
+        XCTAssertEqual(report.said(from: 1.3, to: 1.5), "at the")
+    }
+
+    func testZoomWritesAGridAroundTheMoment() async throws {
+        let url = try Self.writeReport(in: folder, name: "Report 1", video: true, modified: Date())
+        try await Self.writeVideo(to: url.appendingPathComponent("recording.mp4"))
+        let report = try ReportBundle(url)
+
+        let zoom = try await report.zoom(.at(1))
+        XCTAssertEqual(zoom.image.deletingLastPathComponent().lastPathComponent, "zoom")
+        XCTAssertEqual(zoom.times.count, 9)
+        XCTAssertEqual(zoom.times.first ?? 0, 0.5, accuracy: 0.001, "a quarter of the span before")
+        XCTAssertEqual(zoom.times.last ?? 0, 2.5, accuracy: 0.001)
+        XCTAssertEqual(zoom.said, "Look at the total.")
+        let source = try XCTUnwrap(CGImageSourceCreateWithURL(zoom.image as CFURL, nil))
+        let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        XCTAssertEqual(image.width, 1920)
+        XCTAssertEqual(image.height, 4 * 12 + 3 * 468)
+        XCTAssertTrue(zoom.text.hasPrefix(zoom.image.path + "\nAround 0:01.0: #1 0:00.5, #2 0:00.8,"))
+
+        // Near the end the grid stays inside the video.
+        let end = try await report.zoom(.mark(1), span: 2, columns: 2, rows: 1)
+        XCTAssertEqual(end.times.map { ($0 * 100).rounded() / 100 }, [0.95, 2.95])
+
+        let none = try ReportBundle(Self.writeReport(in: folder, name: "Report 2", video: false, modified: Date()))
+        do {
+            _ = try await none.zoom(.at(1))
+            XCTFail("no video, no zoom")
+        } catch {
+            XCTAssertEqual(error as? ReportBundle.Failure, .noVideo(none.video.path))
+        }
+    }
+
+    func testFramesOfAStretch() async throws {
+        let url = try Self.writeReport(in: folder, name: "Report 1", video: true, modified: Date())
+        try await Self.writeVideo(to: url.appendingPathComponent("recording.mp4"))
+        let files = try await ReportBundle(url).frames(from: 0.5, to: 1.5, fps: 4)
+        XCTAssertEqual(files.count, 5)
+        XCTAssertEqual(files.first?.lastPathComponent, "frame-0001-0m00.5.png")
+        let source = try XCTUnwrap(CGImageSourceCreateWithURL(files[0] as CFURL, nil))
+        XCTAssertEqual(CGImageSourceCreateImageAtIndex(source, 0, nil)?.width, 320)
     }
 }

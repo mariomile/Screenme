@@ -81,10 +81,41 @@ struct MCPServer {
         ],
         [
             "name": "get_latest_report",
-            "description": "Return the newest Screenme Report for AI: a screen recording the user narrated and drew on, "
-                + "as summary.md (a moment by moment timeline of what they said, clicked, pressed, switched to and drew, "
-                + "with the paths of the video, frames and events.json) plus up to \(MCPServer.maxReportFrames) of its frames as images.",
+            "description": "Return the newest Screenme Report for AI: a screen recording the user narrated, clicked and drew on "
+                + "to show you something. Returns summary.md (each numbered keyframe #N with what they said and did while it was "
+                + "on screen, and the paths of the frames, video and report.json) and the contact sheet, every keyframe in one "
+                + "image with its #N. Look at the sheet first, then open frames/frame-NN.png for #N; red marks are their drawings. "
+                + "Use zoom_report for a closer look at a moment.",
             "inputSchema": ["type": "object", "properties": [String: Any]()],
+        ],
+        [
+            "name": "zoom_report",
+            "description": "A closer look at a moment of a Screenme Report for AI: a grid of frames from its video around a time, "
+                + "something the user said, or a mark they drew (\"mark N\" in the summary), returned as an image with the "
+                + "time of each cell and what was said. Use it when something moves, happens between keyframes, or a mark is unclear.",
+            "inputSchema": [
+                "type": "object",
+                "properties": [
+                    "report": ["type": "string", "description": "Report folder path, default the latest report"],
+                    "at": ["type": "string", "description": "A time in the video: 1:05, 0:12.5 or 12.5"],
+                    "phrase": ["type": "string", "description": "Words the user said; the grid centers on when they said them"],
+                    "mark": ["type": "integer", "minimum": 1, "description": "A mark number from the summary"],
+                    "span": ["type": "number", "description": "Seconds covered, default 2 (a quarter before the moment)"],
+                    "grid": ["type": "string", "description": "Columns x rows, default 3x3"],
+                ],
+            ],
+        ],
+        [
+            "name": "inspect_report",
+            "description": "Return a Screenme Report for AI as text: summary.md, or with json true its report.json manifest "
+                + "(keyframes with crops, every word with its time, events, marks and the windows timeline).",
+            "inputSchema": [
+                "type": "object",
+                "properties": [
+                    "report": ["type": "string", "description": "Report folder path, default the latest report"],
+                    "json": ["type": "boolean", "description": "Return report.json instead of summary.md"],
+                ],
+            ],
         ],
         [
             "name": "list_captures",
@@ -110,6 +141,18 @@ struct MCPServer {
                     return failure("There are no reports yet in \(reports.path). Make one with Report for AI on a recording.")
                 }
                 return try reportResult(report)
+            case "zoom_report":
+                let request = try Self.zoomRequest(from: arguments)
+                let zoom = try await ReportBundle.open(request.bundle, reports: reports)
+                    .zoom(request.moment, span: request.span, columns: request.columns, rows: request.rows)
+                guard let png = Self.pngData(of: zoom.image) else { return ["content": [text(zoom.text)]] }
+                return ["content": [["type": "image", "data": png.base64EncodedString(), "mimeType": "image/png"], text(zoom.text)]]
+            case "inspect_report":
+                let report = try ReportBundle.open(arguments["report"] as? String ?? "latest", reports: reports)
+                if arguments["json"] as? Bool == true {
+                    return ["content": [text(try String(contentsOf: report.url.appendingPathComponent(ReportBundle.manifestName), encoding: .utf8))]]
+                }
+                return ["content": [text(try report.summary)]]
             default:
                 let limit = arguments["limit"] as? Int ?? Command.defaultListLimit
                 guard limit > 0 else { return failure("limit must be at least 1") }
@@ -140,9 +183,19 @@ struct MCPServer {
         }
     }
 
-    // MARK: Reports
+    /// The zoom_report arguments as the command line would take them.
+    static func zoomRequest(from arguments: [String: Any]) throws -> ZoomRequest {
+        var line = [arguments["report"] as? String ?? "latest"]
+        if let at = arguments["at"] { line += ["--at", "\(at)"] }
+        if let phrase = arguments["phrase"] as? String { line += ["--phrase", phrase] }
+        if let mark = arguments["mark"] { line += ["--mark", "\(mark)"] }
+        if let span = arguments["span"] { line += ["--span", "\(span)"] }
+        if let grid = arguments["grid"] as? String { line += ["--grid", grid] }
+        guard case .zoom(let request) = try Command.parse(["zoom"] + line) else { throw Command.UsageError("zoom_report needs at, phrase or mark") }
+        return request
+    }
 
-    static let maxReportFrames = 6
+    // MARK: Reports
 
     /// The save folder from the app's settings, the Desktop until it is changed.
     static var saveFolder: URL {
@@ -164,19 +217,14 @@ struct MCPServer {
         return reports.max { $0.1 < $1.1 }?.0
     }
 
-    /// summary.md, then up to `maxReportFrames` frames spread over the recording, then the folder's path.
+    /// summary.md, then the contact sheet with its path, then the folder's path.
     private func reportResult(_ folder: URL) throws -> [String: Any] {
         let markdown = try String(contentsOf: folder.appendingPathComponent("summary.md"), encoding: .utf8)
-        let frames = ((try? FileManager.default.contentsOfDirectory(at: folder.appendingPathComponent("frames"), includingPropertiesForKeys: nil)) ?? [])
-            .filter { $0.pathExtension.lowercased() == "png" }
-            .sorted { $0.lastPathComponent < $1.lastPathComponent }
-        let count = min(frames.count, Self.maxReportFrames)
-        let picked = (0..<count).map { frames[$0 * frames.count / count] }
         var content: [[String: Any]] = [text(markdown)]
-        for frame in picked {
-            guard let png = Self.pngData(of: frame) else { continue }
+        let sheet = folder.appendingPathComponent("contact-sheet.png")
+        if let png = Self.pngData(of: sheet) {
             content.append(["type": "image", "data": png.base64EncodedString(), "mimeType": "image/png"])
-            content.append(text(frame.path))
+            content.append(text(sheet.path))
         }
         content.append(text("Report folder: \(folder.path)"))
         return ["content": content]

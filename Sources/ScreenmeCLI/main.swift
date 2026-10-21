@@ -30,6 +30,31 @@ case .latest:
     print(latest.url.path)
 case .list(let limit):
     for capture in folder.captures().prefix(limit) { print(capture.url.path) }
+case .zoom(let request):
+    do {
+        let report = try ReportBundle.open(request.bundle, reports: MCPServer.saveFolder)
+        print(try await report.zoom(request.moment, span: request.span, columns: request.columns, rows: request.rows).text)
+    } catch {
+        fail("\(error)")
+    }
+case .frames(let bundle, let from, let to, let fps):
+    do {
+        let report = try ReportBundle.open(bundle, reports: MCPServer.saveFolder)
+        for file in try await report.frames(from: from, to: to, fps: fps) { print(file.path) }
+    } catch {
+        fail("\(error)")
+    }
+case .inspect(let bundle, let json):
+    do {
+        let report = try ReportBundle.open(bundle, reports: MCPServer.saveFolder)
+        if json {
+            print(try String(contentsOf: report.url.appendingPathComponent(ReportBundle.manifestName), encoding: .utf8))
+        } else {
+            print(try report.summary, terminator: "")
+        }
+    } catch {
+        fail("\(error)")
+    }
 case .mcp:
     let server = MCPServer(folder: folder, capture: { try await folder.take($0) })
     while let line = readLine() {
