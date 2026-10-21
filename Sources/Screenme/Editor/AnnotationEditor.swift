@@ -93,6 +93,7 @@ private final class EditorWindow: NSObject, NSWindowDelegate, NSToolbarDelegate 
         closeObserver = nil
         changes = nil
         controller.canvas = nil
+        controller.removeExportFolder()
         onClose()
     }
 

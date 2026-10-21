@@ -37,6 +37,9 @@ final class EditorController: ObservableObject {
 
     weak var canvas: CanvasView?
     weak var window: NSWindow?
+    /// This editor's temporary files (Share), removed when it closes.
+    let exportFolder = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ScreenmeEditorDrag/\(UUID().uuidString)", isDirectory: true)
 
     init(item: CaptureItem, source: ImageSource) {
         self.item = item

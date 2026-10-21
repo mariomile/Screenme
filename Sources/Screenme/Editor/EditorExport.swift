@@ -13,13 +13,19 @@ extension EditorController {
     }
 
     private func encode(_ image: CGImage, as type: UTType) -> Data? {
-        let data = NSMutableData()
-        guard let destination = CGImageDestinationCreateWithData(data, type.identifier as CFString, 1, nil) else { return nil }
-        let dpi = 72 * unit * state.outputScale
-        var properties: [CFString: Any] = [kCGImagePropertyDPIWidth: dpi, kCGImagePropertyDPIHeight: dpi]
-        if type == .jpeg { properties[kCGImageDestinationLossyCompressionQuality] = Prefs[Pref.jpegQuality] }
-        CGImageDestinationAddImage(destination, image, properties as CFDictionary)
-        return CGImageDestinationFinalize(destination) ? data as Data : nil
+        flattened(image, as: type).encoded()
+    }
+
+    private func flattened(_ image: CGImage, as type: UTType) -> FlattenedImage {
+        FlattenedImage(image: image, type: type, dpi: 72 * unit * state.outputScale,
+                       jpegQuality: Prefs[Pref.jpegQuality], name: item.url.lastPathComponent)
+    }
+
+    /// The document flattened for a drag out. Encoding waits until the receiver asks for the file, off the main thread.
+    func dragExport() -> FlattenedImage? {
+        canvas?.finishTextEditing()
+        guard let (image, type) = flatten(for: item.url) else { return nil }
+        return flattened(image, as: type)
     }
 
     /// Done: flattens, overwrites the capture file in place, tells the rest of the app, closes.
@@ -46,7 +52,7 @@ extension EditorController {
     func copyForAI() {
         canvas?.finishTextEditing()
         guard let image = EditorRenderer.flatten(state: state, source: source, opaque: false),
-              let png = encode(image, as: .png), let file = dragFile() else { return }
+              let png = encode(image, as: .png), let file = aiFile() else { return }
         CaptureContexts.setNotes(notes, for: item.url)
         Task {
             guard let hidden = await AIClipboard.copy(image: image, png: png, path: file, captureURL: item.url,
@@ -134,15 +140,31 @@ extension EditorController {
         }
     }
 
-    /// A file holding the flattened image, for dragging out of the toolbar and sharing.
-    func dragFile() -> URL? {
+    /// A file holding the flattened image, for sharing. Every share overwrites the one file in this editor's
+    /// temporary folder, which goes when the editor closes.
+    func shareFile() -> URL? {
+        writeFlattened(in: exportFolder)
+    }
+
+    /// The file Copy for AI names in the copied text. That text is pasted after the editor may have closed,
+    /// so the file outlives the editor: one per capture, overwritten by the next Copy for AI.
+    private func aiFile() -> URL? {
+        writeFlattened(in: FileManager.default.temporaryDirectory
+            .appendingPathComponent("ScreenmeCopyForAI/\(item.id.uuidString)", isDirectory: true))
+    }
+
+    private func writeFlattened(in folder: URL) -> URL? {
         canvas?.finishTextEditing()
         guard let (image, type) = flatten(for: item.url), let data = encode(image, as: type) else { return nil }
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("ScreenmeEditorDrag/\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let url = folder.appendingPathComponent(item.url.lastPathComponent)
-        guard (try? data.write(to: url)) != nil else { return nil }
+        guard (try? data.write(to: url, options: .atomic)) != nil else { return nil }
         return url
+    }
+
+    /// Called when the editor closes.
+    func removeExportFolder() {
+        try? FileManager.default.removeItem(at: exportFolder)
     }
 
     // MARK: Closing
@@ -170,6 +192,25 @@ extension EditorController {
             }
         }
         return false
+    }
+}
+
+/// Flattened pixels and how to encode them. Immutable, so a drag out can encode it on its own queue.
+struct FlattenedImage: @unchecked Sendable {
+    let image: CGImage
+    let type: UTType
+    let dpi: CGFloat
+    let jpegQuality: Double
+    /// The file name a drag out offers.
+    let name: String
+
+    func encoded() -> Data? {
+        let data = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(data, type.identifier as CFString, 1, nil) else { return nil }
+        var properties: [CFString: Any] = [kCGImagePropertyDPIWidth: dpi, kCGImagePropertyDPIHeight: dpi]
+        if type == .jpeg { properties[kCGImageDestinationLossyCompressionQuality] = jpegQuality }
+        CGImageDestinationAddImage(destination, image, properties as CFDictionary)
+        return CGImageDestinationFinalize(destination) ? data as Data : nil
     }
 }
 

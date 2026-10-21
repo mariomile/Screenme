@@ -162,7 +162,7 @@ struct ToolbarTrailing: View {
 
             IconButton(symbol: "doc.on.doc", help: Prefs[Pref.editorCloseAfterCopy] ? "Copy (⌘C)\nPuts the edited image on the clipboard, saves it and closes the editor." : "Copy (⌘C)\nPuts the edited image on the clipboard without closing the editor.", enabled: true) { c.copyImage() }
             IconButton(symbol: "sparkles", help: "Copy for AI (⇧⌘C)\nCopies the edited image with its context for Claude, ChatGPT or Cursor: the app and page it came from, your notes on annotations and the text in it. Hides sensitive info first if Settings > Screenshots says so.", enabled: true) { c.copyForAI() }
-            IconButton(symbol: "square.and.arrow.up", help: "Share\nSends the edited image with AirDrop, Messages, Mail and more. Hides sensitive info first if Settings > Screenshots says so.", enabled: true) { if let url = c.dragFile() { Share.show(url) } }
+            IconButton(symbol: "square.and.arrow.up", help: "Share\nSends the edited image with AirDrop, Messages, Mail and more. Hides sensitive info first if Settings > Screenshots says so.", enabled: true) { if let url = c.shareFile() { Share.show(url) } }
 
             Button("Done") { c.save() }
                 .buttonStyle(.borderedProminent)
@@ -298,13 +298,43 @@ final class DragThumbView: NSView, NSDraggingSource {
     override func resetCursorRects() { addCursorRect(bounds, cursor: .openHand) }
     override func mouseDown(with event: NSEvent) { dragging = false }
 
+    /// A file promise: the image is encoded and written only when the receiver asks for it, on `writeQueue`.
     override func mouseDragged(with event: NSEvent) {
-        guard !dragging, let url = controller.dragFile() else { return }
+        guard !dragging, let export = controller.dragExport() else { return }
         dragging = true
-        let item = NSDraggingItem(pasteboardWriter: url as NSURL)
+        let provider = NSFilePromiseProvider(fileType: export.type.identifier, delegate: self)
+        provider.userInfo = export
+        let item = NSDraggingItem(pasteboardWriter: provider)
         item.setDraggingFrame(bounds, contents: thumbnail)
         beginDraggingSession(with: [item], event: event, source: self)
     }
 
     func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation { .copy }
+}
+
+extension DragThumbView: NSFilePromiseProviderDelegate {
+    private nonisolated static let writeQueue: OperationQueue = {
+        let queue = OperationQueue()
+        queue.qualityOfService = .userInitiated
+        return queue
+    }()
+
+    nonisolated func filePromiseProvider(_ provider: NSFilePromiseProvider, fileNameForType fileType: String) -> String {
+        (provider.userInfo as? FlattenedImage)?.name ?? "Screenshot.png"
+    }
+
+    nonisolated func filePromiseProvider(_ provider: NSFilePromiseProvider, writePromiseTo url: URL,
+                                         completionHandler: @escaping (Error?) -> Void) {
+        guard let data = (provider.userInfo as? FlattenedImage)?.encoded() else {
+            return completionHandler(CocoaError(.fileWriteUnknown))
+        }
+        do {
+            try data.write(to: url, options: .atomic)
+            completionHandler(nil)
+        } catch {
+            completionHandler(error)
+        }
+    }
+
+    nonisolated func operationQueue(for provider: NSFilePromiseProvider) -> OperationQueue { Self.writeQueue }
 }
