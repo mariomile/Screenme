@@ -40,6 +40,14 @@ final class ShortcutStoreTests: PrefsSandboxTestCase {
         XCTAssertEqual(ShortcutStore.combo(for: .captureFullscreen), ShortcutAction.captureFullscreen.defaultCombo)
     }
 
+    func testAllCombosAgreesWithComboForEveryAction() {
+        ShortcutStore.set(nil, for: .captureArea)
+        ShortcutStore.set(combo(kVK_ANSI_H, cmdKey | optionKey), for: .openHistory)
+        let all = ShortcutStore.allCombos()
+        XCTAssertEqual(all.count, ShortcutAction.allCases.count)
+        for action in ShortcutAction.allCases { XCTAssertEqual(all[action] ?? nil, ShortcutStore.combo(for: action), "\(action)") }
+    }
+
     func testResetAllRestoresDefaults() {
         ShortcutStore.set(nil, for: .captureArea)
         ShortcutStore.set(combo(kVK_ANSI_9, cmdKey), for: .recordScreen)

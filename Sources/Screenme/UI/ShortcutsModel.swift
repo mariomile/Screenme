@@ -99,8 +99,7 @@ final class ShortcutsModel: ObservableObject {
     // MARK: Updating
 
     private func reloadCombos() {
-        var next: [ShortcutAction: KeyCombo] = [:]
-        for action in ShortcutAction.allCases { next[action] = ShortcutStore.combo(for: action) }
+        let next = ShortcutStore.allCombos().compactMapValues { $0 }
         if next != combos { combos = next }
         updateStatuses()
     }
