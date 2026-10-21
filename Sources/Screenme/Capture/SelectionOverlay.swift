@@ -48,6 +48,9 @@ final class SelectionSession {
     /// Where the moving corner sits relative to the pointer (changes while Space moves the selection).
     private var cornerOffset = CGSize.zero
     private var spaceHeld = false
+    /// The selection after an arrow key moved or resized it: shown as is, whatever modifiers are held,
+    /// until the pointer moves again.
+    private var fixedRect: CGRect?
 
     // Lifecycle
     private var previousApp: NSRunningApplication?
@@ -223,6 +226,7 @@ final class SelectionSession {
         let delta = CGPoint(x: location.x - pointer.x, y: location.y - pointer.y)
         pointer = location
         if dragging, let screen = dragScreen {
+            if delta != .zero { fixedRect = nil }
             if spaceHeld {
                 translateSelection(by: delta, within: screen.frame)
             } else {
@@ -260,6 +264,7 @@ final class SelectionSession {
         anchor = Self.clamp(pointer, to: screen.frame)
         corner = anchor
         cornerOffset = .zero
+        fixedRect = nil
         dragging = true
         startDragPolling()
         refresh()
@@ -270,12 +275,20 @@ final class SelectionSession {
             if windowsLoaded { pickWindow(at: pointer) } else { pendingWindowClick = pointer }
             return
         }
+        guard dragging else { return }
+        confirmDrag()
+    }
+
+    /// Ends the drag with the selection as it is now: a capture when it is big enough, otherwise back to picking.
+    /// The button release and Return both come here.
+    private func confirmDrag() {
         guard dragging, let screen = dragScreen else { return }
         let rect = selectionRect()
         stopDragPolling()
         dragging = false
         dragScreen = nil
         spaceHeld = false
+        fixedRect = nil
         if rect.width >= 3, rect.height >= 3 {
             finish(SelectionResult(target: .area(rect, screen), frozenImage: frozenImage(forArea: rect, on: screen)))
         } else if mode == .recording {
@@ -299,13 +312,37 @@ final class SelectionSession {
                 refresh()
             }
         case kVK_Return, kVK_ANSI_KeypadEnter:
-            if mode == .recording { finish(SelectionResult(target: .display(NSScreen.at(pointer)), frozenImage: nil)) }
-        case kVK_LeftArrow: nudge(dx: -1, dy: 0)
-        case kVK_RightArrow: nudge(dx: 1, dy: 0)
-        case kVK_UpArrow: nudge(dx: 0, dy: 1)
-        case kVK_DownArrow: nudge(dx: 0, dy: -1)
+            if dragging {
+                confirmDrag()
+            } else if mode == .recording {
+                finish(SelectionResult(target: .display(NSScreen.at(pointer)), frozenImage: nil))
+            }
+        case kVK_LeftArrow: arrowPressed(.left, dx: -1, dy: 0)
+        case kVK_RightArrow: arrowPressed(.right, dx: 1, dy: 0)
+        case kVK_UpArrow: arrowPressed(.up, dx: 0, dy: 1)
+        case kVK_DownArrow: arrowPressed(.down, dx: 0, dy: -1)
         default: break
         }
+    }
+
+    /// With a selection (the button is held) an arrow moves it by one point, ten with Shift; with Option it resizes
+    /// from the bottom and right edges. Without one it moves the pointer.
+    private func arrowPressed(_ arrow: SelectionNudge.Arrow, dx: CGFloat, dy: CGFloat) {
+        guard dragging, !windowMode, let screen = dragScreen else {
+            nudge(dx: dx, dy: dy)
+            return
+        }
+        let flags = NSEvent.modifierFlags
+        // Shift and Option mean step size and resize here, not square and from the center.
+        let current = fixedRect ?? dragRect(modifiers: [])
+        let rect = SelectionNudge.apply(arrow, to: current, step: SelectionNudge.step(shift: flags.contains(.shift)),
+                                        resize: flags.contains(.option), within: screen.frame)
+        // The corner keeps following the pointer from where it is now.
+        anchor = CGPoint(x: rect.minX, y: rect.minY)
+        corner = CGPoint(x: rect.maxX, y: rect.maxY)
+        cornerOffset = CGSize(width: corner.x - pointer.x, height: corner.y - pointer.y)
+        fixedRect = rect
+        refresh()
     }
 
     /// Moves the real mouse by one point (ten with Shift) for pixel precision.
@@ -331,8 +368,12 @@ final class SelectionSession {
 
     /// The selection as the user sees it: modifiers applied, kept on the display, whole points.
     private func selectionRect() -> CGRect {
+        fixedRect ?? dragRect(modifiers: NSEvent.modifierFlags)
+    }
+
+    /// The drag's rectangle with `flags` applied: Shift makes it square, Option draws it from the center.
+    private func dragRect(modifiers flags: NSEvent.ModifierFlags) -> CGRect {
         guard let screen = dragScreen else { return .zero }
-        let flags = NSEvent.modifierFlags
         let bounds = screen.frame
         let dx = corner.x - anchor.x, dy = corner.y - anchor.y
         let signX: CGFloat = dx < 0 ? -1 : 1, signY: CGFloat = dy < 0 ? -1 : 1

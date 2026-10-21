@@ -6,7 +6,7 @@ extension ShortcutAction {
     var help: String {
         switch self {
         case .allInOne: "Opens a bar with every capture mode, so you can pick one without remembering its shortcut."
-        case .captureArea: "Drag to capture part of the screen. Press Space to switch to window capture."
+        case .captureArea: "Drag to capture part of the screen. Press Space to switch to window capture. While you hold the button, the arrow keys move the selection by 1 pt (Shift: 10 pt), Option with an arrow resizes it from the bottom and right edges, and Return captures it."
         case .captureWindow: "Click a window to capture just that window, with its shadow if turned on."
         case .captureFullscreen: "Captures the whole screen the pointer is on, right away."
         case .capturePreviousArea: "Captures the same area as your last area capture, without selecting again."
