@@ -21,6 +21,15 @@ The script builds a Release copy, signs it with a self-signed certificate kept i
 
 On first launch, allow Screenme in System Settings > Privacy & Security > Screen & System Audio Recording, then relaunch. If an older Screenme is already in that list, remove it with the minus button first.
 
+## Automation
+
+Every action has a `screenme://` link, for Shortcuts, Raycast or scripts:
+
+- `screenme://capture-fullscreen`, `screenme://capture-area`, `screenme://record-screen`, `screenme://open-history`, … (the action name in kebab case)
+- `screenme://capture-area?x=100&y=100&width=640&height=400`: capture that rectangle without selecting (screen points, top-left origin). Works for area, text, translate, self-timer, scrolling and recording; a link-started recording starts at once with your saved settings, and the same link stops it.
+- `screenme://capture-window?app=Safari`: the frontmost window of an app (name or bundle ID)
+- `screenme://settings?tab=recording`: open Settings
+
 ## Where files go
 
 Captures are kept in `~/Library/Application Support/Screenme/Captures` until you save them. Save copies to your save folder (the Desktop by default).
