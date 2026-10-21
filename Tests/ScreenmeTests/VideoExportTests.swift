@@ -100,6 +100,18 @@ final class VideoExportTests: XCTestCase {
         XCTAssertEqual(first.width, 160)
         XCTAssertEqual(first.height, 90)
     }
+
+    func testGIFExportOfAGeneratedVideoDecodesWithOneFramePerTick() async throws {
+        let source = try video(width: 320, height: 180, seconds: 1)
+        let renderer = FrameRenderer(renderSize: CGSize(width: 160, height: 90))
+        let output = try await GIFExporter.export(source, range: range(0, 1), renderer: renderer, fps: 10, quality: .medium) { _ in }
+        cleanup.append(output)
+        let image = try XCTUnwrap(CGImageSourceCreateWithURL(output as CFURL, nil))
+        XCTAssertEqual(CGImageSourceGetCount(image), 10, "1 s at 10 fps, and the moving block changes every tick")
+        let last = try XCTUnwrap(CGImageSourceCreateImageAtIndex(image, 9, nil))
+        XCTAssertEqual(last.width, 160)
+        XCTAssertEqual(last.height, 90)
+    }
 }
 
 /// The renderer the timing test exports with: a gradient background with padding, corners and shadow,

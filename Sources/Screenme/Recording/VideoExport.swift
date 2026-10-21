@@ -118,24 +118,28 @@ enum GIFExporter {
         let dither = quality.gifDither
 
         let cancel = ExportCancel()
-        let data: Data = try await withTaskCancellationHandler {
-            try await Task.detached(priority: .userInitiated) {
-                try await encode(source: source, composition: composition, width: width, height: height, fps: rate,
-                                 colors: colors, dither: dither, cancel: cancel, progress: progress)
-            }.value
-        } onCancel: {
-            cancel.cancel()
-        }
-
         let output = Storage.newURL(extension: "gif")
-        try data.write(to: output)
+        do {
+            try await withTaskCancellationHandler {
+                try await Task.detached(priority: .userInitiated) {
+                    try await encode(source: source, composition: composition, width: width, height: height, fps: rate,
+                                     colors: colors, dither: dither, output: output, cancel: cancel, progress: progress)
+                }.value
+            } onCancel: {
+                cancel.cancel()
+            }
+        } catch {
+            try? FileManager.default.removeItem(at: output)
+            throw error
+        }
         progress(1)
         return output
     }
 
+    /// Streams the GIF to `url` as frames are made.
     private static func encode(source: EditedVideo.Source, composition: AVVideoComposition, width: Int, height: Int, fps: Double,
-                               colors: Int, dither: Bool, cancel: ExportCancel,
-                               progress: @Sendable (Double) -> Void) async throws -> Data {
+                               colors: Int, dither: Bool, output url: URL, cancel: ExportCancel,
+                               progress: @Sendable (Double) -> Void) async throws {
         let asset = source.composition
         let frame = RGBAFrame(width: width, height: height)
         let total = max(asset.duration.seconds, 0.04)
@@ -155,7 +159,10 @@ enum GIFExporter {
             }
         }
         let palette = builder.build(colors: colors)
-        let encoder = GIFEncoder(width: width, height: height, palette: palette, dither: dither)
+        guard FileManager.default.createFile(atPath: url.path, contents: nil) else { throw ScreenmeError.recordingFailed }
+        let handle = try FileHandle(forWritingTo: url)
+        defer { try? handle.close() }
+        let encoder = GIFEncoder(width: width, height: height, palette: palette, dither: dither, output: handle)
 
         // Pass 2: read every drawn frame in order and hold each one until the next tick of the GIF clock.
         let reader = try AVAssetReader(asset: asset)
@@ -206,7 +213,7 @@ enum GIFExporter {
         if reader.status == .failed { throw reader.error ?? ScreenmeError.recordingFailed }
         emitTicks(before: total)
         guard emitted > 0 else { throw ScreenmeError.recordingFailed }
-        return encoder.finish(endTime: total)
+        try encoder.finishFile(endTime: total)
     }
 }
 
