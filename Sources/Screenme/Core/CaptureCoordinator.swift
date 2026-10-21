@@ -101,33 +101,13 @@ final class CaptureCoordinator {
             try await finishScreenshot(SelectionResult(target: result.target, frozenImage: nil))
 
         case .captureText:
-            guard let result = try await select(.text, target) else { return }
-            let image = try await image(for: result)
-            let text = try await TextRecognizer.recognize(image)
-            if text.isEmpty {
-                Toast.show("No text found", symbol: "text.viewfinder")
-            } else {
-                Clipboard.copyText(text)
-                Toast.show("Text copied", symbol: "doc.on.clipboard")
-            }
+            guard let recognized = try await recognizedText(target) else { return }
+            Clipboard.copyText(recognized.text)
+            Toast.show("Text copied", symbol: "doc.on.clipboard")
 
         case .translateText:
-            guard let result = try await select(.text, target) else { return }
-            let text = try await TextRecognizer.recognize(try await image(for: result))
-            guard !text.isEmpty else {
-                Toast.show("No text found", symbol: "text.viewfinder")
-                return
-            }
-            let translation: TextTranslation
-            do {
-                translation = try await TextTranslator.translate(text)
-            } catch TranslateError.sameLanguage(let language) {
-                Clipboard.copyText(text)
-                Toast.show("Already in \(language): text copied", symbol: "doc.on.clipboard")
-                return
-            }
-            Clipboard.copyText(translation.text)
-            TranslationPanel.show(translation, near: result.target.cocoaFrame)
+            guard let recognized = try await recognizedText(target) else { return }
+            try await TranslationPanel.translateAndShow(recognized.text, near: recognized.area)
 
         case .pickColor:
             await ScreenColorPicker.run()
@@ -150,6 +130,18 @@ final class CaptureCoordinator {
     private func select(_ mode: SelectionMode, _ target: ActionLink.Target?) async throws -> SelectionResult? {
         guard let target else { return await SelectionOverlay.select(mode) }
         return SelectionResult(target: try await target.captureTarget(), frozenImage: nil)
+    }
+
+    /// The text in what the user picks or the link names, and where it was (global Cocoa coordinates).
+    /// Nil when the user cancels or there is no text, which a toast says.
+    private func recognizedText(_ target: ActionLink.Target?) async throws -> (text: String, area: CGRect)? {
+        guard let result = try await select(.text, target) else { return nil }
+        let text = try await TextRecognizer.recognize(try await image(for: result))
+        guard !text.isEmpty else {
+            Toast.show("No text found", symbol: "text.viewfinder")
+            return nil
+        }
+        return (text, result.target.cocoaFrame)
     }
 
     // MARK: Screenshots
