@@ -114,23 +114,52 @@ enum BrowserPage {
         } else {
             return nil
         }
-        return await Task.detached {
+        return await run(script, timeout: 1)
+    }
+
+    /// Runs osascript without blocking any thread. The permission prompt holds osascript until the user answers:
+    /// after `timeout` seconds it is stopped and Copy for AI goes on without the page.
+    private static func run(_ script: String, timeout: Double) async -> Page? {
+        await withCheckedContinuation { continuation in
+            let answer = Answer(continuation)
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
             process.arguments = ["-e", script]
             let pipe = Pipe()
             process.standardOutput = pipe
             process.standardError = FileHandle.nullDevice
-            guard (try? process.run()) != nil else { return nil }
-            // The permission prompt holds osascript until the user answers: Copy for AI does not wait for it.
-            let deadline = Date().addingTimeInterval(3)
-            while process.isRunning, Date() < deadline { usleep(20_000) }
-            if process.isRunning { process.terminate(); return nil }
-            let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-            let parts = output.trimmingCharacters(in: .whitespacesAndNewlines).components(separatedBy: "\n")
-            guard process.terminationStatus == 0, parts.count == 2, parts[1].hasPrefix("http") else { return nil }
-            return Page(title: parts[0], url: parts[1])
-        }.value
+            process.terminationHandler = { process in
+                let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+                let parts = output.trimmingCharacters(in: .whitespacesAndNewlines).components(separatedBy: "\n")
+                guard process.terminationStatus == 0, parts.count == 2, parts[1].hasPrefix("http") else { return answer.give(nil) }
+                answer.give(Page(title: parts[0], url: parts[1]))
+            }
+            do {
+                try process.run()
+            } catch {
+                return answer.give(nil)
+            }
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + timeout) {
+                if process.isRunning { process.terminate() }
+                answer.give(nil)
+            }
+        }
+    }
+
+    /// Resumes the continuation with the first answer, the page or the timeout, and ignores the other.
+    private final class Answer: @unchecked Sendable {
+        private let lock = NSLock()
+        private var continuation: CheckedContinuation<Page?, Never>?
+
+        init(_ continuation: CheckedContinuation<Page?, Never>) { self.continuation = continuation }
+
+        func give(_ page: Page?) {
+            lock.lock()
+            let waiting = continuation
+            continuation = nil
+            lock.unlock()
+            waiting?.resume(returning: page)
+        }
     }
 }
 
