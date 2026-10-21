@@ -53,19 +53,15 @@ enum Watermark {
 
     /// `image` with the watermark drawn in, or unchanged when it is off.
     static func applied(to image: CGImage) -> CGImage {
-        guard let text,
-              let context = CGContext(data: nil, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: 0,
-                                      space: image.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!,
-                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return image }
-        let bounds = CGRect(x: 0, y: 0, width: image.width, height: image.height)
-        context.draw(image, in: bounds)
-        let size = fontSize(forShortSide: min(bounds.width, bounds.height))
-        let string = attributed(text, size: size)
-        NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
-        string.draw(in: frame(of: string.size(), in: bounds, margin: size))
-        NSGraphicsContext.restoreGraphicsState()
-        return context.makeImage() ?? image
+        guard let text else { return image }
+        return image.overdrawn { context, bounds in
+            let size = fontSize(forShortSide: min(bounds.width, bounds.height))
+            let string = attributed(text, size: size)
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
+            string.draw(in: frame(of: string.size(), in: bounds, margin: size))
+            NSGraphicsContext.restoreGraphicsState()
+        }
     }
 }
 
