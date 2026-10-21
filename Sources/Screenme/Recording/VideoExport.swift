@@ -81,6 +81,13 @@ enum ExportResolution: String, CaseIterable, Identifiable {
         size.width > 1280 ? .p720 : .original
     }
 
+    /// `size` scaled down to at most `maxWidth` pixels wide (0: any width), for GIFs. Never scales up; dimensions are even.
+    static func fitting(_ size: CGSize, maxWidth: Int) -> CGSize {
+        guard size.width > 0, size.height > 0 else { return size }
+        let scale = maxWidth > 0 ? min(1, CGFloat(maxWidth) / size.width) : 1
+        return CGSize(width: max(2, Int((size.width * scale).rounded()) & ~1), height: max(2, Int((size.height * scale).rounded()) & ~1))
+    }
+
     /// The output size for a source of `size`. Never scales up; dimensions are even.
     func outputSize(for size: CGSize) -> CGSize {
         guard size.width > 0, size.height > 0 else { return size }

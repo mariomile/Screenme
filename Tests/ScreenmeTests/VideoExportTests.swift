@@ -72,6 +72,12 @@ final class VideoExportTests: XCTestCase {
         XCTAssertEqual(mutedLength, 2, accuracy: 0.1)
     }
 
+    func testGIFMaxWidthScalesDownOnly() {
+        XCTAssertEqual(ExportResolution.fitting(CGSize(width: 1920, height: 1080), maxWidth: 800), CGSize(width: 800, height: 450))
+        XCTAssertEqual(ExportResolution.fitting(CGSize(width: 640, height: 360), maxWidth: 1280), CGSize(width: 640, height: 360))
+        XCTAssertEqual(ExportResolution.fitting(CGSize(width: 1921, height: 1081), maxWidth: 0), CGSize(width: 1920, height: 1080), "even")
+    }
+
     func testHEVCExport() async throws {
         let source = try video(width: 640, height: 360, seconds: 1)
         let renderer = FrameRenderer(renderSize: CGSize(width: 640, height: 360))

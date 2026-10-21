@@ -120,23 +120,34 @@ struct VideoEditorView: View {
                 .frame(width: 110)
                 .help("Format\nMP4 keeps full quality and sound. GIF loops silently and plays anywhere, even in chats.")
             }
-            labeled("Size") {
-                Picker("Size", selection: $model.resolution) {
-                    ForEach(ExportResolution.allCases) { Text($0.title).tag($0) }
+            if model.format == .mp4 {
+                labeled("Codec") {
+                    Picker("Codec", selection: $model.codec) {
+                        ForEach(VideoCodec.allCases) { Text($0.title).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .frame(width: 120)
+                    .help("Codec\nH.264 plays everywhere. HEVC makes a file about a third smaller at the same look, for Apple devices and recent browsers.")
                 }
-                .labelsHidden()
-                .frame(width: 100)
-                .help("Size\nSmaller sizes make lighter files, good for chats and email.")
-            }
-            labeled("Quality") {
-                Picker("Quality", selection: $model.quality) {
-                    ForEach(VideoQuality.allCases) { Text($0.title).tag($0) }
+                labeled("Size") {
+                    Picker("Size", selection: $model.resolution) {
+                        ForEach(ExportResolution.allCases) { Text($0.title).tag($0) }
+                    }
+                    .labelsHidden()
+                    .frame(width: 100)
+                    .help("Size\nSmaller sizes make lighter files, good for chats and email.")
                 }
-                .labelsHidden()
-                .frame(width: 90)
-                .help("Quality\nHigher looks sharper; lower makes a lighter file.")
-            }
-            if model.format == .gif {
+            } else {
+                labeled("Max width") {
+                    Picker("Max width", selection: $model.gifMaxWidth) {
+                        Text("Original").tag(0)
+                        ForEach([1280, 1024, 800, 640, 480], id: \.self) { Text("\($0) px").tag($0) }
+                    }
+                    .labelsHidden()
+                    .frame(width: 100)
+                    .help("Max width\nThe widest the GIF gets. Narrower GIFs are much lighter.")
+                }
                 labeled("Frame rate") {
                     Picker("Frame rate", selection: $model.gifFPS) {
                         ForEach([10, 15, 20, 30], id: \.self) { Text("\($0) fps").tag($0) }
@@ -145,6 +156,16 @@ struct VideoEditorView: View {
                     .frame(width: 90)
                     .help("Frame rate\nMore frames move more smoothly; fewer make a lighter GIF.")
                 }
+            }
+            labeled("Quality") {
+                Picker("Quality", selection: $model.quality) {
+                    ForEach(VideoQuality.allCases) { Text($0.title).tag($0) }
+                }
+                .labelsHidden()
+                .frame(width: 90)
+                .help(model.format == .gif
+                      ? "Quality\nHigh uses 256 colors with dithering; Medium and Low use fewer colors for a lighter GIF."
+                      : "Quality\nHigher looks sharper; lower makes a lighter file.")
             }
             if model.hasAudio && model.format == .mp4 {
                 labeled("Audio") {
@@ -158,7 +179,7 @@ struct VideoEditorView: View {
             Spacer()
             VStack(alignment: .trailing, spacing: 2) {
                 Text("\(Int(model.outputSize.width)) × \(Int(model.outputSize.height))")
-                Text(model.format == .gif ? "\(model.gifFPS) fps, loops" : "H.264")
+                Text(model.format == .gif ? "\(model.gifFPS) fps, loops" : model.codec.title)
                     .foregroundStyle(.tertiary)
             }
             .font(.system(size: 11, weight: .medium).monospacedDigit())
@@ -182,7 +203,7 @@ struct VideoEditorView: View {
             Button(CaptureAction.saveAs.title(for: model.item.kind)) { model.perform(.saveAs) }
                 .help("Save As\nExports with these settings where you choose.")
             Button("Done") { model.perform(.done) }
-                .help("Done (Return)\nExports your trim and settings as a new capture in Quick Access and History, then closes.")
+                .help("Done (Return)\nExports your edit as a new capture in History (copied too when Copy file to clipboard is on in Settings > Recording), then closes.")
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
         }

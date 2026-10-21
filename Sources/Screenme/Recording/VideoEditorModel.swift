@@ -9,6 +9,33 @@ enum ExportFormat: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+extension Pref {
+    static let videoCodec = PrefKey(name: "videoCodec", defaultValue: VideoCodec.h264)
+    static let videoGIFFPS = PrefKey(name: "videoGIFFPS", defaultValue: 15)
+    static let videoGIFMaxWidth = PrefKey(name: "videoGIFMaxWidth", defaultValue: 1280)
+}
+
+/// What the video editor does with a file it exported. Never the after-recording actions: with Open in video
+/// editor on they would open another editor on the export, and with Save to folder on save it a second time.
+@MainActor
+struct VideoEditorDelivery {
+    var record: (CaptureItem) -> Void
+    var copy: (CaptureItem) -> Void
+
+    static let live = VideoEditorDelivery(record: { CaptureCoordinator.shared.record($0) }, copy: { Clipboard.copy($0) })
+
+    /// Done: the export becomes the latest capture in History, and is copied when Copy file to clipboard is on.
+    func finished(_ item: CaptureItem) {
+        record(item)
+        if Prefs[Pref.afterRecordingCopy] { copy(item) }
+    }
+
+    /// Save already put the file where the user asked; the new file still goes to History.
+    func saved(_ item: CaptureItem) {
+        record(item)
+    }
+}
+
 @MainActor
 final class VideoEditorModel: ObservableObject {
     let item: CaptureItem
@@ -32,18 +59,22 @@ final class VideoEditorModel: ObservableObject {
     @Published private(set) var isPlaying = false
     @Published private(set) var thumbnails: [CGImage?] = Array(repeating: nil, count: 24)
 
-    @Published var format = ExportFormat.mp4 {
-        didSet {
-            if format == .gif, oldValue != .gif, resolution == .original { resolution = .gif(for: videoSize) }
-        }
-    }
+    @Published var format = ExportFormat.mp4
     @Published var resolution = ExportResolution.original
     @Published var quality = VideoQuality.high
-    @Published var gifFPS = 15
+    @Published var gifFPS = Prefs[Pref.videoGIFFPS] {
+        didSet { Prefs[Pref.videoGIFFPS] = gifFPS }
+    }
+    /// The widest a GIF gets, in pixels; 0 keeps the full width.
+    @Published var gifMaxWidth = Prefs[Pref.videoGIFMaxWidth] {
+        didSet { Prefs[Pref.videoGIFMaxWidth] = gifMaxWidth }
+    }
     @Published var mute = false {
         didSet { player.isMuted = mute }
     }
-    @Published var codec = VideoCodec.h264
+    @Published var codec = Prefs[Pref.videoCodec] {
+        didSet { Prefs[Pref.videoCodec] = codec }
+    }
     @Published private(set) var exportProgress: Double?
     @Published private(set) var exportTitle = ""
 
@@ -80,8 +111,12 @@ final class VideoEditorModel: ObservableObject {
 
     var source: VideoSource { VideoSource(size: videoSize, events: events, cursor: cursorPath) }
 
-    init(item: CaptureItem) {
+    /// What happens to an exported file.
+    private let delivery: VideoEditorDelivery
+
+    init(item: CaptureItem, delivery: VideoEditorDelivery = .live) {
         self.item = item
+        self.delivery = delivery
         events = RecordingEvents.events(for: item.url)
         cursorPath = VideoSource.cursorPath(of: events)
         asset = AVURLAsset(url: item.url)
@@ -232,7 +267,12 @@ final class VideoEditorModel: ObservableObject {
 
     // MARK: Export
 
-    var outputSize: CGSize { edit.outputSize(for: source, resolution: resolution) }
+    var outputSize: CGSize {
+        switch format {
+        case .mp4: edit.outputSize(for: source, resolution: resolution)
+        case .gif: ExportResolution.fitting(edit.outputSize(for: source, resolution: .original), maxWidth: gifMaxWidth)
+        }
+    }
     var clipDuration: Double { trimEnd - trimStart }
     /// How long the export plays, at its speed.
     var outputDuration: Double { clipDuration / edit.speed }
@@ -270,7 +310,7 @@ final class VideoEditorModel: ObservableObject {
                 case .save:
                     let output = try await renderOutput(title: "Saving")
                     if await CaptureAction.save.perform(output), output.url != item.url {
-                        CaptureCoordinator.shared.afterCapture(output)
+                        delivery.saved(output)
                     }
 
                 case .saveAs:
@@ -284,7 +324,7 @@ final class VideoEditorModel: ObservableObject {
                 case .done:
                     if !isUnmodified {
                         let output = try await renderOutput(title: "Exporting")
-                        CaptureCoordinator.shared.afterCapture(output)
+                        delivery.finished(output)
                     }
                     window?.close()
                 }
