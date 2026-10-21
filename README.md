@@ -88,6 +88,17 @@ That block goes in the client's MCP config (Claude Desktop: `~/Library/Applicati
 
 The agent then has four tools: `take_screenshot` (mode `fullscreen`, `area` with `x`, `y`, `width`, `height`, or `window` with `app`), `get_latest_capture`, `get_latest_report` (the newest Report for AI in your save folder: `report.md` plus up to six frames) and `list_captures`. Screenshots come back as an image (scaled to at most 1568 pixels on the long side) plus the path of the full-size file.
 
+### Agent skill
+
+`skills/screenme/SKILL.md` teaches an agent (Claude Code, Codex, OpenCode and others that read skills) how to read a Report for AI: the contact sheet first, then the keyframes, frames by number, what the red marks and pins mean, and when to run `screenme zoom`. The app carries a copy, so `screenme skill` prints it without the repo. To install it for Claude Code:
+
+```bash
+mkdir -p ~/.claude/skills/screenme
+screenme skill > ~/.claude/skills/screenme/SKILL.md
+```
+
+or copy `skills/screenme` from this checkout into `~/.claude/skills/` (or a project's `.claude/skills/`). Other agents take the same folder in their own skills directory.
+
 ## Where files go
 
 Captures are kept in `~/Library/Application Support/Screenme/Captures` until you save them. Save copies to your save folder (the Desktop by default).

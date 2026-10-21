@@ -352,6 +352,28 @@ final class ReportBundleTests: XCTestCase {
         }
     }
 
+    func testTheSkillHasFrontmatterAndShipsInTheApp() throws {
+        let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let skill = try String(contentsOf: repo.appendingPathComponent("skills/screenme/SKILL.md"), encoding: .utf8)
+        XCTAssertTrue(skill.hasPrefix("---\nname: screenme\ndescription: "))
+        XCTAssertTrue(skill.contains("\n---\n\n# Screenme reports\n"))
+        XCTAssertFalse(skill.contains("\u{2014}"), "no em-dashes")
+        XCTAssertEqual(try Command.parse(["skill"]), .skill)
+        XCTAssertThrowsError(try Command.parse(["skill", "install"]))
+
+        // Screenme.app/Contents/Helpers/screenme finds Contents/Resources/SKILL.md, also through a link on PATH.
+        let contents = folder.appendingPathComponent("Screenme.app/Contents")
+        try FileManager.default.createDirectory(at: contents.appendingPathComponent("Helpers"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: contents.appendingPathComponent("Resources"), withIntermediateDirectories: true)
+        let tool = contents.appendingPathComponent("Helpers/screenme")
+        FileManager.default.createFile(atPath: tool.path, contents: Data())
+        try skill.write(to: contents.appendingPathComponent("Resources/SKILL.md"), atomically: true, encoding: .utf8)
+        let link = folder.appendingPathComponent("screenme")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: tool)
+        XCTAssertEqual(Skill.url(executable: link)?.resolvingSymlinksInPath().path,
+                       contents.appendingPathComponent("Resources/SKILL.md").resolvingSymlinksInPath().path)
+    }
+
     func testTimes() {
         XCTAssertEqual(ReportBundle.parseTime("12.5"), 12.5)
         XCTAssertEqual(ReportBundle.parseTime("1:05"), 65)

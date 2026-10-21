@@ -55,6 +55,11 @@ case .inspect(let bundle, let json):
     } catch {
         fail("\(error)")
     }
+case .skill:
+    guard let url = Skill.url(), let text = try? String(contentsOf: url, encoding: .utf8) else {
+        fail("the skill is not installed: Screenme.app/Contents/Resources/\(Skill.fileName) is missing. Reinstall Screenme.")
+    }
+    print(text, terminator: "")
 case .mcp:
     let server = MCPServer(folder: folder, capture: { try await folder.take($0) })
     while let line = readLine() {

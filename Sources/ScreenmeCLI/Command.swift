@@ -49,6 +49,7 @@ enum Command: Equatable {
     case zoom(ZoomRequest)
     case frames(bundle: String, from: Double, to: Double, fps: Double)
     case inspect(bundle: String, json: Bool)
+    case skill
     case mcp
     case help
 
@@ -62,6 +63,7 @@ enum Command: Equatable {
           screenme latest                      Print the path of the newest capture
           screenme list [--limit N]            Print the paths of recent captures, newest first (default 10)
           screenme mcp                         Run the MCP server on stdin and stdout
+          screenme skill                       Print the agent skill for reading reports (SKILL.md)
 
         Reports for AI (REPORT is a report folder or `latest`, the default):
           screenme zoom [REPORT] --at TIME     A grid of frames around a moment, TIME as 1:05, 0:12.5 or 12.5
@@ -114,6 +116,9 @@ enum Command: Equatable {
             let (bundle, options) = try bundleAndOptions(rest, flags: ["--json"])
             try only(options, ["--json"], in: "inspect")
             return .inspect(bundle: bundle, json: options["--json"] != nil)
+        case "skill":
+            guard rest.isEmpty else { throw UsageError("skill takes no arguments") }
+            return .skill
         case "mcp":
             guard rest.isEmpty else { throw UsageError("mcp takes no arguments") }
             return .mcp

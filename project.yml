@@ -11,7 +11,11 @@ targets:
   Screenme:
     type: application
     platform: macOS
-    sources: [Sources/Screenme]
+    sources:
+      - Sources/Screenme
+      # The agent skill, printed by `screenme skill` from Contents/Resources.
+      - path: skills/screenme/SKILL.md
+        buildPhase: resources
     info:
       path: Sources/Screenme/Info.plist
       properties:
