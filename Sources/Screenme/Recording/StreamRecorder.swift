@@ -8,7 +8,7 @@ import ScreenCaptureKit
 /// All mutable state lives on `queue`; ScreenCaptureKit delivers samples there too.
 final class StreamRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
     let url: URL
-    let setup: CaptureSetup
+    private(set) var setup: CaptureSetup
 
     /// Called on an arbitrary thread when the stream stops on its own or the writer fails.
     var onFailure: (@Sendable (Error) -> Void)?
@@ -64,6 +64,17 @@ final class StreamRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
         for track in tracks { try stream.addStreamOutput(self, type: track.type, sampleHandlerQueue: queue) }
         self.stream = stream
         try await stream.startCapture()
+    }
+
+    /// Films something else from now on, at the same output size: a window recording that starts filming the
+    /// drawing overlay. Read from and called on the main actor only, like `start`.
+    func film(_ newSetup: CaptureSetup) async throws {
+        newSetup.configuration.width = setup.width
+        newSetup.configuration.height = setup.height
+        try await stream?.updateConfiguration(newSetup.configuration)
+        try await stream?.updateContentFilter(newSetup.filter)
+        setup = CaptureSetup(filter: newSetup.filter, configuration: newSetup.configuration,
+                             width: setup.width, height: setup.height, fps: setup.fps)
     }
 
     /// Stops the stream and finishes the file. Returns nil when nothing was recorded or `discard` is set.

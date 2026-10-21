@@ -209,6 +209,9 @@ private final class Session {
     private var palette: DrawPalette?
     private var drawKey: TemporaryHotKey?
     private var escapeKey: TemporaryHotKey?
+    /// Whether the effects overlay is in the picture. A window recording films the window itself, which follows it
+    /// when it moves and keeps its shadow setting, until the overlay is needed: from the first Draw on.
+    private var filmsEffects = false
 
     init(target: CaptureTarget, settings: RecordingSettings, webcam: WebcamBubble?) {
         self.target = target
@@ -236,15 +239,17 @@ private final class Session {
             Toast.show("Keystrokes need Accessibility access", symbol: "keyboard", duration: 3)
         }
         let showKeys = settings.showKeystrokes && Permission.accessibility.isGranted
-        // Always there: live drawings are drawn in it.
+        // Always there, because live drawings are drawn in it, but filmed from the start only when it shows something.
         let overlay = RecordingEffects(frame: frame, highlightClicks: settings.highlightClicks, showKeystrokes: showKeys, drawing: drawing)
         overlay.show()
         effects = overlay
+        let isWindow = if case .window = target { true } else { false }
+        filmsEffects = !isWindow || settings.highlightClicks || showKeys
 
         watermark = WatermarkOverlay(frame: frame)
         watermark?.show()
 
-        let overlays: [NSWindow] = [effects?.panel, webcam?.panel, watermark?.panel].compactMap { $0 }
+        let overlays: [NSWindow] = [filmsEffects ? overlay.panel : nil, webcam?.panel, watermark?.panel].compactMap { $0 }
         // Let the window server register the overlay windows before ScreenCaptureKit looks for them.
         if !overlays.isEmpty { try? await Task.sleep(for: .milliseconds(200)) }
         recorder = try await makeRecorder(CaptureSetup.make(for: target, settings: settings, overlays: overlays))
@@ -283,6 +288,7 @@ private final class Session {
         guard drawing.isOn != on else { return }
         drawing.isOn = on
         effects?.setDrawing(on)
+        if on && !filmsEffects { Task { await filmEffects() } }
         if on {
             let palette = DrawPalette(drawing: drawing, near: bar?.frame ?? target.cocoaFrame) { [weak self] in self?.setDrawing(false) }
             palette.show()
@@ -293,6 +299,25 @@ private final class Session {
             palette = nil
             HotKeyCenter.shared.unregisterTemporary(escapeKey)
             escapeKey = nil
+        }
+    }
+
+    /// Starts filming the effects overlay in a window recording, from the window's display, so drawings show.
+    /// The overlay first moves onto the window in case it moved since the start.
+    private func filmEffects() async {
+        guard !filmsEffects, let recorder, let effects else { return }
+        filmsEffects = true
+        do {
+            if case .window(let picked) = target,
+               let current = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+                .windows.first(where: { $0.windowID == picked.windowID }) {
+                effects.move(to: current.frame.cocoaFlipped)
+            }
+            let overlays: [NSWindow] = [effects.panel, webcam?.panel, watermark?.panel].compactMap { $0 }
+            try await recorder.film(CaptureSetup.make(for: target, settings: settings, overlays: overlays))
+        } catch {
+            filmsEffects = false
+            Toast.show("Drawings cannot be filmed in this recording", symbol: "exclamationmark.triangle.fill")
         }
     }
 

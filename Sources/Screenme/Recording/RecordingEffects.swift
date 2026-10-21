@@ -66,6 +66,14 @@ final class RecordingEffects {
 
     func clearDrawings() { canvas.clear() }
 
+    /// Moves the overlay onto `frame` (global Cocoa coordinates), for a window that moved since the recording started.
+    func move(to frame: CGRect) {
+        guard frame != panel.frame else { return }
+        panel.setFrame(frame, display: true)
+        root.frame = CGRect(origin: .zero, size: frame.size)
+        canvas.frame = root.bounds
+    }
+
     func stop() {
         monitors.forEach { NSEvent.removeMonitor($0) }
         monitors.removeAll()
