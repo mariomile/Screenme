@@ -1,8 +1,8 @@
 # PRODUCT.md: Screenme
 
 **Stage:** in use
-**Last amended:** 2026-10-21
-**Amendment count:** 4
+**Last amended:** 2026-10-22
+**Amendment count:** 5
 
 ## Purpose
 
@@ -42,7 +42,7 @@ Order is Mario's stated frequency ranking (A, B, C), not an observed one. `[assu
 - Selling it, or shaping the roadmap around other users: Mario is the primary user; the code is open source so others can use and fork it as is. `[doc:user-2026-10-20-screenme]`
 - Cross-platform (Windows, Linux, web): because native macOS is the requirement. `[doc:user-2026-10-20-screenme]`
 - Feature parity with CleanShot: because "leggero" beats complete; each capability enters only when used.
-- Screen Studio-style video editor with auto-zoom: Later, useful but not needed now. `[doc:user-2026-10-20-screenme]`
+- ~~Screen Studio-style video editor with auto-zoom: Later.~~ Superseded: it shipped (background, auto zoom, smooth cursor, GPU export). `[code:Sources/Screenme/Recording/VideoEditorModel.swift]`
 
 ## Constraints
 
@@ -68,7 +68,7 @@ Order is Mario's stated frequency ranking (A, B, C), not an observed one. `[assu
 ## Success
 
 **North Star:** not yet selected (phase 2). Candidate: share of Mario's daily captures done with Screenme instead of other tools. `[assumption:unvalidated]`
-**Current baseline:** 0 (pre-build)
+**Current baseline:** unknown. The product is in daily use `[doc:user-2026-10-22-in-daily-use]`, but no count of captures per product was ever taken, so there is no number to put here. `[assumption:unvalidated]`
 
 ## Data Sources
 
@@ -84,3 +84,4 @@ Order is Mario's stated frequency ranking (A, B, C), not an observed one. `[assu
 | 2026-10-20 | The Problem, How they solve it today, What that costs them, Jobs To Be Done rewritten; non-goal added for a Screen Studio-style video editor (Later) | Phase 0 round 1 answers settle the problem (fragmentation plus no further subscriptions), the three frequent flows, and the video editor deferral | `[doc:user-2026-10-20-screenme]` `[doc:observed-2026-10-20-installed-tools]` `[doc:web-2026-10-20-prior-art-pricing]` |
 | 2026-10-20 | Non-goal on distribution replaced: open source on GitHub, still not sold | Mario: "è un tool che io voglio costruire e rendere opensource" | `[doc:user-2026-10-20-screenme]` |
 | 2026-10-21 | Stage set from idea to in use. Non-goal "Cloud upload, share links" superseded: Upload & Copy Link to the user's own S3-compatible bucket (R2, B2, AWS) shipped on 2026-10-21; a shared cloud service, teams and SSO remain non-goals | Screenme is built and in daily use; the upload goes to a bucket the user owns, so no Screenme service holds anyone's captures | `[observed:2026-10-21-git-41147d5]` |
+| 2026-10-22 | Video editor non-goal struck as superseded; Success baseline changed from 0 (pre-build) to unknown | The editor shipped; the product is in daily use but no capture counts exist, so 0 was no longer true and no number replaces it | `[doc:user-2026-10-22-in-daily-use]` `[code:Sources/Screenme/Recording/VideoEditorModel.swift]` |

@@ -1,6 +1,6 @@
 # TECH.md: Screenme
 
-**Verified:** 2026-10-20 @ first commit
+**Verified:** 2026-10-22 @ eb39dd1
 
 ## Stack
 | Layer | Choice | Why | Decision |
@@ -10,6 +10,10 @@
 | Capture | ScreenCaptureKit | Modern Apple capture API for stills and video | inherited |
 | OCR | Vision | On-device, no dependency | inherited |
 | Video | AVFoundation | System framework, no dependency | inherited |
+| Video editor | Core Image on the GPU (`Recording/VideoCompositor.swift`), one renderer for preview and export | What the editor shows is what gets exported, no dependency | `[code:Sources/Screenme/Recording/VideoCompositor.swift]` |
+| Command line and MCP | `screenme` tool in `Sources/ScreenmeCLI`, embedded in `Contents/Helpers`, no code shared with the app | Lets an agent take and read captures through `screenme://` links and the report folder | `[code:Sources/ScreenmeCLI/MCPServer.swift]` |
+| Upload link | Own SigV4-signed PUT with CryptoKit to the user's S3-compatible bucket | No SDK dependency; no Screenme service holds captures | `[code:Sources/Screenme/Core/S3Upload.swift]` |
+| Updates | `git pull` of the checkout it was installed from, then `scripts/install.sh` | Same local signing identity, so privacy permissions survive | `[code:Sources/Screenme/Core/Updater.swift]` |
 | GIF | Own encoder, `Recording/GIFEncoder.swift` | ImageIO's GIF writer can't do what keeps screen GIFs small and clean: one palette shared by every frame (no colour flicker), frames that hold only the rectangle that changed, and unchanged pixels left transparent. | decided 2026-10-20 in the recording module review: keep it |
 | Project | XcodeGen (`project.yml`), .xcodeproj gitignored | Readable, diffable project instead of a .pbxproj | inherited |
 | Language mode | Swift 5 mode on the Swift 6.4 compiler | Avoids strict-concurrency churn around ScreenCaptureKit delegates | inherited |
@@ -19,6 +23,7 @@
 |-------|---------|----------------|
 | Build | `xcodegen generate && xcodebuild -project Screenme.xcodeproj -scheme Screenme -configuration Release -derivedDataPath build/DerivedData build` | `** BUILD SUCCEEDED **`, 0 warnings in Sources/ |
 | Test | `xcodegen generate && xcodebuild test -project Screenme.xcodeproj -scheme Screenme -destination 'platform=macOS' -derivedDataPath build/tests -skip-testing:ScreenmeUITests` | `** TEST SUCCEEDED **`, 0 failures |
+| Test (unit only) | `xcodegen generate && xcodebuild test -project Screenme.xcodeproj -scheme Screenme -destination 'platform=macOS' -derivedDataPath build/test -only-testing:ScreenmeTests -only-testing:ScreenmeCLITests` | `** TEST SUCCEEDED **`, 0 failures |
 | UI test | `./scripts/ui-test.sh` (drives the real app through `screenme://` links, no pointer; needs the Screen Recording grant from `scripts/install.sh`) | `** TEST EXECUTE SUCCEEDED **` |
 | Lint | none yet | |
 
