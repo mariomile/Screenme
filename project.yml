@@ -35,8 +35,28 @@ targets:
         ENABLE_HARDENED_RUNTIME: NO
         GENERATE_INFOPLIST_FILE: NO
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    dependencies:
+      # The `screenme` command line tool, in Contents/Helpers: Contents/MacOS already has `Screenme`,
+      # and the default file system does not tell the two names apart.
+      - target: screenme-cli
+        embed: true
+        copy:
+          destination: wrapper
+          subpath: Contents/Helpers
     scheme:
-      testTargets: [ScreenmeTests, ScreenmeUITests]
+      testTargets: [ScreenmeTests, ScreenmeCLITests, ScreenmeUITests]
+  screenme-cli:
+    type: tool
+    platform: macOS
+    sources: [Sources/ScreenmeCLI]
+    settings:
+      base:
+        PRODUCT_NAME: screenme
+        # A module named "screenme" would overwrite the app's Screenme.swiftmodule on a case-insensitive disk.
+        PRODUCT_MODULE_NAME: ScreenmeCLI
+        PRODUCT_BUNDLE_IDENTIFIER: dev.mariomiletta.Screenme.cli
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_STYLE: Manual
   ScreenmeTests:
     type: bundle.unit-test
     platform: macOS
@@ -46,6 +66,20 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.mariomiletta.ScreenmeTests
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_STYLE: Manual
+        GENERATE_INFOPLIST_FILE: YES
+  ScreenmeCLITests:
+    type: bundle.unit-test
+    platform: macOS
+    # The tool's sources compiled into the test bundle; main.swift runs the tool, so it stays out.
+    sources:
+      - Tests/ScreenmeCLITests
+      - path: Sources/ScreenmeCLI
+        excludes: [main.swift]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.mariomiletta.ScreenmeCLITests
         CODE_SIGN_IDENTITY: "-"
         CODE_SIGN_STYLE: Manual
         GENERATE_INFOPLIST_FILE: YES
