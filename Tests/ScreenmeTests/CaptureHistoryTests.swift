@@ -109,7 +109,7 @@ final class CaptureHistoryTests: PrefsSandboxTestCase {
         let kept = try file("kept.mp4", in: captures)
         for url in [trashed, expired, kept] {
             try Data("raw".utf8).write(to: BakedCursor.sourceURL(for: url))
-            XCTAssertNotNil(BakedCursor.source(for: url))
+            XCTAssertTrue(FileManager.default.fileExists(atPath: BakedCursor.sourceURL(for: url).path))
         }
         let history = history()
         let item = CaptureItem(url: trashed, kind: .video, date: now)
@@ -120,9 +120,10 @@ final class CaptureHistoryTests: PrefsSandboxTestCase {
         history.trash(item)
         history.prune(now: now)
 
-        XCTAssertNil(BakedCursor.source(for: trashed))
-        XCTAssertNil(BakedCursor.source(for: expired))
-        XCTAssertNotNil(BakedCursor.source(for: kept), "a capture still in History keeps its source")
+        func hasSource(_ url: URL) -> Bool { FileManager.default.fileExists(atPath: BakedCursor.sourceURL(for: url).path) }
+        XCTAssertFalse(hasSource(trashed))
+        XCTAssertFalse(hasSource(expired))
+        XCTAssertTrue(hasSource(kept), "a capture still in History keeps its source")
         XCTAssertEqual(history.items.map(\.url), [kept])
     }
 }

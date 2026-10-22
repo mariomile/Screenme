@@ -13,24 +13,14 @@ final class BakedCursorTests: XCTestCase {
         super.tearDown()
     }
 
-    private func events(hidden: Bool, withTrack: Bool = true) -> RecordingEvents {
+    /// A recording filmed without the cursor, its pointer resting at 50, 60.
+    private var events: RecordingEvents {
         var events = RecordingEvents(width: 200, height: 100, events: [])
-        if withTrack {
-            var track = CursorTrack(hidden: hidden)
-            track.add(time: 0, x: 50, y: 60)
-            track.add(time: 2, x: 50, y: 60)
-            events.cursor = track
-        }
+        var track = CursorTrack(hidden: true)
+        track.add(time: 0, x: 50, y: 60)
+        track.add(time: 2, x: 50, y: 60)
+        events.cursor = track
         return events
-    }
-
-    func testOnlyARecordingMadeWithoutTheCursorNeedsItDrawn() {
-        let style = CursorStyle()
-        XCTAssertTrue(BakedCursor.isNeeded(events: events(hidden: true), style: style))
-        XCTAssertFalse(BakedCursor.isNeeded(events: events(hidden: false), style: style), "the cursor is in the picture")
-        XCTAssertFalse(BakedCursor.isNeeded(events: events(hidden: true, withTrack: false), style: style), "no cursor track")
-        XCTAssertFalse(BakedCursor.isNeeded(events: nil, style: style), "no events")
-        XCTAssertFalse(BakedCursor.isNeeded(events: events(hidden: true), style: CursorStyle(show: false)), "the user hides the cursor")
     }
 
     @MainActor
@@ -39,20 +29,18 @@ final class BakedCursorTests: XCTestCase {
         cleanup.append(video)
         let size = CGSize(width: 400, height: 200)
 
-        let none = try await BakedCursor.render(video, size: size, events: events(hidden: false))
-        XCTAssertNil(none, "nothing to draw")
-        XCTAssertTrue(FileManager.default.fileExists(atPath: video.path), "a recording with its cursor stays the capture")
-
-        let baked = try await BakedCursor.render(video, size: size, events: events(hidden: true))
-        let result = try XCTUnwrap(baked)
+        let style = CursorStyle(show: true, size: 1.5, clickHighlight: true, hideWhenIdle: false)
+        let result = try await BakedCursor.render(video, size: size, events: events, style: style)
         cleanup.append(result.url)
         cleanup.append(BakedCursor.sourceURL(for: result.url))
         XCTAssertNotEqual(result.url, video)
         XCTAssertFalse(FileManager.default.fileExists(atPath: video.path), "the raw recording moved")
-        let source = try XCTUnwrap(BakedCursor.source(for: result.url), "the raw recording is kept as the source")
+        let source = BakedCursor.sourceURL(for: result.url)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: source.path), "the raw recording is kept as the source")
         XCTAssertEqual(source.lastPathComponent, ".\(result.url.lastPathComponent).screenme-source.mp4", "hidden, next to the capture")
         XCTAssertEqual(source.deletingLastPathComponent(), result.url.deletingLastPathComponent())
-        XCTAssertEqual(result.events.cursor?.hidden, false)
+        XCTAssertEqual(result.events.cursor?.hidden, true, "it was filmed without the cursor")
+        XCTAssertEqual(result.events.cursor?.bakedStyle, style, "the style drawn into the capture")
         XCTAssertNotNil(result.events.cursor, "the track stays for auto zoom")
         let rendered = try await TestVideo.size(of: result.url)
         XCTAssertEqual(rendered, size, "no background, same size")

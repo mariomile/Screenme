@@ -4,23 +4,26 @@ import CoreImage
 /// The recording an edit is drawn from: its pixel size and, when it has them, its events (clicks, cursor).
 struct VideoSource {
     var size: CGSize
-    var events: RecordingEvents?
-    /// The smoothed cursor track, worked out once.
-    var cursor: CursorPath?
+    let events: RecordingEvents?
+    /// The smoothed pointer path, for the camera to follow. Worked out once.
+    let cursorPath: CursorPath?
+    /// The cursor the editor can draw: only when the file drawn from was filmed without it.
+    let drawableCursor: (path: CursorPath, track: CursorTrack)?
 
-    init(size: CGSize, events: RecordingEvents?, cursor: CursorPath? = nil) {
+    /// `cursorless` says whether the file drawn from was filmed without the cursor. Left out, the events say it
+    /// about their own capture: filmed without it and not drawn in since.
+    init(size: CGSize, events: RecordingEvents?, cursorless: Bool? = nil) {
         self.size = size
         self.events = events
-        self.cursor = cursor ?? Self.cursorPath(of: events)
+        let track = events?.cursor
+        let path = events.flatMap { events in track.flatMap { CursorPath(track: $0, width: events.width, height: events.height) } }
+        cursorPath = path
+        if let path, let track, cursorless ?? !track.isInPicture {
+            drawableCursor = (path, track)
+        } else {
+            drawableCursor = nil
+        }
     }
-
-    static func cursorPath(of events: RecordingEvents?) -> CursorPath? {
-        guard let events, let track = events.cursor else { return nil }
-        return CursorPath(track: track, width: events.width, height: events.height)
-    }
-
-    /// Recorded with Smooth cursor: the cursor is not in the picture and the editor can draw it.
-    var cursorHidden: Bool { events?.cursor?.hidden == true }
 
     /// Video pixels per point of the recorded screen: 2 on a Retina display.
     var pixelsPerPoint: CGFloat {
@@ -44,9 +47,9 @@ struct VideoEdit: Equatable {
     /// True when the output is the recording's own picture, only trimmed or scaled.
     func isPlain(for source: VideoSource) -> Bool { !canvas.enabled && zooms.isEmpty && !drawsCursor(for: source) && speed == 1 }
 
-    /// The cursor is drawn when the recording left it out (Smooth cursor) and recorded where it went.
+    /// The cursor is drawn when the file left it out (Smooth cursor) and the recording knows where it went.
     func drawsCursor(for source: VideoSource) -> Bool {
-        cursor.show && source.cursorHidden && source.cursor != nil
+        cursor.show && source.drawableCursor != nil
     }
 
     /// The canvas the video sits on, in video pixels. Without a background, the video itself.
@@ -74,10 +77,10 @@ struct VideoEdit: Equatable {
             mask = VideoCanvas.mask(contentRect: content, radius: VideoCanvas.cornerRadius(canvas, contentRect: content, unit: unit))
         }
         let camera = zoomed && !zooms.isEmpty
-            ? CameraPath(segments: zooms, strength: zoomStrength, cursor: source.cursor, duration: duration) : nil
+            ? CameraPath(segments: zooms, strength: zoomStrength, cursor: source.cursorPath, duration: duration) : nil
         var overlay: CursorOverlay?
-        if drawsCursor(for: source), let path = source.cursor, let track = source.events?.cursor {
-            overlay = CursorOverlay(path: path, track: track, style: cursor, pixelsPerPoint: source.pixelsPerPoint)
+        if cursor.show, let drawable = source.drawableCursor {
+            overlay = CursorOverlay(path: drawable.path, track: drawable.track, style: cursor, pixelsPerPoint: source.pixelsPerPoint)
         }
         return FrameRenderer(renderSize: renderSize, timeOffset: timeOffset, speed: speed, contentRect: content,
                              background: background, mask: mask, camera: camera, cursor: overlay)

@@ -39,8 +39,8 @@ struct VideoEditorDelivery {
 @MainActor
 final class VideoEditorModel: ObservableObject {
     let item: CaptureItem
-    /// The file the editor plays and exports from: the capture's cursorless source when it has one (a Smooth cursor
-    /// recording, see `BakedCursor`), so the cursor can be drawn again in any style. Otherwise the capture itself.
+    /// The file the editor plays and exports from: the cursorless source of a capture the cursor was drawn into (a
+    /// Smooth cursor recording, see `BakedCursor`), so the cursor can be drawn again in any style. Otherwise the capture.
     let videoURL: URL
     let player = AVPlayer()
     private let asset: AVURLAsset
@@ -53,7 +53,9 @@ final class VideoEditorModel: ObservableObject {
     private var fps = 30
 
     @Published private(set) var duration = 0.0
-    @Published private(set) var videoSize = CGSize.zero
+    /// What the editor draws on: the played file's size once loaded, its events and the cursor it can draw.
+    @Published private(set) var source: VideoSource
+    var videoSize: CGSize { source.size }
     @Published private(set) var hasAudio = false
     @Published private(set) var loadFailed = false
     @Published var trimStart = 0.0
@@ -109,13 +111,12 @@ final class VideoEditorModel: ObservableObject {
         didSet { if pickingZoom != oldValue { updatePreview() } }
     }
     /// The recording's clicks and cursor, when it was recorded with them.
-    let events: RecordingEvents?
-    private let cursorPath: CursorPath?
-    /// With a source: the cursor style the editor opened with. The capture was rendered in it, so with that style and
-    /// nothing else changed the capture is already the output.
-    private let openedCursor: CursorStyle?
-
-    var source: VideoSource { VideoSource(size: videoSize, events: events, cursor: cursorPath) }
+    var events: RecordingEvents? { source.events }
+    /// The cursor drawn into the capture, relative to the played file: the baked style when the editor plays the
+    /// source, nil when it plays the capture itself.
+    private let capturedCursor: CursorStyle?
+    /// The capture file as it is: its pixel size and codec, read when it loads. Nil before, or for another codec.
+    private var capture: (size: CGSize, codec: VideoCodec)?
 
     /// What happens to an exported file.
     private let delivery: VideoEditorDelivery
@@ -123,14 +124,18 @@ final class VideoEditorModel: ObservableObject {
     init(item: CaptureItem, delivery: VideoEditorDelivery = .live) {
         self.item = item
         self.delivery = delivery
-        let source = BakedCursor.source(for: item.url)
-        videoURL = source ?? item.url
-        var events = RecordingEvents.events(for: item.url)
-        // The capture's events say its cursor is in the picture; the source was filmed without it.
-        if source != nil { events?.cursor?.hidden = true }
-        self.events = events
-        cursorPath = VideoSource.cursorPath(of: events)
-        openedCursor = source != nil ? CursorStyle.saved : nil
+        let events = RecordingEvents.events(for: item.url)
+        let sourceURL = BakedCursor.sourceURL(for: item.url)
+        if let baked = events?.cursor?.bakedStyle, FileManager.default.fileExists(atPath: sourceURL.path) {
+            videoURL = sourceURL
+            capturedCursor = baked
+            source = VideoSource(size: .zero, events: events, cursorless: true)
+        } else {
+            // The capture itself. One the cursor was drawn into, whose source is gone, keeps that cursor for good.
+            videoURL = item.url
+            capturedCursor = nil
+            source = VideoSource(size: .zero, events: events)
+        }
         asset = AVURLAsset(url: videoURL)
         edit.canvas = VideoCanvas.saved
         edit.cursor = CursorStyle.saved
@@ -173,8 +178,8 @@ final class VideoEditorModel: ObservableObject {
                 loadFailed = true
                 return
             }
-            let natural = try await track.load(.naturalSize).applying(track.load(.preferredTransform))
-            videoSize = CGSize(width: abs(natural.width), height: abs(natural.height))
+            source.size = try await Self.pixelSize(of: track)
+            capture = try await captureFile(playing: track)
             videoTrackID = track.trackID
             let nominal = try await track.load(.nominalFrameRate)
             fps = nominal > 1 ? Int(min(max(nominal, 24), 60).rounded()) : 30
@@ -190,6 +195,19 @@ final class VideoEditorModel: ObservableObject {
             return
         }
         await loadThumbnails()
+    }
+
+    private static func pixelSize(of track: AVAssetTrack) async throws -> CGSize {
+        let natural = try await track.load(.naturalSize).applying(track.load(.preferredTransform))
+        return CGSize(width: abs(natural.width), height: abs(natural.height))
+    }
+
+    /// The capture's size and codec: from the played track when it plays the capture, else from the capture's file.
+    private func captureFile(playing played: AVAssetTrack) async throws -> (size: CGSize, codec: VideoCodec)? {
+        let track = videoURL == item.url ? played : try await AVURLAsset(url: item.url).loadTracks(withMediaType: .video).first
+        guard let track, let format = try await track.load(.formatDescriptions).first,
+              let codec = VideoCodec(subtype: CMFormatDescriptionGetMediaSubType(format)) else { return nil }
+        return (try await Self.pixelSize(of: track), codec)
     }
 
     private func loadThumbnails() async {
@@ -289,14 +307,13 @@ final class VideoEditorModel: ObservableObject {
     /// How long the export plays, at its speed.
     var outputDuration: Double { clipDuration / edit.speed }
 
-    /// True when the output would be a byte-for-byte copy of the capture.
+    /// True when the output would be the capture as it is: an MP4 in its codec and size, untrimmed, with its sound,
+    /// the cursor it has and nothing else drawn. The editor opens at High quality, which stands for the capture's own.
     var isUnmodified: Bool {
-        guard format == .mp4 && trimStart <= 0.001 && trimEnd >= duration - 0.001 && resolution == .original
-            && (!mute || !hasAudio) && quality == .high && codec == .h264 else { return false }
-        guard let openedCursor else { return edit.isPlain(for: source) }
-        var rest = edit
-        rest.cursor.show = false
-        return edit.cursor == openedCursor && rest.isPlain(for: source)
+        guard let capture, format == .mp4, codec == capture.codec, quality == .high, outputSize == capture.size,
+              trimStart <= 0.001, trimEnd >= duration - 0.001, !mute || !hasAudio else { return false }
+        let drawnCursor = edit.drawsCursor(for: source) ? edit.cursor : nil
+        return drawnCursor == capturedCursor && !edit.canvas.enabled && edit.zooms.isEmpty && edit.speed == 1
     }
 
     enum Action {
@@ -398,9 +415,6 @@ final class VideoEditorModel: ObservableObject {
         let content = layout.contentRect
         return CGRect(x: origin.x + content.minX * k, y: origin.y + content.minY * k, width: content.width * k, height: content.height * k)
     }
-
-    /// Recorded with Smooth cursor, so the editor draws the cursor. Otherwise it is in the picture already.
-    var canDrawCursor: Bool { events?.cursor?.hidden == true && cursorPath != nil }
 
     // MARK: Zoom
 

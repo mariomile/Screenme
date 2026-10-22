@@ -10,8 +10,11 @@ extension Pref {
 /// Times are seconds of the finished video; positions are points from the top-left corner of the recorded area,
 /// like the other events. A still pointer adds no samples: a run of equal positions keeps only its first and last.
 struct CursorTrack: Codable, Equatable {
-    /// True when the recording was made without the cursor, so the editor draws it (Smooth cursor).
+    /// True when the recording was filmed without the cursor (Smooth cursor). Stays true after the cursor is drawn in.
     var hidden: Bool
+    /// The style the cursor was drawn into the capture with when the recording stopped (`BakedCursor`). Nil when
+    /// nothing was drawn in: the capture is the raw recording.
+    var bakedStyle: CursorStyle? = nil
     var t: [Double] = []
     var x: [Double] = []
     var y: [Double] = []
@@ -20,6 +23,9 @@ struct CursorTrack: Codable, Equatable {
     var up: [Double] = []
 
     var isEmpty: Bool { t.isEmpty }
+
+    /// Whether the capture these events belong to shows the cursor: filmed with it, or drawn in since.
+    var isInPicture: Bool { !hidden || bakedStyle != nil }
 
     /// Adds a sample. A sample at the same position as the previous one only moves the end of the still run.
     mutating func add(time: Double, x px: Double, y py: Double) {

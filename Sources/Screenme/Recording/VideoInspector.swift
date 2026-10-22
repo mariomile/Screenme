@@ -195,9 +195,9 @@ private struct CursorControls: View {
                     .help("Hide when idle\nFades the cursor out when it rests for 2 seconds, and back in when it moves.")
                     .disabled(!model.edit.cursor.show)
             }
-            .disabled(!model.canDrawCursor)
+            .disabled(model.source.drawableCursor == nil)
 
-            if !model.canDrawCursor {
+            if model.source.drawableCursor == nil {
                 Text("The cursor is part of this recording. Record with Smooth cursor to restyle it.")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)

@@ -96,7 +96,7 @@ final class RecordingController {
         }
         guard var events = session.recordedEvents else { return CaptureItem(url: url, kind: .video) }
         var file = url
-        if let baked = await bakeCursor(url, size: size, events: events) {
+        if session.settings.rendersCursorLater, let baked = await bakeCursor(url, size: size, events: events, style: .saved) {
             (file, events) = baked
             CaptureContexts.move(url, to: file)
         }
@@ -105,13 +105,13 @@ final class RecordingController {
     }
 
     /// A Smooth cursor recording as a file with the cursor drawn in; the raw file becomes its hidden source. Nil when
-    /// the recording has its cursor already, or when drawing it failed (the raw file is delivered then, with the error shown).
-    private func bakeCursor(_ video: URL, size: CGSize, events: RecordingEvents) async -> (url: URL, events: RecordingEvents)? {
-        guard BakedCursor.isNeeded(events: events, style: .saved) else { return nil }
+    /// the cursor is off, or when drawing it failed (the raw file is delivered then, with the error shown).
+    private func bakeCursor(_ video: URL, size: CGSize, events: RecordingEvents, style: CursorStyle) async -> (url: URL, events: RecordingEvents)? {
+        guard style.show else { return nil }
         let toast = Toast.progress("Adding the cursor")
         defer { toast.finish() }
         do {
-            return try await BakedCursor.render(video, size: size, events: events) { value in
+            return try await BakedCursor.render(video, size: size, events: events, style: style) { value in
                 Task { @MainActor in toast.update(value) }
             }
         } catch {

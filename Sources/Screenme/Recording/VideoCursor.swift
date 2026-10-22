@@ -9,7 +9,7 @@ extension Pref {
 }
 
 /// How the editor draws the cursor of a recording made with Smooth cursor.
-struct CursorStyle: Equatable {
+struct CursorStyle: Codable, Equatable {
     var show = true
     /// 1x is the size it had on screen.
     var size = 1.5

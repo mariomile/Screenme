@@ -225,6 +225,15 @@ enum VideoCodec: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var title: String { self == .h264 ? "H.264" : "HEVC" }
     var type: AVVideoCodecType { self == .h264 ? .h264 : .hevc }
+
+    /// The codec of a video track's format, by its media subtype. Nil for any other codec.
+    init?(subtype: FourCharCode) {
+        switch subtype {
+        case kCMVideoCodecType_H264: self = .h264
+        case kCMVideoCodecType_HEVC: self = .hevc
+        default: return nil
+        }
+    }
 }
 
 struct VideoExportSettings {
