@@ -30,8 +30,8 @@ final class QuickAccessCard: NSObject {
 
     private var autoClose: DispatchWorkItem?
 
-    /// `preview`: the picture of a file still being written (see `QuickAccess.show(_:preview:)`).
-    init(item: CaptureItem, screen: NSScreen, owner: QuickAccess, preview: CGImage? = nil) {
+    /// `preview`: the picture of `file` while it is still being written (see `QuickAccess.show(_:preview:file:)`).
+    init(item: CaptureItem, screen: NSScreen, owner: QuickAccess, preview: CGImage?, file: Task<URL, Error>) {
         self.screen = screen
         self.owner = owner
         let width = Prefs[Pref.quickAccessSize].cardWidth
@@ -39,7 +39,7 @@ final class QuickAccessCard: NSObject {
         // Between 140 and 220 points tall at the medium width, in proportion for the other sizes.
         let height = CGFloat.minimum(width * 220 / 224, CGFloat.maximum(width * 140 / 224, width * aspect))
         size = CGSize(width: width, height: height)
-        model = CardModel(item: item, preview: preview)
+        model = CardModel(item: item, preview: preview, file: file)
 
         let inset = QuickAccess.inset
         let frame = CGRect(x: 0, y: 0, width: width + inset * 2, height: height + inset * 2)
@@ -54,7 +54,8 @@ final class QuickAccessCard: NSObject {
         hosting.autoresizingMask = [.width, .height]
         root.addSubview(hosting)
         panel.contentView = root
-        if preview == nil { Task { await model.reload() } }
+        // The thumbnail of the written file, with its watermark and notch cover, replaces the preview.
+        whenWritten { [model] in await model.reload() }
     }
 
     // MARK: Placement
@@ -98,9 +99,17 @@ final class QuickAccessCard: NSObject {
     /// Runs `action` on the capture. The card goes away once it did something, except Show in Finder,
     /// and Share, whose menu opens from the card.
     func perform(_ action: CaptureAction) {
-        Task {
-            await model.untilWritten()
+        whenWritten { [self] in
             guard await action.perform(model.item), action != .reveal, action != .share else { return }
+            owner.dismiss(self)
+        }
+    }
+
+    /// Runs `work` once the capture's file is written. When writing failed it never runs: the card goes, with a toast.
+    private func whenWritten(_ work: @escaping @MainActor () async -> Void) {
+        Task {
+            guard let error = await model.whenWritten(work) else { return }
+            Feedback.failure(error.localizedDescription, duration: 3.2)
             owner.dismiss(self)
         }
     }
@@ -215,12 +224,14 @@ final class QuickAccessCard: NSObject {
         let work = DispatchWorkItem { [weak self] in
             MainActor.assumeIsolated {
                 guard let self, !self.model.hovering, !self.model.dragging else { return }
-                // Not a second copy of a capture already saved after capture.
-                if Prefs[Pref.quickAccessAutoCloseSaves] {
-                    let url = self.model.item.url
-                    _ = Storage.savedCopy(of: url) ?? (try? Storage.save(url))
+                self.whenWritten {
+                    // Not a second copy of a capture already saved after capture.
+                    if Prefs[Pref.quickAccessAutoCloseSaves] {
+                        let url = self.model.item.url
+                        _ = Storage.savedCopy(of: url) ?? (try? Storage.save(url))
+                    }
+                    self.owner.dismiss(self)
                 }
-                self.owner.dismiss(self)
             }
         }
         autoClose = work

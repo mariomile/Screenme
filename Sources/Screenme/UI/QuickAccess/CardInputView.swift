@@ -79,7 +79,7 @@ final class CardInputView: NSView, NSDraggingSource {
             // A mostly horizontal move toward the screen edge swipes the card away. Anything else drags the file out,
             // as soon as the file is written.
             let swipe = abs(dx) > abs(dy) * 1.2 && dx * sign > 0
-            guard swipe || model.isWritten else { return }
+            guard swipe || model.canDrag else { return }
             mode = swipe ? .swiping : .dragging
             if mode == .dragging { beginFileDrag(with: event) }
         }

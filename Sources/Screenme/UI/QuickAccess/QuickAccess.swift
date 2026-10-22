@@ -24,34 +24,18 @@ final class QuickAccess {
 
     // MARK: Showing
 
-    /// `preview` is the picture while its file is still being written: the card shows it at once and waits with its
-    /// actions until `fileWritten`.
-    func show(_ item: CaptureItem, preview: CGImage? = nil) {
+    /// `file` is the capture's file being written; `preview` the picture to show until it is. The card waits for the
+    /// file before any action and goes away when writing it fails.
+    func show(_ item: CaptureItem, preview: CGImage? = nil, file: Task<URL, Error>) {
         // A new version of a capture already on screen replaces its card.
         for old in cards where old.model.item.url == item.url && !old.isDismissing { remove(old) }
 
         let screen = NSScreen.underMouse
-        let card = QuickAccessCard(item: item, screen: screen, owner: self, preview: preview)
+        let card = QuickAccessCard(item: item, screen: screen, owner: self, preview: preview, file: file)
         cards.append(card)
         trimOverflow(on: screen)
         layout()
         card.slideIn()
-    }
-
-    /// The file of a card shown from a preview is on disk now.
-    func fileWritten(_ url: URL) {
-        for card in cards where card.model.item.url == url {
-            card.model.fileWritten()
-            Task { await card.model.reload() }
-        }
-    }
-
-    /// The file of a card shown from a preview could not be written: the card goes.
-    func fileFailed(_ url: URL) {
-        for card in cards where card.model.item.url == url {
-            card.model.fileWritten()
-            remove(card)
-        }
     }
 
     // MARK: Layout
