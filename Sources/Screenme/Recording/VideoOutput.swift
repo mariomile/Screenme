@@ -6,13 +6,6 @@ enum ExportSpec: Equatable {
     case mp4(codec: VideoCodec, quality: VideoQuality, resolution: ExportResolution, mute: Bool)
     case gif(fps: Int, maxWidth: Int, quality: VideoQuality)
 
-    var kind: CaptureItem.Kind {
-        switch self {
-        case .mp4: .video
-        case .gif: .gif
-        }
-    }
-
     /// The pixel size of the output for an edit whose canvas is `canvas` pixels. Never scales up; dimensions are even.
     func outputSize(for canvas: CGSize) -> CGSize {
         switch self {

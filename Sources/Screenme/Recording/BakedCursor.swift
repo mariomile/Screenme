@@ -8,15 +8,15 @@ import AVFoundation
 /// `.<capture>.screenme-source.mp4`, hidden like the events sidecar so History and the CLI never list it: the video
 /// editor opens the source and draws the cursor again, so its style can still change.
 enum BakedCursor {
-    /// The cursorless recording `video` (`size` pixels) with the cursor drawn in `style`, as an MP4 in `codec`, and
+    /// The cursorless recording `video` (`size` pixels) with the cursor drawn in `style`, written as `spec`, and
     /// its events with that style; `video` becomes its hidden source. `events` hold the recording's cursor track.
     @MainActor
-    static func render(_ video: URL, size: CGSize, events: RecordingEvents, style: CursorStyle, codec: VideoCodec,
+    static func render(_ video: URL, size: CGSize, events: RecordingEvents, style: CursorStyle, spec: ExportSpec,
                        progress: @escaping @Sendable (Double) -> Void = { _ in }) async throws -> (item: CaptureItem, events: RecordingEvents) {
         var edit = VideoEdit()
         edit.cursor = style
         let item = try await VideoOutput.render(video, source: VideoSource(size: size, events: events, cursorless: true), edit: edit,
-                                                spec: .mp4(codec: codec, quality: .high, resolution: .original, mute: false), progress: progress)
+                                                spec: spec, progress: progress)
         do {
             try FileManager.default.moveItem(at: video, to: Sidecar.source.url(for: item.url))
         } catch {

@@ -23,6 +23,33 @@ final class BakedCursorTests: XCTestCase {
         return events
     }
 
+    /// A recording's settings: the format, whether the cursor shows, and Smooth cursor.
+    private func settings(_ format: RecordingFormat, showCursor: Bool = true, smoothCursor: Bool = true) -> RecordingSettings {
+        RecordingSettings(format: format, fps: 30, quality: .high, showCursor: showCursor, smoothCursor: smoothCursor, highlightClicks: false,
+                          showKeystrokes: false, microphone: false, microphoneID: "", systemAudio: false, webcam: false,
+                          webcamSize: .medium, webcamID: "", countdown: 0, hideDesktopIcons: false, hideNotifications: false)
+    }
+
+    /// When a recording stops, a GIF recording becomes a GIF with the video editor's GIF settings, a Smooth cursor one
+    /// gets its cursor drawn in as a full-size MP4 in the editor's codec, and anything else stays as it was filmed.
+    func testWhatAStoppedRecordingBecomes() {
+        var defaults = VideoEditorDefaults()
+        defaults.codec = .hevc
+        defaults.gifFPS = 10
+        defaults.gifMaxWidth = 640
+        defaults.cursor = CursorStyle(show: true, size: 2, clickHighlight: false, hideWhenIdle: true)
+
+        XCTAssertEqual(StopRender.choose(for: settings(.gif), defaults: defaults, hasEvents: true),
+                       .gif(.gif(fps: 10, maxWidth: 640, quality: .high)), "a GIF recording films its cursor")
+        XCTAssertEqual(StopRender.choose(for: settings(.video), defaults: defaults, hasEvents: true),
+                       .cursor(defaults.cursor, .mp4(codec: .hevc, quality: .high, resolution: .original, mute: false)))
+        XCTAssertNil(StopRender.choose(for: settings(.video, smoothCursor: false), defaults: defaults, hasEvents: true), "the cursor was filmed")
+        XCTAssertNil(StopRender.choose(for: settings(.video, showCursor: false), defaults: defaults, hasEvents: true), "no cursor at all")
+        XCTAssertNil(StopRender.choose(for: settings(.video), defaults: defaults, hasEvents: false), "no cursor track to draw")
+        defaults.cursor.show = false
+        XCTAssertNil(StopRender.choose(for: settings(.video), defaults: defaults, hasEvents: true), "the editor hides the cursor")
+    }
+
     @MainActor
     func testStoppingRendersTheCaptureAndKeepsTheCursorlessSource() async throws {
         let video = try await TestVideo.makeOffMain(width: 400, height: 200, seconds: 2)
@@ -30,7 +57,8 @@ final class BakedCursorTests: XCTestCase {
         let size = CGSize(width: 400, height: 200)
 
         let style = CursorStyle(show: true, size: 1.5, clickHighlight: true, hideWhenIdle: false)
-        let result = try await BakedCursor.render(video, size: size, events: events, style: style, codec: .h264)
+        let result = try await BakedCursor.render(video, size: size, events: events, style: style,
+                                                  spec: .mp4(codec: .h264, quality: .high, resolution: .original, mute: false))
         cleanup.append(result.item.url)
         cleanup.append(Sidecar.source.url(for: result.item.url))
         XCTAssertNotEqual(result.item.url, video)

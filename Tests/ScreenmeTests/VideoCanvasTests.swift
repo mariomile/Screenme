@@ -45,13 +45,6 @@ final class VideoCanvasTests: PrefsSandboxTestCase {
     }
 
     func testTheEditorsChoicesAreRememberedWithinTheVideoLimits() {
-        let realStore = Prefs.store
-        let suite = "dev.mariomiletta.ScreenmeTests.\(UUID().uuidString)"
-        Prefs.store = UserDefaults(suiteName: suite)!
-        defer {
-            Prefs.store.removePersistentDomain(forName: suite)
-            Prefs.store = realStore
-        }
         XCTAssertEqual(VideoEditorDefaults.saved, VideoEditorDefaults(), "nothing saved yet")
         var wide = settings(padding: 35, aspect: .linkedin)
         wide.alignment = .topLeft

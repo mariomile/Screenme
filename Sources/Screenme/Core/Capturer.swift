@@ -12,10 +12,10 @@ enum Capturer {
 }
 
 enum Storage {
-    /// Captures live in Application Support (not Caches, which macOS may purge) so history keeps working.
+    /// Captures live in Application Support (not Caches, which macOS may purge) so history keeps working. The same
+    /// folder the `screenme` tool reads (`ScreenmePaths.captures`).
     static let directory: URL = {
-        let url = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Screenme/Captures", isDirectory: true)
+        let url = ScreenmePaths.captures
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
     }()

@@ -95,23 +95,23 @@ final class RecordingController {
     /// one (the raw file kept as its source), else the recording itself, also when that work fails (with the error
     /// shown). The final file gets `context`, read when the recording stopped, and, for a video, the events, for Report for AI.
     private func finalize(_ video: URL, size: CGSize, context: CaptureContext, session: Session) async -> CaptureItem {
-        let defaults = VideoEditorDefaults.saved
-        let gif = session.settings.format == .gif
-        let drawsCursor = session.settings.rendersCursorLater && defaults.cursor.show
         var item = CaptureItem(url: video, kind: .video)
         var events = session.recordedEvents
-        if gif || drawsCursor {
-            let toast = Toast.progress(gif ? "Creating GIF" : "Adding the cursor")
+        if let render = StopRender.choose(for: session.settings, defaults: VideoEditorDefaults.saved, hasEvents: events != nil) {
+            let toast = Toast.progress(render.title)
             defer { toast.finish() }
             let progress = VideoOutput.onMain { toast.update($0) }
             do {
-                if gif {
+                switch render {
+                case .gif(let spec):
                     item = try await VideoOutput.render(video, source: VideoSource(size: size, events: events), edit: VideoEdit(),
-                                                        spec: defaults.gif, progress: progress)
+                                                        spec: spec, progress: progress)
                     try? FileManager.default.removeItem(at: video)
-                } else if let recorded = events {
-                    (item, events) = try await BakedCursor.render(video, size: size, events: recorded, style: defaults.cursor,
-                                                                  codec: defaults.codec, progress: progress)
+                case .cursor(let style, let spec):
+                    if let recorded = events {
+                        (item, events) = try await BakedCursor.render(video, size: size, events: recorded, style: style, spec: spec,
+                                                                      progress: progress)
+                    }
                 }
             } catch {
                 CaptureCoordinator.shared.report(error)
@@ -198,6 +198,29 @@ final class RecordingController {
         await CaptureCoordinator.shared.stopRecording()
         if (error as? SCStreamError)?.code == .userStopped { return }
         CaptureCoordinator.shared.report(error)
+    }
+}
+
+/// What a stopped recording is rendered into before it is delivered. Nil from `choose` when it stays as it was filmed.
+enum StopRender: Equatable {
+    /// A GIF recording, converted with the video editor's GIF settings.
+    case gif(ExportSpec)
+    /// A Smooth cursor recording whose cursor is shown, the cursor drawn in `style`, at full size and quality in the
+    /// editor's codec, with its sound.
+    case cursor(CursorStyle, ExportSpec)
+
+    static func choose(for settings: RecordingSettings, defaults: VideoEditorDefaults, hasEvents: Bool) -> StopRender? {
+        if settings.format == .gif { return .gif(defaults.gif) }
+        guard settings.rendersCursorLater, defaults.cursor.show, hasEvents else { return nil }
+        return .cursor(defaults.cursor, .mp4(codec: defaults.codec, quality: .high, resolution: .original, mute: false))
+    }
+
+    /// The progress toast while it renders.
+    var title: String {
+        switch self {
+        case .gif: "Creating GIF"
+        case .cursor: "Adding the cursor"
+        }
     }
 }
 
