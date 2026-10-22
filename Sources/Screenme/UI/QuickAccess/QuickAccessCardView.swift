@@ -9,26 +9,29 @@ final class CardModel: ObservableObject {
     @Published var duration: String?
     @Published var hovering = false
     @Published var dragging = false
-    /// False while the capture file is still being written. The card shows the in-memory preview meanwhile,
-    /// actions wait for the file and a drag out starts once it is there.
-    private(set) var isWritten: Bool
-    private var waiting: [CheckedContinuation<Void, Never>] = []
+    /// The capture's file, still being written while the card shows a preview from memory.
+    let file: Task<URL, Error>
+    /// True once `file` is on disk. A drag must start from the mouse event itself and cannot wait for the file,
+    /// so it starts only once this is set.
+    private(set) var canDrag = false
 
-    init(item: CaptureItem, preview: CGImage? = nil) {
+    init(item: CaptureItem, preview: CGImage?, file: Task<URL, Error>) {
         self.item = item
-        isWritten = preview == nil
+        self.file = file
         thumbnail = preview.map { NSImage(cgImage: $0, size: .zero) }
     }
 
-    func untilWritten() async {
-        guard !isWritten else { return }
-        await withCheckedContinuation { waiting.append($0) }
-    }
-
-    func fileWritten() {
-        isWritten = true
-        waiting.forEach { $0.resume() }
-        waiting.removeAll()
+    /// Runs `work` once the file is written. When writing failed `work` never runs and the error is returned.
+    @discardableResult
+    func whenWritten(_ work: () async -> Void) async -> Error? {
+        do {
+            _ = try await file.value
+        } catch {
+            return error
+        }
+        canDrag = true
+        await work()
+        return nil
     }
 
     func reload() async {
@@ -104,8 +107,9 @@ struct QuickAccessCardView: View {
 
             VStack {
                 HStack {
-                    SymbolButton(symbol: "xmark", help: "Close\nHides this card. The capture stays in History.", style: .circle,
-                                 label: "Close") { card?.dismiss() }
+                    SymbolButton("Close", symbol: "xmark", help: "Hides this card. The capture stays in History.", style: .circle) {
+                        card?.dismiss()
+                    }
                     Spacer()
                     circle(.copyForAI)
                     circle(.reportForAI)
@@ -135,8 +139,8 @@ struct QuickAccessCardView: View {
     @ViewBuilder
     private func circle(_ action: CaptureAction) -> some View {
         if action.isAvailable(for: model.item.kind) {
-            SymbolButton(symbol: action.symbol(for: model.item.kind), help: action.tooltip(for: model.item.kind), style: .circle,
-                         label: action.title(for: model.item.kind)) { card?.perform(action) }
+            SymbolButton(action.title(for: model.item.kind), symbol: action.symbol(for: model.item.kind),
+                         help: action.help(for: model.item.kind), style: .circle) { card?.perform(action) }
         }
     }
 }

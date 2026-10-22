@@ -175,18 +175,9 @@ private final class PinWindowController: NSObject {
     func makeMenu() -> NSMenu {
         let menu = NSMenu()
         menu.autoenablesItems = false
-        for (action, key) in [(CaptureAction.copy, "c"), (.copyForAI, ""), (.copyMarkdown, ""), (.copyPath, ""), (.save, "s"), (.edit, ""), (.uploadLink, ""), (.share, "")]
-            where action.isAvailable(for: item.kind) {
-            // The share menu lists the services as a submenu.
-            if action == .share {
-                menu.addItem(Share.menuItem(for: item.url))
-                continue
-            }
-            let entry = entry(action.title(for: item.kind), #selector(captureAction(_:)), key: key)
-            entry.representedObject = CaptureAction.allCases.firstIndex(of: action)
-            entry.toolTip = action.help(for: item.kind)
-            menu.addItem(entry)
-        }
+        CaptureAction.menuItems([.copy, .copyForAI, .copyMarkdown, .copyPath, .save, .edit, .uploadLink, .share], for: item,
+                                keys: [.copy: "c", .save: "s"]) { [weak self] in self?.perform($0) }
+            .forEach(menu.addItem)
         menu.addItem(.separator())
 
         let opacity = NSMenu()
@@ -241,10 +232,6 @@ private final class PinWindowController: NSObject {
         Task { await action.perform(item) }
     }
 
-    @objc private func captureAction(_ sender: NSMenuItem) {
-        guard let index = sender.representedObject as? Int else { return }
-        perform(CaptureAction.allCases[index])
-    }
     @objc private func opacityAction(_ sender: NSMenuItem) { panel.animator().alphaValue = CGFloat(sender.tag) / 100 }
     @objc private func zoomInAction() { zoom(by: 1.15, animated: true) }
     @objc private func zoomOutAction() { zoom(by: 1 / 1.15, animated: true) }
@@ -305,7 +292,7 @@ private final class PinContentView: NSView {
         closeButton.frame = CGRect(x: 8, y: frame.height - 30, width: 22, height: 22)
         closeButton.autoresizingMask = [.maxXMargin, .minYMargin]
         closeButton.alphaValue = 0
-        closeButton.toolTip = "Close\nRemoves this pin from the screen. The capture stays in History."
+        closeButton.toolTip = Tooltip.text("Close", "Removes this pin from the screen. The capture stays in History.")
         addSubview(closeButton)
 
         labelBackground.wantsLayer = true

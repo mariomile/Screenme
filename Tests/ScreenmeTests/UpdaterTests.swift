@@ -60,7 +60,31 @@ final class UpdaterTests: XCTestCase {
         guard case .failed = updater.state else { return XCTFail("expected a failure, got \(updater.state)") }
     }
 
+    func testASecondUpdateWhileTheFirstRunsDoesNothing() async throws {
+        let commands = CommandLog()
+        let updater = Updater(source: Updater.Source(repo: checkout, commit: "abc"),
+                              logURL: root.appendingPathComponent("update.log")) { executable, arguments, _, _ in
+            commands.append(([executable] + arguments).joined(separator: " "))
+            try await Task.sleep(for: .milliseconds(100))
+            return (0, Data())
+        }
+        let first = Task { await updater.update() }
+        // The first update waits on its first command: busy already, so a double click cannot start a second one.
+        while commands.all.isEmpty { await Task.yield() }
+        guard case .updating = updater.state else { return XCTFail("expected updating, got \(updater.state)") }
+        await updater.update()
+        await first.value
+        XCTAssertEqual(commands.all, ["/usr/bin/git status --porcelain --untracked-files=no", "/usr/bin/git pull --ff-only", "scripts/install.sh"])
+    }
+
     // MARK: - Helpers
+
+    private final class CommandLog: @unchecked Sendable {
+        private let lock = NSLock()
+        private var commands: [String] = []
+        var all: [String] { lock.withLock { commands } }
+        func append(_ command: String) { lock.withLock { commands.append(command) } }
+    }
 
     private func installedUpdater() async throws -> Updater {
         let head = try await Updater.git(["rev-parse", "HEAD"], in: checkout)

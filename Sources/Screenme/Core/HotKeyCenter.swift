@@ -59,7 +59,7 @@ final class HotKeyCenter: ObservableObject {
         var failed: Set<ShortcutAction> = []
         let combos = ShortcutStore.allCombos()
         for (id, action) in ids {
-            guard let combo = combos[action] ?? nil else { continue }
+            guard let combo = combos[action] else { continue }
             var ref: EventHotKeyRef?
             let status = RegisterEventHotKey(combo.keyCode, combo.modifiers, EventHotKeyID(signature: Self.signature, id: id),
                                              GetApplicationEventTarget(), 0, &ref)

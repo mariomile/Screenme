@@ -10,7 +10,13 @@ struct PrefKey<Value> {
 }
 
 enum Prefs {
-    static var store = UserDefaults.standard // var so tests can swap in a throwaway suite
+    /// Where every preference lives. Unit tests swap in a throwaway suite; UI tests launch the app with
+    /// `-ScreenmeDefaultsSuite <name>` for the same, so a run never reads or changes the user's settings.
+    /// Launch arguments (`-key value`) still override either.
+    static var store: UserDefaults = {
+        guard let suite = UserDefaults.standard.string(forKey: "ScreenmeDefaultsSuite") else { return .standard }
+        return UserDefaults(suiteName: suite) ?? .standard
+    }()
 
     static subscript<Value>(key: PrefKey<Value>) -> Value {
         get { store.object(forKey: key.name) as? Value ?? key.defaultValue }

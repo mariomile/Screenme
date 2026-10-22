@@ -48,35 +48,56 @@ final class S3UploadTests: XCTestCase {
         XCTAssertEqual(S3Upload.contentType(forExtension: "mp4"), "video/mp4")
     }
 
-    private func settings(endpoint: String, region: String = "auto", publicURL: String) -> UploadSettings {
-        UploadSettings(endpoint: endpoint, region: region, bucket: "shots", accessKeyID: "id", secretKey: "secret", publicURL: publicURL)
+    private func settings(endpoint: String, region: String = "auto", bucket: String = "shots", secret: String = "secret",
+                          publicURL: String) throws -> UploadSettings {
+        try UploadSettings(endpoint: endpoint, region: region, bucket: bucket, accessKeyID: "id", secretKey: secret, publicURL: publicURL)
     }
 
-    func testURLsForR2() {
-        let s = settings(endpoint: "https://abc123.r2.cloudflarestorage.com", publicURL: "https://pub-xyz.r2.dev")
-        XCTAssertEqual(s.objectURL(key: "k.png")?.absoluteString, "https://abc123.r2.cloudflarestorage.com/shots/k.png")
+    func testURLsForR2() throws {
+        let s = try settings(endpoint: "https://abc123.r2.cloudflarestorage.com", publicURL: "https://pub-xyz.r2.dev")
+        XCTAssertEqual(s.objectURL(key: "k.png").absoluteString, "https://abc123.r2.cloudflarestorage.com/shots/k.png")
         XCTAssertEqual(s.host, "abc123.r2.cloudflarestorage.com")
         XCTAssertEqual(s.publicLink(key: "k.png"), "https://pub-xyz.r2.dev/k.png")
     }
 
-    func testURLsForBackblazeAndAWSWithRegions() {
-        let b2 = settings(endpoint: "https://s3.us-west-004.backblazeb2.com/", region: "us-west-004", publicURL: "https://f004.backblazeb2.com/file/shots/")
-        XCTAssertEqual(b2.objectURL(key: "k.gif")?.absoluteString, "https://s3.us-west-004.backblazeb2.com/shots/k.gif")
+    func testURLsForBackblazeAndAWSWithRegions() throws {
+        let b2 = try settings(endpoint: "https://s3.us-west-004.backblazeb2.com/", region: "us-west-004", publicURL: "https://f004.backblazeb2.com/file/shots/")
+        XCTAssertEqual(b2.objectURL(key: "k.gif").absoluteString, "https://s3.us-west-004.backblazeb2.com/shots/k.gif")
         XCTAssertEqual(b2.publicLink(key: "k.gif"), "https://f004.backblazeb2.com/file/shots/k.gif")
 
-        let aws = settings(endpoint: "s3.eu-central-1.amazonaws.com", region: "eu-central-1", publicURL: "cdn.example.com")
-        XCTAssertEqual(aws.objectURL(key: "k.mp4")?.absoluteString, "https://s3.eu-central-1.amazonaws.com/shots/k.mp4")
+        let aws = try settings(endpoint: "s3.eu-central-1.amazonaws.com", region: "eu-central-1", publicURL: "cdn.example.com")
+        XCTAssertEqual(aws.objectURL(key: "k.mp4").absoluteString, "https://s3.eu-central-1.amazonaws.com/shots/k.mp4")
         XCTAssertEqual(aws.publicLink(key: "k.mp4"), "https://cdn.example.com/k.mp4")
     }
 
-    func testHostKeepsACustomPort() {
-        XCTAssertEqual(settings(endpoint: "http://localhost:9000", publicURL: "x").host, "localhost:9000")
+    func testHostKeepsACustomPort() throws {
+        XCTAssertEqual(try settings(endpoint: "http://localhost:9000", publicURL: "x").host, "localhost:9000")
     }
 
-    func testCompletenessNeedsEveryField() {
-        XCTAssertTrue(settings(endpoint: "https://a.b", publicURL: "https://c.d").isComplete)
-        XCTAssertFalse(settings(endpoint: " ", publicURL: "https://c.d").isComplete)
-        XCTAssertFalse(settings(endpoint: "https://a.b", region: "", publicURL: "https://c.d").isComplete)
+    func testFieldsAreTrimmedOnce() throws {
+        let s = try settings(endpoint: "  https://a.b/ ", region: " auto ", bucket: " shots ", secret: " secret ", publicURL: " https://c.d// ")
+        XCTAssertEqual(s.region, "auto")
+        XCTAssertEqual(s.secretKey, "secret")
+        XCTAssertEqual(s.objectPath(key: "k.png"), "/shots/k.png")
+        XCTAssertEqual(s.objectURL(key: "k.png").absoluteString, "https://a.b/shots/k.png")
+        XCTAssertEqual(s.publicLink(key: "k.png"), "https://c.d/k.png")
+    }
+
+    func testAMissingFieldOrABadAddressIsAClearError() {
+        func message(_ make: () throws -> UploadSettings) -> String {
+            do {
+                _ = try make()
+                return "no error"
+            } catch {
+                return error.localizedDescription
+            }
+        }
+        XCTAssertEqual(message { try settings(endpoint: " ", publicURL: "https://c.d") }, "Set up Upload in Settings first: Endpoint URL is empty")
+        XCTAssertEqual(message { try settings(endpoint: "https://a.b", region: "", publicURL: "https://c.d") },
+                       "Set up Upload in Settings first: Region is empty")
+        XCTAssertEqual(message { try settings(endpoint: "https://a.b", secret: "", publicURL: "https://c.d") },
+                       "Set up Upload in Settings first: Secret Access Key is empty")
+        XCTAssertEqual(message { try settings(endpoint: "https://a b", publicURL: "https://c.d") }, "Endpoint URL is not a valid address")
     }
 
     func testErrorCodesBecomeReadableMessages() {

@@ -100,6 +100,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             [.recordScreen],
             [.pinLastCapture, .openHistory, .toggleDesktopIcons],
         ]
+        let combos = ShortcutStore.allCombos()
         for group in groups {
             for action in group {
                 let item = NSMenuItem(title: action == .toggleDesktopIcons && DesktopIcons.isHidden ? "Show Desktop Icons" : action.title,
@@ -108,7 +109,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 item.target = self
                 item.image = NSImage(systemSymbolName: action.symbol, accessibilityDescription: nil)
                 item.toolTip = action.help
-                if let combo = ShortcutsModel.shared.combo(for: action) {
+                if let combo = combos[action] {
                     item.keyEquivalent = combo.keyEquivalent
                     item.keyEquivalentModifierMask = combo.eventModifiers
                 }
@@ -120,7 +121,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: ",").target = self
         let updates = menu.addItem(withTitle: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
         updates.target = self
-        updates.toolTip = "Looks for new Screenme changes on GitHub and offers to install them."
+        updates.toolTip = Updater.checkHelp
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit Screenme", action: #selector(quit), keyEquivalent: "q").target = self
     }

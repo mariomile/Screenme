@@ -44,8 +44,10 @@ final class ShortcutStoreTests: PrefsSandboxTestCase {
         ShortcutStore.set(nil, for: .captureArea)
         ShortcutStore.set(combo(kVK_ANSI_H, cmdKey | optionKey), for: .openHistory)
         let all = ShortcutStore.allCombos()
-        XCTAssertEqual(all.count, ShortcutAction.allCases.count)
-        for action in ShortcutAction.allCases { XCTAssertEqual(all[action] ?? nil, ShortcutStore.combo(for: action), "\(action)") }
+        XCTAssertNil(all[.captureArea], "an action without a shortcut is absent")
+        XCTAssertNil(all[.measure], "so is one without a default")
+        XCTAssertEqual(all[.openHistory], combo(kVK_ANSI_H, cmdKey | optionKey))
+        for action in ShortcutAction.allCases { XCTAssertEqual(all[action], ShortcutStore.combo(for: action), "\(action)") }
     }
 
     func testResetAllRestoresDefaults() {

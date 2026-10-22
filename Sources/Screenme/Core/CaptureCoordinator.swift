@@ -161,8 +161,7 @@ final class CaptureCoordinator {
 
     private func finishScreenshot(_ result: SelectionResult) async throws {
         if case .area = result.target { previousArea = result.target }
-        let image = try await image(for: result)
-        try await deliver(image, cover: Notch.cover(for: result.target)) { CaptureContexts.record(result.target, for: $0) }
+        try await deliver(try await image(for: result), from: result.target)
     }
 
     /// The frozen picture when the picker had one, otherwise a fresh capture.
@@ -172,25 +171,18 @@ final class CaptureCoordinator {
     }
 
     /// Writes an image capture and runs the after-capture actions. The notch cover, the watermark and the encoding
-    /// run off the main thread; meanwhile a Quick Access card already shows `image` from memory and gets the
-    /// file when it is written. Copy, Save, Pin and the editor need the file, so they run after the write.
-    /// `written` runs on the new file before the after-capture actions.
-    func deliver(_ image: CGImage, cover: Notch.Cover? = nil, written: (URL) -> Void = { _ in }) async throws {
+    /// run off the main thread; meanwhile a Quick Access card already shows `image` from memory and waits for the file.
+    /// `target`: where the picture came from, for its notch cover and its context (Copy for AI).
+    func deliver(_ image: CGImage, from target: CaptureTarget? = nil) async throws {
         let item = CaptureItem(url: Storage.newURL(extension: Prefs[Pref.imageFormat].fileExtension), kind: .image)
+        if let target { CaptureContexts.record(target, for: item.url) }
+        let cover = target.flatMap(Notch.cover(for:))
         Sounds.shutter()
-        let cardFirst = !Prefs[Pref.afterShotOpenEditor] && Prefs[Pref.afterShotQuickAccess]
-        if cardFirst { QuickAccess.shared.show(item, preview: image) }
-        do {
-            try await Task.detached(priority: .userInitiated) {
-                try Storage.write(Watermark.applied(to: cover?.applied(to: image) ?? image), to: item.url)
-            }.value
-        } catch {
-            if cardFirst { QuickAccess.shared.fileFailed(item.url) }
-            throw error
+        let file = Task.detached(priority: .userInitiated) {
+            try Storage.write(Watermark.applied(to: cover?.applied(to: image) ?? image), to: item.url)
+            return item.url
         }
-        written(item.url)
-        if cardFirst { QuickAccess.shared.fileWritten(item.url) }
-        afterCapture(item, quickAccessShown: cardFirst)
+        try await afterCapture(item, preview: image, file: file)
     }
 
     // MARK: Recordings
@@ -202,7 +194,8 @@ final class CaptureCoordinator {
         busy = true
         defer { busy = false }
         guard let item = await RecordingController.shared.stop() else { return }
-        afterCapture(item)
+        // The file is complete: nothing is left to wait for or to fail.
+        try? await afterCapture(item, file: Task { item.url })
         // Outside the busy window: transcribing can take a while, and a new capture need not wait for it.
         if Prefs[Pref.afterRecordingAIReport], CaptureAction.reportForAI.isAvailable(for: item.kind) {
             Task { await CaptureAction.reportForAI.perform(item) }
@@ -218,29 +211,17 @@ final class CaptureCoordinator {
         CaptureHistory.shared.add(item)
     }
 
-    /// Records `item` and runs the user's after-capture actions. Editors call this too when they save a new version.
-    /// `quickAccessShown`: `deliver` already put the card on screen while the file was written.
-    func afterCapture(_ item: CaptureItem, quickAccessShown: Bool = false) {
+    /// Runs the user's after-capture actions on a new capture. A Quick Access card shows at once, from `preview` while
+    /// `file` is still being written; everything else waits for the file, and nothing happens when writing it fails.
+    private func afterCapture(_ item: CaptureItem, preview: CGImage? = nil, file: Task<URL, Error>) async throws {
+        let plan = AfterCapture.plan(for: item.kind)
+        if plan.presentation == .quickAccess { QuickAccess.shared.show(item, preview: preview, file: file) }
+        _ = try await file.value
         record(item)
-        switch item.kind {
-        case .image:
-            if Prefs[Pref.afterShotCopy] { Clipboard.copy(item) }
-            if Prefs[Pref.afterShotSave] { _ = try? Storage.save(item.url) }
-            if Prefs[Pref.afterShotPin] { PinWindow.pin(item) }
-            if Prefs[Pref.afterShotOpenEditor] {
-                AnnotationEditor.open(item)
-            } else if Prefs[Pref.afterShotQuickAccess], !quickAccessShown {
-                QuickAccess.shared.show(item)
-            }
-        case .video, .gif:
-            if Prefs[Pref.afterRecordingCopy] { Clipboard.copy(item) }
-            if Prefs[Pref.afterRecordingSave] { _ = try? Storage.save(item.url) }
-            if Prefs[Pref.afterRecordingOpenEditor] && item.kind == .video {
-                VideoEditor.open(item)
-            } else if Prefs[Pref.afterRecordingQuickAccess] {
-                QuickAccess.shared.show(item)
-            }
-        }
+        if plan.copy { Clipboard.copy(item) }
+        if plan.save { _ = try? Storage.save(item.url) }
+        if plan.pin { PinWindow.pin(item) }
+        if plan.presentation == .editor { item.kind == .image ? AnnotationEditor.open(item) : VideoEditor.open(item) }
     }
 
     // MARK: Helpers
@@ -253,6 +234,29 @@ final class CaptureCoordinator {
                            detail: "Screenme needs Screen Recording permission. Open Settings > Permissions to turn it on.")
         } else {
             Feedback.failure(error.localizedDescription, duration: 3.2)
+        }
+    }
+}
+
+/// What happens to a new capture, from the after-capture settings: the file actions, then where it opens.
+struct AfterCapture: Equatable {
+    enum Presentation { case editor, quickAccess, none }
+
+    var copy = false
+    var save = false
+    var pin = false
+    var presentation = Presentation.none
+
+    /// The editor opens instead of Quick Access. GIFs have no editor, so a GIF recording falls back to Quick Access.
+    static func plan(for kind: CaptureItem.Kind) -> AfterCapture {
+        switch kind {
+        case .image:
+            AfterCapture(copy: Prefs[Pref.afterShotCopy], save: Prefs[Pref.afterShotSave], pin: Prefs[Pref.afterShotPin],
+                         presentation: Prefs[Pref.afterShotOpenEditor] ? .editor : Prefs[Pref.afterShotQuickAccess] ? .quickAccess : .none)
+        case .video, .gif:
+            AfterCapture(copy: Prefs[Pref.afterRecordingCopy], save: Prefs[Pref.afterRecordingSave],
+                         presentation: Prefs[Pref.afterRecordingOpenEditor] && kind == .video ? .editor
+                             : Prefs[Pref.afterRecordingQuickAccess] ? .quickAccess : .none)
         }
     }
 }

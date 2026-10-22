@@ -5,16 +5,11 @@ import XCTest
 final class CopyActionsTests: PrefsSandboxTestCase {
     private var folder: URL!
 
-    override func setUp() {
-        super.setUp()
-        folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try? FileManager.default.createDirectory(at: folder.appendingPathComponent("Saved"), withIntermediateDirectories: true)
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        folder = try temporaryFolder()
+        try FileManager.default.createDirectory(at: folder.appendingPathComponent("Saved"), withIntermediateDirectories: true)
         Prefs[Pref.saveDirectory] = folder.appendingPathComponent("Saved").path
-    }
-
-    override func tearDown() {
-        try? FileManager.default.removeItem(at: folder)
-        super.tearDown()
     }
 
     func testMarkdownUsesTheNameWithoutExtensionAndAnEncodedPath() {

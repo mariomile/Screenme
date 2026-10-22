@@ -24,6 +24,36 @@ enum CaptureAction: CaseIterable {
         }
     }
 
+    /// What it does, shown when the pointer rests on it.
+    func help(for kind: CaptureItem.Kind) -> String {
+        let noun = kind == .image ? "image" : kind == .gif ? "GIF" : "video"
+        switch self {
+        case .copy: return "Puts the \(noun) on the clipboard, ready to paste into any app."
+        case .copyForAI: return "Copies the image with its context for Claude, ChatGPT or Cursor: the app, window and page it came from, your notes on annotations and the text in it." + Self.hidingNote
+        case .reportForAI: return "Turns the recording into a report an AI agent can act on: numbered keyframes with what you said, clicked, pressed and drew on each, a contact sheet of them all, and a prompt. Saved as a folder; the summary and the contact sheet are copied."
+        case .copyMarkdown: return "Saves the \(noun) to your save folder and copies a Markdown image link to it, for notes and docs."
+        case .copyPath: return "Copies the file path of the \(noun), for scripts or the terminal."
+        case .save: return "Saves a copy to your save folder (Settings > General)."
+        case .saveAs: return "Saves a copy where you choose, with the name you choose."
+        case .reveal: return "Shows the file in Finder."
+        case .share: return "Sends it with AirDrop, Messages, Mail and more." + (kind == .image ? Self.hidingNote : "")
+        case .uploadLink: return "Uploads the \(noun) to your own S3-compatible bucket (Settings > Upload) and copies a public link." + (kind == .image ? Self.hidingNote : "")
+        case .edit: return kind == .image ? "Opens the editor: arrows, text, blur, highlights, crop and backgrounds." : "Opens the video editor: trim, mute, and export as video or GIF."
+        case .pin: return "Keeps the image floating above all windows, as a reference while you work."
+        case .trash: return "Moves the file to the Trash and removes it from History."
+        }
+    }
+
+    /// Added to the tooltips of the actions the setting applies to, while it is on.
+    private static var hidingNote: String {
+        Prefs[Pref.hideSensitiveWhenSharing] ? " Sensitive info and faces are hidden in the copy." : ""
+    }
+
+    /// Title and what it does, for a tooltip.
+    func tooltip(for kind: CaptureItem.Kind) -> String {
+        Tooltip.text(title(for: kind), help(for: kind))
+    }
+
     func symbol(for kind: CaptureItem.Kind) -> String {
         switch self {
         case .copy: "doc.on.doc"
@@ -97,7 +127,32 @@ enum CaptureAction: CaseIterable {
         case .share:
             Share.show(item.url)
         case .uploadLink:
-            return await UploadLink.run(item)
+            let settings: UploadSettings
+            do {
+                settings = try UploadSettings.load()
+            } catch {
+                Feedback.failure(error.localizedDescription, duration: 2.4)
+                SettingsWindow.show(tab: .upload)
+                return false
+            }
+            guard let shared = try? await Redaction.shareableCopy(of: item.url) else {
+                Feedback.failure("Could not read the text")
+                return false
+            }
+            let progress = Toast.progress("Uploading")
+            do {
+                let link = try await S3Upload.put(shared.url, key: S3Upload.randomKey(extension: shared.url.pathExtension),
+                                                  settings: settings) { value in
+                    Task { @MainActor in progress.update(value) }
+                }
+                progress.finish()
+                Clipboard.copyText(link)
+                confirm(hidden: shared.hidden)
+            } catch {
+                progress.finish()
+                Feedback.failure(error.localizedDescription, duration: 3.2)
+                return false
+            }
         case .edit:
             item.kind == .image ? AnnotationEditor.open(item) : VideoEditor.open(item)
         case .pin:
@@ -125,9 +180,14 @@ enum CaptureAction: CaseIterable {
             Toast.show("Path copied", symbol: "link")
         case .save, .saveAs:
             Toast.show("Saved to \(url?.deletingLastPathComponent().lastPathComponent ?? "folder")", symbol: "square.and.arrow.down.fill")
+        case .share:
+            // The share menu itself confirms; only a redacted copy needs saying.
+            if hidden > 0 { Toast.show("Sharing a copy, \(Self.hiddenItems(hidden)) hidden", symbol: "eye.slash.fill") }
+        case .uploadLink:
+            Toast.show(hidden > 0 ? "Link copied, \(Self.hiddenItems(hidden)) hidden" : "Link copied", symbol: "link.icloud.fill")
         case .trash:
             Toast.show("Moved to Trash", symbol: "trash.fill")
-        case .reveal, .share, .uploadLink, .edit, .pin:
+        case .reveal, .edit, .pin:
             break
         }
     }
@@ -151,4 +211,51 @@ enum CaptureAction: CaseIterable {
         Feedback.failure("Could not save")
         return false
     }
+
+    // MARK: Menus
+
+    /// AppKit menu items for the `actions` available for `item`, with their symbols and tooltips, in that order.
+    /// Share lists the services as a submenu, unless what is shared must be redacted first: then it is a plain item and
+    /// `perform(.share)` opens the share menu once the copy is ready. `keys`: ⌘ key equivalents.
+    @MainActor
+    static func menuItems(_ actions: [CaptureAction], for item: CaptureItem, keys: [CaptureAction: String] = [:],
+                          perform: @escaping (CaptureAction) -> Void) -> [NSMenuItem] {
+        actions.filter { $0.isAvailable(for: item.kind) }.map { action in
+            if action == .share, !Prefs[Pref.hideSensitiveWhenSharing] {
+                return NSSharingServicePicker(items: [item.url]).standardShareMenuItem
+            }
+            let entry = NSMenuItem(title: action.title(for: item.kind), symbol: action.symbol(for: item.kind),
+                                   toolTip: action.help(for: item.kind)) { perform(action) }
+            if let key = keys[action] {
+                entry.keyEquivalent = key
+                entry.keyEquivalentModifierMask = .command
+            }
+            return entry
+        }
+    }
+}
+
+/// Before & After: two screenshots in one image labelled Before and After, from a Quick Access card (with the
+/// previous screenshot) or from two selected in History.
+enum BeforeAfter {
+    static let title = "Before & After"
+    static let symbol = "rectangle.split.2x1"
+}
+
+extension NSMenuItem {
+    /// An item that runs `handler`. The item holds its target, which `target` alone would not keep alive.
+    convenience init(title: String, symbol: String, toolTip: String, handler: @escaping () -> Void) {
+        let target = MenuHandler(handler)
+        self.init(title: title, action: #selector(MenuHandler.run), keyEquivalent: "")
+        self.target = target
+        representedObject = target
+        image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+        self.toolTip = toolTip
+    }
+}
+
+private final class MenuHandler: NSObject {
+    private let handler: () -> Void
+    init(_ handler: @escaping () -> Void) { self.handler = handler }
+    @objc func run() { handler() }
 }

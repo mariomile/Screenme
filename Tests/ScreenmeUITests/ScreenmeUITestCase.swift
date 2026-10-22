@@ -2,8 +2,8 @@ import AppKit
 import XCTest
 
 /// Base for the end-to-end tests. Launches the Debug build that `scripts/ui-test.sh` signed like the installed app,
-/// with test preferences passed as launch arguments: they override the user's settings for this run only and
-/// are never written to disk. Actions start through `screenme://` links, the same way Shortcuts or Raycast would,
+/// reading its preferences from a fresh suite, with the test's deviations passed as launch arguments: the user's
+/// settings are never read or changed. Actions start through `screenme://` links, the same way Shortcuts or Raycast would,
 /// and areas and windows are named in the link, so the tests never move the pointer: they run while you work.
 /// Keys go to Screenme's own windows only. Every capture a test creates is deleted afterwards.
 class ScreenmeUITestCase: XCTestCase {
@@ -21,44 +21,16 @@ class ScreenmeUITestCase: XCTestCase {
         Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent("Screenme.app")
     }
 
-    /// Preferences for a predictable run. Tests add or override entries before `launch()`.
+    /// Where the defaults differ for a predictable, fast run. Everything else is the app's default: the app reads its
+    /// preferences from a fresh suite (`-ScreenmeDefaultsSuite`), never the user's settings. Tests add or override
+    /// entries before `launch()`.
     var prefs: [String: String] = [
         "onboardingDone": "<true/>",
-        "playSounds": "<false/>",
-        "afterShotQuickAccess": "<true/>",
-        "afterShotCopy": "<true/>",
-        "afterShotSave": "<false/>",
-        "afterShotOpenEditor": "<false/>",
-        "afterShotPin": "<false/>",
-        "afterRecordingQuickAccess": "<true/>",
-        "afterRecordingCopy": "<false/>",
-        "afterRecordingSave": "<false/>",
-        "afterRecordingOpenEditor": "<false/>",
-        "quickAccessAutoClose": "<integer>0</integer>",
-        "quickAccessCloseAfterDrag": "<true/>",
-        "freezeScreen": "<false/>",
-        "hideNotch": "<false/>",
-        "hideDesktopIconsInShots": "<false/>",
-        "watermarkEnabled": "<false/>",
-        "imageFormat": "png",
-        "recordingFormat": "video",
         "recordingCountdown": "<integer>0</integer>",
-        "recordingWebcam": "<false/>",
-        "recordingMicrophone": "<false/>",
-        "recordingSystemAudio": "<false/>",
-        "recordingHideDesktopIcons": "<false/>",
         "selfTimerSeconds": "<integer>3</integer>",
-        "showMenuBarIcon": "<true/>",
-        "retinaResolution": "<true/>",
-        "windowShadow": "<true/>",
-        "showCursorInShots": "<false/>",
-        "translateTarget": "",
-        "ocrLanguage": "",
-        "quickAccessSize": "medium",
-        "quickAccessAutoCloseSaves": "<false/>",
-        "recordingHideNotifications": "<true/>",
-        "colorFormat": "hex",
     ]
+    /// The throwaway preferences suite of this test, removed afterwards.
+    private let defaultsSuite = "dev.mariomiletta.ScreenmeUITests.\(UUID().uuidString)"
 
     override func setUpWithError() throws {
         continueAfterFailure = false
@@ -69,7 +41,7 @@ class ScreenmeUITestCase: XCTestCase {
 
     func launch() {
         app = XCUIApplication()
-        app.launchArguments = prefs.flatMap { ["-\($0.key)", $0.value] }
+        app.launchArguments = ["-ScreenmeDefaultsSuite", defaultsSuite] + prefs.flatMap { ["-\($0.key)", $0.value] }
         app.launch()
         XCTAssertTrue(app.statusItems.firstMatch.waitForExistence(timeout: 10), "the menu bar icon should appear")
     }
@@ -78,6 +50,7 @@ class ScreenmeUITestCase: XCTestCase {
         app?.terminate()
         for url in newCaptures() + cleanup { try? FileManager.default.removeItem(at: url) }
         try? FileManager.default.removeItem(at: Self.saveFolder)
+        UserDefaults(suiteName: defaultsSuite)?.removePersistentDomain(forName: defaultsSuite)
     }
 
     /// Files to delete after the test, e.g. documents a test opened in another app.

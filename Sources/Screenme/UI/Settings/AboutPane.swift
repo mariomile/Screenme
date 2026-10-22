@@ -54,7 +54,7 @@ private struct UpdateSection: View {
             } else {
                 Button("Check for Updates") { Task { await updater.check() } }
                     .disabled(updater.isBusy)
-                    .help("Fetches the latest changes from GitHub and lists what is new since this copy was installed.")
+                    .help(title: "Check for Updates", Updater.checkHelp)
                 status
             }
         }
@@ -87,13 +87,13 @@ private struct UpdateSection: View {
                     .buttonStyle(.borderedProminent)
                     .help("Pulls the changes, builds Screenme and installs it in Applications. Screenme restarts, and its permissions stay granted.")
             }
-        case .updating(let step):
+        case .updating(let step, let started):
             VStack(spacing: 4) {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
                     Text(step).font(.callout)
                     TimelineView(.periodic(from: .now, by: 1)) { context in
-                        Text(Duration.seconds(context.date.timeIntervalSince(updater.updateStarted).rounded()),
+                        Text(Duration.seconds(context.date.timeIntervalSince(started).rounded()),
                              format: .time(pattern: .minuteSecond))
                             .font(.callout.monospacedDigit())
                             .foregroundStyle(.secondary)
@@ -109,8 +109,8 @@ private struct UpdateSection: View {
                     .font(.caption)
                     .foregroundStyle(.red)
                     .multilineTextAlignment(.center)
-                if FileManager.default.fileExists(atPath: Updater.logURL.path) {
-                    Button("Show Update Log") { NSWorkspace.shared.open(Updater.logURL) }
+                if FileManager.default.fileExists(atPath: updater.logURL.path) {
+                    Button("Show Update Log") { NSWorkspace.shared.open(updater.logURL) }
                         .controlSize(.small)
                         .help("Opens the output of the last update attempt.")
                 }

@@ -81,13 +81,20 @@ enum S3Keychain {
         return String(data: data, encoding: .utf8) ?? ""
     }
 
-    /// Replaces the stored secret; an empty one removes it. Throws a readable error when the Keychain refuses.
+    /// Stores the secret, updating the item when there is one; an empty secret removes it. Throws a readable error
+    /// when the Keychain refuses.
     static func write(_ secret: String) throws {
-        let deleted = SecItemDelete(query as CFDictionary)
-        guard deleted == errSecSuccess || deleted == errSecItemNotFound else { throw Failure(status: deleted) }
-        guard !secret.isEmpty else { return }
-        let added = SecItemAdd(query.merging([kSecValueData as String: Data(secret.utf8)]) { $1 } as CFDictionary, nil)
-        guard added == errSecSuccess else { throw Failure(status: added) }
+        guard !secret.isEmpty else {
+            let deleted = SecItemDelete(query as CFDictionary)
+            guard deleted == errSecSuccess || deleted == errSecItemNotFound else { throw Failure(status: deleted) }
+            return
+        }
+        let value = [kSecValueData as String: Data(secret.utf8)]
+        var status = SecItemUpdate(query as CFDictionary, value as CFDictionary)
+        if status == errSecItemNotFound {
+            status = SecItemAdd(query.merging(value) { $1 } as CFDictionary, nil)
+        }
+        guard status == errSecSuccess else { throw Failure(status: status) }
     }
 
     struct Failure: LocalizedError {
@@ -99,51 +106,66 @@ enum S3Keychain {
 }
 
 /// Where uploads go: the user's own S3-compatible bucket, addressed path-style (`<endpoint>/<bucket>/<key>`).
+/// Only a complete, valid configuration exists: every field trimmed and filled in, both addresses real URLs.
 struct UploadSettings {
-    var endpoint: String
-    var region: String
-    var bucket: String
-    var accessKeyID: String
-    var secretKey: String
-    var publicURL: String
-
-    /// The saved settings, or nil while a field is empty.
-    static func load() -> UploadSettings? {
-        let settings = UploadSettings(endpoint: Prefs[Pref.s3Endpoint], region: Prefs[Pref.s3Region], bucket: Prefs[Pref.s3Bucket],
-                                      accessKeyID: Prefs[Pref.s3AccessKeyID], secretKey: S3Keychain.read(), publicURL: Prefs[Pref.s3PublicURL])
-        return settings.isComplete ? settings : nil
-    }
-
-    var isComplete: Bool {
-        ![endpoint, region, bucket, accessKeyID, secretKey, publicURL].contains { $0.trimmingCharacters(in: .whitespaces).isEmpty }
-    }
-
-    /// The endpoint without spaces or a trailing slash, and with `https://` when it was typed without a scheme.
-    private static func normalized(_ url: String) -> String {
-        var base = url.trimmingCharacters(in: .whitespaces)
-        while base.hasSuffix("/") { base.removeLast() }
-        return base.contains("://") ? base : "https://" + base
-    }
-
+    /// Without a trailing slash, with `https://` when it was typed without a scheme.
+    let endpoint: URL
     /// The `Host` header value: the endpoint's host, with its port when it has one.
-    var host: String? {
-        guard let url = URL(string: Self.normalized(endpoint)), let host = url.host else { return nil }
-        return url.port.map { "\(host):\($0)" } ?? host
+    let host: String
+    let region: String
+    let bucket: String
+    let accessKeyID: String
+    let secretKey: String
+    /// Where the uploaded files are public, normalized like `endpoint`.
+    let publicBase: URL
+
+    struct Invalid: LocalizedError {
+        let errorDescription: String?
+    }
+
+    /// The saved settings. Throws a message naming what to fix in Settings > Upload.
+    static func load() throws -> UploadSettings {
+        try UploadSettings(endpoint: Prefs[Pref.s3Endpoint], region: Prefs[Pref.s3Region], bucket: Prefs[Pref.s3Bucket],
+                           accessKeyID: Prefs[Pref.s3AccessKeyID], secretKey: S3Keychain.read(), publicURL: Prefs[Pref.s3PublicURL])
+    }
+
+    init(endpoint: String, region: String, bucket: String, accessKeyID: String, secretKey: String, publicURL: String) throws {
+        func filled(_ value: String, _ name: String) throws -> String {
+            let trimmed = value.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else { throw Invalid(errorDescription: "Set up Upload in Settings first: \(name) is empty") }
+            return trimmed
+        }
+        func address(_ value: String, _ name: String) throws -> URL {
+            var base = try filled(value, name)
+            while base.hasSuffix("/") { base.removeLast() }
+            guard let url = URL(string: base.contains("://") ? base : "https://" + base), url.host?.isEmpty == false else {
+                throw Invalid(errorDescription: "\(name) is not a valid address")
+            }
+            return url
+        }
+        self.endpoint = try address(endpoint, "Endpoint URL")
+        self.region = try filled(region, "Region")
+        self.bucket = try filled(bucket, "Bucket")
+        self.accessKeyID = try filled(accessKeyID, "Access Key ID")
+        self.secretKey = try filled(secretKey, "Secret Access Key")
+        self.publicBase = try address(publicURL, "Public URL")
+        let host = self.endpoint.host ?? ""
+        self.host = self.endpoint.port.map { "\(host):\($0)" } ?? host
     }
 
     /// The path that is signed: `/<bucket>/<key>`.
     func objectPath(key: String) -> String {
-        "/\(bucket.trimmingCharacters(in: .whitespaces))/\(key)"
+        "/\(bucket)/\(key)"
     }
 
-    /// `<endpoint>/<bucket>/<key>`, with the key percent-encoded.
-    func objectURL(key: String) -> URL? {
-        URL(string: Self.normalized(endpoint) + SigV4.encode(objectPath(key: key), keepingSlash: true))
+    /// `<endpoint>/<bucket>/<key>`. Bucket names and the keys `S3Upload` makes hold only characters that need no encoding.
+    func objectURL(key: String) -> URL {
+        endpoint.appending(path: objectPath(key: key))
     }
 
     /// `<public base URL>/<key>`.
     func publicLink(key: String) -> String {
-        "\(Self.normalized(publicURL))/\(key)"
+        publicBase.appending(path: key).absoluteString
     }
 }
 
@@ -192,51 +214,53 @@ enum S3Upload {
         let errorDescription: String?
     }
 
+    /// What a request sends: a file streamed from disk, a few bytes, or nothing.
+    private enum Body {
+        case file(URL)
+        case data(Data)
+        case none
+    }
+
     /// Uploads `file` as `key` and returns the public link. Throws a `Failure` with a readable message.
     /// `progress` gets the share of the file sent so far, from 0 to 1, on URLSession's queue.
     static func put(_ file: URL, key: String, settings: UploadSettings,
                     progress: (@Sendable (Double) -> Void)? = nil) async throws -> String {
-        let hash = try SigV4.sha256Hex(ofFile: file)
-        var request = try signedRequest("PUT", key: key, settings: settings, payloadHash: hash)
-        request.setValue(contentType(forExtension: file.pathExtension), forHTTPHeaderField: "Content-Type")
-        try await send(request, file: file, progress: progress)
+        try await send("PUT", key: key, settings: settings, body: .file(file),
+                       contentType: contentType(forExtension: file.pathExtension), progress: progress)
         return settings.publicLink(key: key)
     }
 
     /// Uploads a tiny text object and deletes it again, to check the settings.
     static func test(settings: UploadSettings) async throws {
         let key = ".screenme-test-\(randomKey(extension: "txt"))"
-        let file = FileManager.default.temporaryDirectory.appendingPathComponent("screenme-test-\(UUID().uuidString).txt")
-        try Data("Screenme connection test".utf8).write(to: file)
-        defer { try? FileManager.default.removeItem(at: file) }
-        _ = try await put(file, key: key, settings: settings)
-        let emptyHash = SigV4.hex(SHA256.hash(data: Data()))
-        try await send(try signedRequest("DELETE", key: key, settings: settings, payloadHash: emptyHash), file: nil)
+        try await send("PUT", key: key, settings: settings, body: .data(Data("Screenme connection test".utf8)), contentType: "text/plain")
+        try await send("DELETE", key: key, settings: settings, body: .none)
     }
 
-    private static func signedRequest(_ method: String, key: String, settings: UploadSettings, payloadHash: String) throws -> URLRequest {
-        guard let url = settings.objectURL(key: key), let host = settings.host else { throw Failure(errorDescription: "Endpoint not found") }
+    /// Signs and sends one request for the object `key`.
+    private static func send(_ method: String, key: String, settings: UploadSettings, body: Body, contentType: String? = nil,
+                             progress: (@Sendable (Double) -> Void)? = nil) async throws {
+        let payloadHash = switch body {
+        case .file(let file): try SigV4.sha256Hex(ofFile: file)
+        case .data(let data): SigV4.hex(SHA256.hash(data: data))
+        case .none: SigV4.hex(SHA256.hash(data: Data()))
+        }
         let date = SigV4.amzDate(Date())
-        let headers = ["host": host, "x-amz-content-sha256": payloadHash, "x-amz-date": date]
-        var request = URLRequest(url: url)
+        let headers = ["host": settings.host, "x-amz-content-sha256": payloadHash, "x-amz-date": date]
+        var request = URLRequest(url: settings.objectURL(key: key))
         request.httpMethod = method
         for (name, value) in headers where name != "host" { request.setValue(value, forHTTPHeaderField: name) }
-        request.setValue(SigV4.authorization(method: method, path: settings.objectPath(key: key), headers: headers, payloadHash: payloadHash, amzDate: date,
-                                             region: settings.region.trimmingCharacters(in: .whitespaces), service: "s3",
-                                             accessKey: settings.accessKeyID.trimmingCharacters(in: .whitespaces),
-                                             secretKey: settings.secretKey.trimmingCharacters(in: .whitespaces)),
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        request.setValue(SigV4.authorization(method: method, path: settings.objectPath(key: key), headers: headers, payloadHash: payloadHash,
+                                             amzDate: date, region: settings.region, service: "s3",
+                                             accessKey: settings.accessKeyID, secretKey: settings.secretKey),
                          forHTTPHeaderField: "Authorization")
-        return request
-    }
-
-    private static func send(_ request: URLRequest, file: URL?, progress: (@Sendable (Double) -> Void)? = nil) async throws {
         do {
-            let (data, response): (Data, URLResponse)
-            if let file {
-                (data, response) = try await URLSession.shared.upload(for: request, fromFile: file,
-                                                                      delegate: progress.map(UploadProgress.init))
+            let (data, response) = switch body {
+            case .file(let file): try await URLSession.shared.upload(for: request, fromFile: file, delegate: progress.map(UploadProgress.init))
+            case .data(let data): try await URLSession.shared.upload(for: request, from: data)
+            case .none: try await URLSession.shared.data(for: request)
             }
-            else { (data, response) = try await URLSession.shared.data(for: request) }
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             guard (200..<300).contains(status) else { throw Failure(errorDescription: message(status: status, body: data)) }
         } catch let failure as Failure {
@@ -257,43 +281,5 @@ private final class UploadProgress: NSObject, URLSessionTaskDelegate, @unchecked
                     totalBytesSent: Int64, totalBytesExpectedToSend: Int64) {
         guard totalBytesExpectedToSend > 0 else { return }
         report(Double(totalBytesSent) / Double(totalBytesExpectedToSend))
-    }
-}
-
-/// Upload & Copy Link: a capture to a public link on the user's own bucket.
-@MainActor
-enum UploadLink {
-    /// Returns true when the link is on the clipboard.
-    static func run(_ item: CaptureItem) async -> Bool {
-        guard let settings = UploadSettings.load() else {
-            Feedback.failure("Set up Upload in Settings first", duration: 2.4)
-            SettingsWindow.show(tab: .upload)
-            return false
-        }
-        var file = item.url
-        var hidden = 0
-        if item.kind == .image, Prefs[Pref.hideSensitiveWhenSharing] {
-            do {
-                if let copy = try await Redaction.redactedCopy(of: file) { (file, hidden) = (copy.url, copy.count) }
-            } catch {
-                Feedback.failure("Could not read the text")
-                return false
-            }
-        }
-        let progress = Toast.progress("Uploading")
-        do {
-            let link = try await S3Upload.put(file, key: S3Upload.randomKey(extension: file.pathExtension),
-                                              settings: settings) { value in
-                Task { @MainActor in progress.update(value) }
-            }
-            progress.finish()
-            Clipboard.copyText(link)
-            Toast.show(hidden > 0 ? "Link copied, \(CaptureAction.hiddenItems(hidden)) hidden" : "Link copied", symbol: "link.icloud.fill")
-            return true
-        } catch {
-            progress.finish()
-            Feedback.failure(error.localizedDescription, duration: 3.2)
-            return false
-        }
     }
 }
