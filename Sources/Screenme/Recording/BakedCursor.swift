@@ -8,16 +8,6 @@ import AVFoundation
 /// `.<capture>.screenme-source.mp4`, hidden like the events sidecar so History and the CLI never list it: the video
 /// editor opens the source and draws the cursor again, so its style can still change.
 enum BakedCursor {
-    /// Where the cursorless recording of `capture` is kept.
-    static func sourceURL(for capture: URL) -> URL {
-        capture.deletingLastPathComponent().appendingPathComponent(".\(capture.lastPathComponent).screenme-source.mp4")
-    }
-
-    /// The capture went to the Trash: its source goes too.
-    static func removeSource(for capture: URL) {
-        try? FileManager.default.trashItem(at: sourceURL(for: capture), resultingItemURL: nil)
-    }
-
     /// The cursorless recording `video` (`size` pixels) with the cursor drawn in `style`, as an MP4 in `codec`, and
     /// its events with that style; `video` becomes its hidden source. `events` hold the recording's cursor track.
     @MainActor
@@ -28,7 +18,7 @@ enum BakedCursor {
         let item = try await VideoOutput.render(video, source: VideoSource(size: size, events: events, cursorless: true), edit: edit,
                                                 spec: .mp4(codec: codec, quality: .high, resolution: .original, mute: false), progress: progress)
         do {
-            try FileManager.default.moveItem(at: video, to: sourceURL(for: item.url))
+            try FileManager.default.moveItem(at: video, to: Sidecar.source.url(for: item.url))
         } catch {
             try? FileManager.default.removeItem(at: item.url)
             throw error

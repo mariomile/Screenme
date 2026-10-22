@@ -38,17 +38,17 @@ struct CaptureContext: Equatable {
 @MainActor
 enum CaptureContexts {
     private static var contexts: [URL: CaptureContext] = [:]
+    /// A capture that goes to the Trash is forgotten.
+    private static let forgetsTrashed = Sidecar.onTrash { contexts[$0] = nil }
 
     static func record(_ target: CaptureTarget, for url: URL) {
+        _ = forgetsTrashed
         contexts[url] = context(of: target)
     }
 
     static func setNotes(_ notes: [String], for url: URL) {
+        _ = forgetsTrashed
         contexts[url, default: CaptureContext()].notes = notes
-    }
-
-    static func forget(_ url: URL) {
-        contexts[url] = nil
     }
 
     /// The recorded context, with the browser page looked up now: only when the browser still shows the
@@ -180,8 +180,9 @@ enum AIClipboard {
                 if let result = try await Redaction.hidingSensitive(in: image, unit: unit),
                    let data = NSBitmapImageRep(cgImage: result.image).representation(using: .png, properties: [:]),
                    let file = Redaction.write(result.image, like: path.deletingPathExtension().appendingPathExtension("png")) {
-                    // The editor's unredacted temporary file must not stay behind; a capture file stays.
-                    if path != captureURL { try? FileManager.default.removeItem(at: path) }
+                    // The editor's unredacted temporary file must not stay behind (a copy of the same name was just
+                    // overwritten in place); a capture file stays.
+                    if path != captureURL, path != file { try? FileManager.default.removeItem(at: path) }
                     (image, png, path, hidden) = (result.image, data, file, result.count)
                 }
             } catch {

@@ -77,53 +77,66 @@ final class CaptureHistoryTests: PrefsSandboxTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: old.path))
     }
 
-    @MainActor func testTrashAndPruneRemoveTheSavedAnnotations() throws {
-        Prefs[Pref.historyDays] = 30
-        let now = Date()
-        let trashed = try file("trashed.png", in: captures)
-        let expired = try file("expired.png", in: captures)
-        for url in [trashed, expired] {
-            try EditSidecar.keepOriginal(of: url)
-            try EditSidecar.write(EditState(cropRect: CGRect(x: 0, y: 0, width: 1, height: 1)), for: url)
-            XCTAssertNotNil(EditSidecar.load(for: url))
+    /// Writes `sidecar` for `capture` the way its owner does.
+    private func write(_ sidecar: Sidecar, for capture: URL) throws {
+        switch sidecar {
+        case .events, .source:
+            try Data("x".utf8).write(to: sidecar.url(for: capture))
+        case .edit:
+            try EditSidecar.save(EditState(cropRect: CGRect(x: 0, y: 0, width: 1, height: 1)), flattened: Data("x".utf8), to: capture)
         }
-        let history = history()
-        let item = CaptureItem(url: trashed, kind: .image, date: now)
-        history.add(item)
-        history.add(CaptureItem(url: expired, kind: .image, date: now.addingTimeInterval(-31 * 86_400)))
-
-        history.trash(item)
-        history.prune(now: now)
-
-        for url in [trashed, expired] {
-            XCTAssertFalse(FileManager.default.fileExists(atPath: EditSidecar.folder(for: url).path), url.lastPathComponent)
-        }
-        XCTAssertTrue(history.items.isEmpty)
     }
 
-    @MainActor func testTrashAndPruneRemoveARecordingsCursorlessSource() throws {
+    @MainActor func testTrashAndPruneTakeEverySidecarWithTheCapture() throws {
         Prefs[Pref.historyDays] = 30
         let now = Date()
-        let trashed = try file("trashed.mp4", in: captures)
-        let expired = try file("expired.mp4", in: captures)
-        let kept = try file("kept.mp4", in: captures)
-        for url in [trashed, expired, kept] {
-            try Data("raw".utf8).write(to: BakedCursor.sourceURL(for: url))
-            XCTAssertTrue(FileManager.default.fileExists(atPath: BakedCursor.sourceURL(for: url).path))
+        let cases: [(Sidecar, String)] = [(.events, "mp4"), (.edit, "png"), (.source, "mp4")]
+        for (sidecar, ext) in cases {
+            let trashed = try file("trashed.\(ext)", in: captures)
+            let expired = try file("expired.\(ext)", in: captures)
+            let kept = try file("kept.\(ext)", in: captures)
+            for url in [trashed, expired, kept] { try write(sidecar, for: url) }
+            let history = history()
+            history.moveToTrash = { try FileManager.default.removeItem(at: $0) }
+            let kind: CaptureItem.Kind = ext == "png" ? .image : .video
+            let item = CaptureItem(url: trashed, kind: kind, date: now)
+            history.add(item)
+            history.add(CaptureItem(url: expired, kind: kind, date: now.addingTimeInterval(-31 * 86_400)))
+            history.add(CaptureItem(url: kept, kind: kind, date: now))
+
+            history.trash(item)
+            history.prune(now: now)
+
+            for url in [trashed, expired] {
+                XCTAssertFalse(FileManager.default.fileExists(atPath: sidecar.url(for: url).path), "\(sidecar) of \(url.lastPathComponent)")
+                XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+            }
+            XCTAssertEqual(Sidecar.all(for: kept), [sidecar.url(for: kept)], "a capture still in History keeps its \(sidecar)")
+            XCTAssertEqual(history.items.map(\.url), [kept])
+            try FileManager.default.removeItem(at: captures)
+            try FileManager.default.createDirectory(at: captures, withIntermediateDirectories: true)
         }
+    }
+
+    /// Trash is never a hard delete: Put Back must find the capture and every sidecar it had.
+    @MainActor func testTrashMovesTheCaptureAndItsSidecarsToTheTrash() throws {
+        let trash = folder.appendingPathComponent("Trash", isDirectory: true)
+        try FileManager.default.createDirectory(at: trash, withIntermediateDirectories: true)
+        let capture = try file("both.mp4", in: captures)
+        for sidecar in Sidecar.allCases { try write(sidecar, for: capture) }
         let history = history()
-        let item = CaptureItem(url: trashed, kind: .video, date: now)
+        history.moveToTrash = { try FileManager.default.moveItem(at: $0, to: trash.appendingPathComponent($0.lastPathComponent)) }
+        let item = CaptureItem(url: capture, kind: .video)
         history.add(item)
-        history.add(CaptureItem(url: expired, kind: .video, date: now.addingTimeInterval(-31 * 86_400)))
-        history.add(CaptureItem(url: kept, kind: .video, date: now))
+        var forgotten: [URL] = []
+        let observer = Sidecar.onTrash { forgotten.append($0) }
+        defer { NotificationCenter.default.removeObserver(observer) }
 
         history.trash(item)
-        history.prune(now: now)
 
-        func hasSource(_ url: URL) -> Bool { FileManager.default.fileExists(atPath: BakedCursor.sourceURL(for: url).path) }
-        XCTAssertFalse(hasSource(trashed))
-        XCTAssertFalse(hasSource(expired))
-        XCTAssertTrue(hasSource(kept), "a capture still in History keeps its source")
-        XCTAssertEqual(history.items.map(\.url), [kept])
+        let inTrash = try FileManager.default.contentsOfDirectory(atPath: trash.path).sorted()
+        XCTAssertEqual(inTrash, ([capture] + Sidecar.allCases.map { $0.url(for: capture) }).map(\.lastPathComponent).sorted())
+        XCTAssertTrue(FileManager.default.fileExists(atPath: trash.appendingPathComponent(".both.mp4.screenme-edit/edit.json").path))
+        XCTAssertEqual(forgotten, [capture], "one notification tells memory to forget the capture")
     }
 }

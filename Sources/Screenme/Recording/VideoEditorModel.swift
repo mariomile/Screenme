@@ -120,7 +120,7 @@ final class VideoEditorModel: ObservableObject {
         self.item = item
         self.delivery = delivery
         let events = RecordingEvents.events(for: item.url)
-        let sourceURL = BakedCursor.sourceURL(for: item.url)
+        let sourceURL = Sidecar.source.url(for: item.url)
         if let baked = events?.cursor?.bakedStyle, FileManager.default.fileExists(atPath: sourceURL.path) {
             videoURL = sourceURL
             capturedCursor = baked

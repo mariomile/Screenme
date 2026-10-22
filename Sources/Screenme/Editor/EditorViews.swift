@@ -156,13 +156,16 @@ struct ToolbarTrailing: View {
     }
 }
 
-/// A slider whose whole drag is one undo step. `apply` changes the document without committing.
+/// A slider whose whole drag is one undo step. `apply` changes the document without committing; the controller
+/// publishes at commit, so while the slider drags it publishes itself, at most 30 times a second, for the values
+/// the inspector shows.
 struct EditSlider: View {
     @ObservedObject var c: EditorController
     let value: Double
     let range: ClosedRange<Double>
     let apply: (Double) -> Void
     @State private var before: EditorController.Checkpoint?
+    @State private var publishScheduled = false
 
     var body: some View {
         Slider(value: Binding(get: { value }, set: change), in: range) { editing in
@@ -178,10 +181,23 @@ struct EditSlider: View {
 
     /// A change outside a drag (the keyboard, a click on the track) is a step of its own.
     private func change(_ newValue: Double) {
-        guard before == nil else { return apply(newValue) }
+        guard before == nil else {
+            apply(newValue)
+            publishSoon()
+            return
+        }
         let start = c.checkpoint()
         apply(newValue)
         c.commit(since: start)
+    }
+
+    private func publishSoon() {
+        guard !publishScheduled else { return }
+        publishScheduled = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / 30) { [c] in
+            publishScheduled = false
+            c.notify()
+        }
     }
 }
 

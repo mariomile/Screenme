@@ -66,26 +66,27 @@ final class RedactionTests: XCTestCase {
         XCTAssertNotEqual(pixel(try rgba(redacted), 0, 0), pixel(try rgba(original), 0, 0))
     }
 
-    func testSharingTheSameCaptureAgainReusesItsFolder() throws {
+    func testSharingTheSameCaptureAgainOverwritesItsCopy() throws {
         let image = try noisyImage()
         let name = "Screenme-test-\(UUID().uuidString).png"
         let original = URL(fileURLWithPath: "/captures/" + name)
         let first = try XCTUnwrap(Redaction.write(image, like: original))
         let second = try XCTUnwrap(Redaction.write(image, like: original))
-        defer { try? FileManager.default.removeItem(at: first.deletingLastPathComponent()) }
+        defer { try? FileManager.default.removeItem(at: first) }
         XCTAssertEqual(first, second)
         XCTAssertEqual(first.lastPathComponent, name)
-        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: first.deletingLastPathComponent().path), [name])
+        XCTAssertEqual(first.deletingLastPathComponent().standardizedFileURL, TemporaryCopies.folder.standardizedFileURL)
+        XCTAssertNotNil(ImageSource.load(url: first), "a readable PNG")
     }
 
     func testStaleCopiesGoAfterADayAndFreshOnesStay() throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("RedactionStale-\(UUID().uuidString)")
-        let old = root.appendingPathComponent("old"), fresh = root.appendingPathComponent("fresh")
-        for folder in [old, fresh] { try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true) }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("CopiesStale-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
+        let old = try XCTUnwrap(TemporaryCopies.write(Data("old".utf8), named: "old.png", in: root))
+        let fresh = try XCTUnwrap(TemporaryCopies.write(Data("fresh".utf8), named: "fresh.png", in: root))
         try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-2 * 24 * 3600)], ofItemAtPath: old.path)
-        Redaction.removeStaleCopies(in: root)
+        TemporaryCopies.removeStale(in: root)
         XCTAssertFalse(FileManager.default.fileExists(atPath: old.path))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: fresh.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fresh.path), "a copy from today stays: Copy for AI's text still names it")
     }
 }

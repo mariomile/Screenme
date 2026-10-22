@@ -26,7 +26,7 @@ final class VideoEditorSourceTests: PrefsSandboxTestCase {
             try FileManager.default.removeItem(at: video)
             video = hevc
         }
-        cleanup += [video, RecordingEvents.sidecarURL(for: video), BakedCursor.sourceURL(for: video)]
+        cleanup += [video, Sidecar.events.url(for: video), Sidecar.source.url(for: video)]
         var events = RecordingEvents(width: 160, height: 90, events: [])
         var track = CursorTrack(hidden: hidden, bakedStyle: baked)
         track.add(time: 0, x: 40, y: 40)
@@ -39,7 +39,7 @@ final class VideoEditorSourceTests: PrefsSandboxTestCase {
     @MainActor
     private func addSource(to capture: URL) async throws {
         let raw = try await TestVideo.makeOffMain(width: 320, height: 180, seconds: 1)
-        try FileManager.default.moveItem(at: raw, to: BakedCursor.sourceURL(for: capture))
+        try FileManager.default.moveItem(at: raw, to: Sidecar.source.url(for: capture))
     }
 
     @MainActor
@@ -59,7 +59,7 @@ final class VideoEditorSourceTests: PrefsSandboxTestCase {
 
         let model = try await loaded(capture)
 
-        XCTAssertEqual(model.videoURL, BakedCursor.sourceURL(for: capture), "plays and exports the cursorless source")
+        XCTAssertEqual(model.videoURL, Sidecar.source.url(for: capture), "plays and exports the cursorless source")
         XCTAssertEqual(model.item.url, capture, "the capture stays the item")
         XCTAssertNotNil(model.source.drawableCursor)
         XCTAssertTrue(model.edit.drawsCursor(for: model.source))
