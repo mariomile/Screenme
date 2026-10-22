@@ -83,8 +83,7 @@ final class CaptureHistoryTests: PrefsSandboxTestCase {
         case .events, .source:
             try Data("x".utf8).write(to: sidecar.url(for: capture))
         case .edit:
-            try EditSidecar.keepOriginal(of: capture)
-            try EditSidecar.write(EditState(cropRect: CGRect(x: 0, y: 0, width: 1, height: 1)), for: capture)
+            try EditSidecar.save(EditState(cropRect: CGRect(x: 0, y: 0, width: 1, height: 1)), flattened: Data("x".utf8), to: capture)
         }
     }
 

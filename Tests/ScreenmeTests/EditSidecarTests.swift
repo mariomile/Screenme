@@ -100,7 +100,7 @@ final class EditSidecarTests: PrefsSandboxTestCase {
         XCTAssertEqual(try Data(contentsOf: EditSidecar.originalURL(for: url)), captured)
         XCTAssertNotEqual(try Data(contentsOf: url), captured, "the capture holds the flattened annotations")
         XCTAssertEqual(EditSidecar.load(for: url)?.state, controller.state)
-        XCTAssertEqual(EditSidecar.folder(for: url).lastPathComponent, ".Screenshot.png.screenme-edit")
+        XCTAssertEqual(Sidecar.edit.url(for: url).lastPathComponent, ".Screenshot.png.screenme-edit")
 
         addBox(controller, at: 20)
         XCTAssertTrue(controller.writeToCapture())
@@ -133,5 +133,109 @@ final class EditSidecarTests: PrefsSandboxTestCase {
         XCTAssertFalse(controller.reopened)
         XCTAssertTrue(controller.state.annotations.isEmpty)
         XCTAssertEqual(controller.state.cropRect, CGRect(x: 0, y: 0, width: 40, height: 30))
+    }
+
+    // MARK: Format
+
+    /// Removes `keys` from every object in the JSON, the way a file written before those fields existed looks.
+    private func dropping(_ keys: Set<String>, from data: Data) throws -> Data {
+        func strip(_ value: Any) -> Any {
+            if let object = value as? [String: Any] {
+                return object.filter { !keys.contains($0.key) }.mapValues(strip)
+            }
+            if let array = value as? [Any] { return array.map(strip) }
+            return value
+        }
+        return try JSONSerialization.data(withJSONObject: strip(JSONSerialization.jsonObject(with: data)))
+    }
+
+    func testAFileWithoutFieldsAddedLaterStillLoadsWithTheirDefaults() throws {
+        let state = Self.richState()
+        let data = try JSONEncoder().encode(EditDocument(state: state))
+        let optional: Set<String> = ["id", "note", "outputScale", "canvasFill", "background", "spotlightDim",
+                                     "sizeIndex", "filled", "curved", "fontSize", "weight", "backdrop", "intensity", "ellipseSpot"]
+
+        let decoded = try JSONDecoder().decode(EditDocument.self, from: try dropping(optional, from: data))
+
+        let defaults = EditState(cropRect: state.cropRect)
+        XCTAssertEqual(decoded.version, EditDocument.currentVersion)
+        XCTAssertEqual(decoded.state.annotations.map(\.shape), state.annotations.map(\.shape))
+        XCTAssertEqual(decoded.state.annotations.map(\.style.color), state.annotations.map(\.style.color))
+        XCTAssertEqual(decoded.state.annotations.map(\.note), Array(repeating: "", count: state.annotations.count))
+        XCTAssertEqual(decoded.state.annotations.first?.style.fontSize, ToolStyle(color: Palette.red).fontSize)
+        XCTAssertEqual(decoded.state.outputScale, defaults.outputScale)
+        XCTAssertEqual(decoded.state.background, defaults.background)
+        XCTAssertEqual(decoded.state.spotlightDim, defaults.spotlightDim)
+    }
+
+    func testAFileFromBeforeTheVersionReadsAsVersionZero() throws {
+        let state = Self.richState()
+        let decoded = try JSONDecoder().decode(EditDocument.self, from: try JSONEncoder().encode(state))
+        XCTAssertEqual(decoded.version, 0)
+        XCTAssertEqual(decoded.state, state)
+    }
+
+    // MARK: Writing and failing
+
+    /// The sidecar is written before the capture: when the capture is written, the original holds the pixels
+    /// as captured and the document is already the new one.
+    @MainActor
+    func testDoneWritesTheSidecarFirstAndTheCaptureLast() throws {
+        let url = try capture()
+        let captured = try Data(contentsOf: url)
+        var state = EditState(cropRect: CGRect(x: 0, y: 0, width: 40, height: 30))
+        state.spotlightDim = 0.2
+        var captureWritten = false
+
+        try EditSidecar.save(state, flattened: Data("flat".utf8), to: url) { data, capture in
+            XCTAssertEqual(try Data(contentsOf: EditSidecar.originalURL(for: capture)), captured)
+            XCTAssertEqual(EditSidecar.load(for: capture)?.state, state)
+            try data.write(to: capture, options: .atomic)
+            captureWritten = true
+        }
+
+        XCTAssertTrue(captureWritten)
+        XCTAssertEqual(try Data(contentsOf: url), Data("flat".utf8))
+    }
+
+    /// A capture that cannot be written fails Done, and the sidecar keeps the newer document: nothing is lost.
+    @MainActor
+    func testACaptureThatFailsToWriteKeepsTheNewerDocument() throws {
+        let url = try capture()
+        let captured = try Data(contentsOf: url)
+        let state = EditState(cropRect: CGRect(x: 1, y: 1, width: 20, height: 20))
+        struct Failed: Error {}
+
+        XCTAssertThrowsError(try EditSidecar.save(state, flattened: Data(), to: url) { _, _ in throw Failed() })
+
+        XCTAssertEqual(try Data(contentsOf: url), captured)
+        XCTAssertEqual(EditSidecar.load(for: url)?.state, state)
+    }
+
+    /// A document that does not decode moves the whole sidecar aside, and the flattened capture opens.
+    @MainActor
+    func testAnUnreadableSidecarIsSetAsideAndTheFlattenedCaptureOpens() throws {
+        let url = try capture()
+        let first = try XCTUnwrap(AnnotationEditor.controller(for: CaptureItem(url: url, kind: .image)))
+        addBox(first, at: 2)
+        first.perform { $0.cropRect = CGRect(x: 1, y: 1, width: 30, height: 20) }
+        XCTAssertTrue(first.writeToCapture())
+        try Data("{ not json".utf8).write(to: EditSidecar.documentURL(for: url))
+
+        let reopened = try XCTUnwrap(AnnotationEditor.controller(for: CaptureItem(url: url, kind: .image)))
+
+        XCTAssertFalse(reopened.reopened)
+        XCTAssertEqual(reopened.source.size, CGSize(width: 30, height: 20), "the flattened capture, not the original")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: Sidecar.edit.url(for: url).path))
+        let aside = try FileManager.default.contentsOfDirectory(atPath: folder.path).filter { $0.contains(".unreadable-") }
+        XCTAssertEqual(aside.count, 1)
+        XCTAssertTrue(try XCTUnwrap(aside.first).hasPrefix(".Screenshot.png.screenme-edit.unreadable-"))
+        let kept = folder.appendingPathComponent(try XCTUnwrap(aside.first))
+        XCTAssertEqual(Set(try FileManager.default.contentsOfDirectory(atPath: kept.path)), ["original.png", "edit.json"])
+
+        // The next Done starts a new sidecar from the flattened pixels.
+        addBox(reopened, at: 4)
+        XCTAssertTrue(reopened.writeToCapture())
+        XCTAssertEqual(EditSidecar.load(for: url)?.state.annotations.count, 1)
     }
 }
