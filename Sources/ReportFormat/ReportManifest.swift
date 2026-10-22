@@ -6,13 +6,29 @@ import Foundation
 struct ReportManifest: Codable, Equatable {
     /// What the recording shows and where it was made.
     struct Environment: Codable, Equatable {
+        /// The main screen in points, and its scale (2 on a Retina screen).
+        struct Screen: Codable, Equatable {
+            var width: Double
+            var height: Double
+            var scale: Double
+        }
+
+        /// The video in pixels, and its length in seconds.
+        struct Video: Codable, Equatable {
+            var width: Int
+            var height: Int
+            var duration: Double
+        }
+
         var app: String?
         var window: String?
         var page: String?
+        /// The macOS version, "26.0.1".
         var system: String
-        var screen: String?
-        var video: String
-        var date: String
+        var screen: Screen?
+        var video: Video
+        /// When the recording was made, ISO 8601 in the file.
+        var date: Date
     }
 
     struct Size: Codable, Equatable {
@@ -82,10 +98,9 @@ struct ReportManifest: Codable, Equatable {
         var keyframe: Int
     }
 
-    var version = 1
+    var version = 2
     var title: String
     var environment: Environment
-    var duration: Double
     /// The recorded area in points, when the recording has events.
     var area: Size?
     var video: String
@@ -103,7 +118,15 @@ struct ReportManifest: Codable, Equatable {
     func json() throws -> Data {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        encoder.dateEncodingStrategy = .iso8601
         return try encoder.encode(self)
+    }
+
+    /// Reads `report.json`.
+    static func decode(_ data: Data) throws -> ReportManifest {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(ReportManifest.self, from: data)
     }
 }
 

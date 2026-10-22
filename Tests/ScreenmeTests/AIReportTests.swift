@@ -30,16 +30,21 @@ final class AIReportTests: XCTestCase {
         }
     }
 
-    private func report(transcript: [TranscriptSegment], events: RecordingEvents?, duration: Double = 10) -> AIReport {
+    private let recordedAt = ISO8601DateFormatter().date(from: "2026-10-21T08:22:00Z")!
+
+    /// A report without pictures: keyframes from the narration and the events, and `crops` by keyframe index.
+    private func report(transcript: [TranscriptSegment], events: RecordingEvents?, duration: Double = 10,
+                        crops: [Int: AutoCrop.Crop] = [:]) -> AIReport {
         let environment = AIReport.Environment(app: "Safari", window: "Checkout", page: "https://shop.example/checkout",
-                                               system: "27.0.1", screen: "1512×982 points at 2x",
-                                               video: "3024×1964 px, 0:12", date: "21 October 2026 at 10:22")
-        var report = AIReport(folder: URL(fileURLWithPath: "/Users/me/Desktop/Report 1", isDirectory: true),
-                              environment: environment,
-                              transcript: Transcript(segments: transcript, words: TranscriptSegment.words(in: transcript)),
-                              noNarration: "The recording has no audio.", events: events)
-        report.makeKeyframes(duration: duration, samples: [])
-        return report
+                                               system: "27.0.1", screen: AIReport.Environment.Screen(width: 1512, height: 982, scale: 2),
+                                               video: AIReport.Environment.Video(width: 3024, height: 1964, duration: duration),
+                                               date: recordedAt)
+        let narration: Narration = transcript.isEmpty ? .silent("The recording has no audio.")
+            : .spoken(Transcript(segments: transcript, words: TranscriptSegment.words(in: transcript)))
+        var keyframes = Keyframes.select(words: narration.transcript.words, events: events, samples: [], duration: duration)
+        for (index, crop) in crops { keyframes[index].crop = crop }
+        return AIReport(folder: URL(fileURLWithPath: "/Users/me/Desktop/Report 1", isDirectory: true), environment: environment,
+                        narration: narration, recording: events, keyframes: keyframes)
     }
 
     /// An app, a click on a named button, a shortcut, an arrow and a window switch, in a 1000 × 600 point area.
@@ -109,7 +114,8 @@ final class AIReportTests: XCTestCase {
         let keyframes = Keyframes.select(words: [], events: events, samples: [], duration: 10)
         XCTAssertEqual(keyframes.map(\.reason), [.start, .drag, .scroll])
         XCTAssertEqual(keyframes.map(\.time), [0.3, 3.3, 6.8])
-        XCTAssertEqual(AIReport.describe(events), ["Dragged from 10, 10 to 80, 10", "Scrolled down at 50, 50"])
+        XCTAssertEqual(AIReport.describe(events, keyframes: keyframes).map(\.text), ["Dragged from 10, 10 to 80, 10", "Scrolled down at 50, 50"])
+        XCTAssertEqual(AIReport.describe(events, keyframes: keyframes).map(\.keyframe), [1, 2])
     }
 
     func testAScreenChangeCutsAtItsSettledViewOnlyWhenThePictureIsNew() {
@@ -168,14 +174,13 @@ final class AIReportTests: XCTestCase {
             .pin(1, at: CGPoint(x: 100, y: 80), time: 2.3),
             .pin(2, at: CGPoint(x: 850, y: 550), time: 6),
         ])
-        var report = report(transcript: [segment(6, "This one is wrong.")], events: events)
+        let report = report(transcript: [segment(6, "This one is wrong.")], events: events)
         XCTAssertEqual(report.keyframes.map(\.reason), [.start, .pin, .pin], "a pin wins over a click next to it")
         XCTAssertEqual(report.keyframes.map(\.time), [0.3, 2.5, 6.2])
         XCTAssertEqual(report.caption(1), "pin 1")
         XCTAssertEqual(report.caption(2), "pin 2 \u{00B7} \u{201C}This one is wrong.\u{201D}")
         XCTAssertTrue(report.summary.contains("- #3 [0:06] \"This one is wrong.\"\n  - 0:06 Dropped pin 2 at the bottom right (850, 550)\n"))
         XCTAssertEqual(AutoCrop.activity(from: 5, to: 7, in: events), [AutoCrop.Activity(point: CGPoint(x: 850, y: 550), weight: 5)])
-        report.keyframes = []
         XCTAssertTrue(report.manifest.marks.isEmpty, "pins are not marks: they have their own numbers")
     }
 
@@ -210,7 +215,7 @@ final class AIReportTests: XCTestCase {
             .drawing(.highlighter, color: .yellow, box: CGRect(x: 400, y: 250, width: 100, height: 20), tip: nil, time: 5),
             .drawing(.pen, color: .green, box: CGRect(x: 800, y: 280, width: 50, height: 40), tip: nil, time: 6),
         ])
-        XCTAssertEqual(AIReport.describe(events), [
+        XCTAssertEqual(AIReport.describe(events, keyframes: []).map(\.text), [
             "In Notes", "Right-clicked at 10, 21", "Switched to Safari, window \"Docs\"", "Switched to window \"Docs 2\" in Safari",
             "Drew a blue rectangle at the bottom left (10, 400, 100×50) (mark 1)",
             "Highlighted in yellow in the middle (400, 250, 100×20) (mark 2)",
@@ -230,9 +235,9 @@ final class AIReportTests: XCTestCase {
         - Page: https://shop.example/checkout
         - macOS: 27.0.1
         - Screen: 1512×982 points at 2x
-        - Recording: 3024×1964 px, 0:12
+        - Recording: 3024×1964 px, 0:10
         - Recorded area: 1000×600 points
-        - Date: 21 October 2026 at 10:22
+        - Date: \(recordedAt.formatted(date: .long, time: .shortened))
 
         ## Keyframes
 
@@ -271,8 +276,8 @@ final class AIReportTests: XCTestCase {
     }
 
     func testManifestHasKeyframesMarksWordsAndEvents() throws {
-        var report = report(transcript: [segment(1, "Look at this total."), segment(6, "It should be 42.")], events: sampleEvents)
-        report.crops = [nil, AutoCrop.Crop(rect: CGRect(x: 0, y: 0, width: 600, height: 400), apps: ["Safari"]), nil, nil]
+        let report = report(transcript: [segment(1, "Look at this total."), segment(6, "It should be 42.")], events: sampleEvents,
+                            crops: [1: AutoCrop.Crop(rect: CGRect(x: 0, y: 0, width: 600, height: 400), apps: ["Safari"])])
         let manifest = report.manifest
         XCTAssertEqual(manifest.keyframes.map(\.number), [1, 2, 3, 4])
         XCTAssertEqual(manifest.keyframes.map(\.file), ["frames/frame-01.png", "frames/frame-02.png", "frames/frame-03.png", "frames/frame-04.png"])
@@ -291,7 +296,15 @@ final class AIReportTests: XCTestCase {
         XCTAssertEqual(manifest.croppedTo, "Safari")
         XCTAssertEqual(manifest.contactSheetFull, "contact-sheet-full.png")
         XCTAssertEqual(manifest.area, ReportManifest.Size(width: 1000, height: 600))
-        XCTAssertEqual(try JSONDecoder().decode(ReportManifest.self, from: manifest.json()), manifest)
+        XCTAssertEqual(try ReportManifest.decode(manifest.json()), manifest)
+
+        // The environment is typed fields; summary.md formats them.
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: manifest.json()) as? [String: Any])
+        let environment = try XCTUnwrap(json["environment"] as? [String: Any])
+        XCTAssertEqual(environment["date"] as? String, "2026-10-21T08:22:00Z")
+        XCTAssertEqual(environment["video"] as? NSDictionary, ["width": 3024, "height": 1964, "duration": 10])
+        XCTAssertEqual(environment["screen"] as? NSDictionary, ["width": 1512, "height": 982, "scale": 2])
+        XCTAssertEqual(json["version"] as? Int, 2)
     }
 
     func testLongFirstSentenceIsShortenedForTheTitle() {
@@ -391,10 +404,10 @@ final class AIReportTests: XCTestCase {
         XCTAssertEqual(image.size, CGSize(width: 320, height: 240))
         let sheet = try XCTUnwrap(NSImage(contentsOf: report.folder.appendingPathComponent("contact-sheet.png")))
         XCTAssertEqual(sheet.size, ContactSheet.layout(count: 2, boxHeight: 480).size)
-        let manifest = try JSONDecoder().decode(ReportManifest.self, from: Data(contentsOf: report.folder.appendingPathComponent("report.json")))
+        let manifest = try ReportManifest.decode(Data(contentsOf: report.folder.appendingPathComponent("report.json")))
         XCTAssertEqual(manifest, report.manifest)
         XCTAssertEqual(manifest.events, events.events)
-        XCTAssertEqual(manifest.duration, 3, accuracy: 0.01)
+        XCTAssertEqual(manifest.environment.video.duration, 3, accuracy: 0.01)
         let summary = try String(contentsOf: report.folder.appendingPathComponent("summary.md"), encoding: .utf8)
         XCTAssertEqual(summary, report.summary)
         XCTAssertTrue(summary.contains("No narration. The recording has no audio."))
@@ -442,7 +455,7 @@ final class AIReportTests: XCTestCase {
                                      ])])
 
         let report = try await AIReporter.write(video, context: CaptureContext(), events: events, recordedAt: Date(), in: directory)
-        XCTAssertEqual(report.crops, [nil, AutoCrop.Crop(rect: CGRect(x: 0, y: 0, width: 320, height: 114), apps: ["Notes"])])
+        XCTAssertEqual(report.keyframes.map(\.crop), [nil, AutoCrop.Crop(rect: CGRect(x: 0, y: 0, width: 320, height: 114), apps: ["Notes"])])
         func size(_ name: String) throws -> CGSize { try XCTUnwrap(NSImage(contentsOf: report.folder.appendingPathComponent(name))).size }
         XCTAssertEqual(try size("frames/frame-02.png"), CGSize(width: 320, height: 114))
         XCTAssertEqual(try size("frames-full/frame-02.png"), CGSize(width: 320, height: 240))

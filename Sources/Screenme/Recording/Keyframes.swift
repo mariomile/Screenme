@@ -14,6 +14,8 @@ struct Keyframe: Equatable {
     var text = ""
     /// Indices into the recording's events, for the events from this keyframe's moment until the next one.
     var events: [Int] = []
+    /// The part of the recorded area the frame is cut to, nil when it stays whole.
+    var crop: AutoCrop.Crop? = nil
 }
 
 /// A small picture of the video at one time: grayscale, about 64 pixels wide, with its perceptual hash.

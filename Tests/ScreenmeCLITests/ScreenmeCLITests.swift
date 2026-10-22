@@ -296,8 +296,9 @@ final class ReportBundleTests: XCTestCase {
         return ReportManifest(
             title: "Report: Look at the total.",
             environment: ReportManifest.Environment(app: "Safari", window: "Checkout", page: nil, system: "26.0.0", screen: nil,
-                                                    video: "320×240 px, 0:03", date: "21 October 2026 at 10:00"),
-            duration: 3, area: ReportManifest.Size(width: 160, height: 120), video: ReportLayout.video, summary: ReportLayout.summary,
+                                                    video: ReportManifest.Environment.Video(width: 320, height: 240, duration: 3),
+                                                    date: ISO8601DateFormatter().date(from: "2026-10-21T08:00:00Z")!),
+            area: ReportManifest.Size(width: 160, height: 120), video: ReportLayout.video, summary: ReportLayout.summary,
             contactSheet: ReportLayout.contactSheet, contactSheetFull: nil, croppedTo: nil,
             keyframes: [ReportManifest.KeyframeEntry(number: 1, time: 0.3, moment: 0, reason: .start, file: ReportLayout.frame(0), fullFile: nil,
                                                      crop: nil, text: "Look at the total.",

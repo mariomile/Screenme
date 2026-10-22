@@ -13,7 +13,7 @@ enum AIReporter {
         do {
             let context = await CaptureContexts.context(for: item.url)
             let report = try await write(item.url, context: context, events: RecordingEvents.events(for: item.url),
-                                         recordedAt: item.date, screen: screenDescription(), autoCrop: Prefs[Pref.reportAutoCrop],
+                                         recordedAt: item.date, screen: mainScreen(), autoCrop: Prefs[Pref.reportAutoCrop],
                                          in: Storage.saveDirectory) { value in
                 Task { @MainActor in toast.update(value) }
             }
@@ -39,10 +39,10 @@ enum AIReporter {
         pasteboard.writeObjects([entry])
     }
 
-    /// "1512×982 points at 2x": the main screen, for the report's environment.
+    /// The main screen, for the report's environment.
     @MainActor
-    static func screenDescription() -> String? {
-        NSScreen.main.map { "\(Int($0.frame.width))×\(Int($0.frame.height)) points at \(Int($0.backingScaleFactor))x" }
+    static func mainScreen() -> AIReport.Environment.Screen? {
+        NSScreen.main.map { AIReport.Environment.Screen(width: $0.frame.width, height: $0.frame.height, scale: $0.backingScaleFactor) }
     }
 
     /// Writes the report folder for `video` inside `parent` and returns the report. The folder is built as a hidden
@@ -50,7 +50,7 @@ enum AIReporter {
     /// leaves nothing behind. Asks for speech recognition only when the video has sound. Not on the main actor:
     /// copying, decoding and writing PNGs take a while.
     static func write(_ video: URL, context: CaptureContext, events: RecordingEvents?, recordedAt date: Date,
-                      screen: String? = nil, autoCrop: Bool = true, in parent: URL,
+                      screen: AIReport.Environment.Screen? = nil, autoCrop: Bool = true, in parent: URL,
                       progress: @escaping @Sendable (Double) -> Void = { _ in }) async throws -> AIReport {
         let folder = newFolder(in: parent)
         let building = parent.appendingPathComponent(".\(folder.lastPathComponent) \(UUID().uuidString)", isDirectory: true)
@@ -67,7 +67,7 @@ enum AIReporter {
 
     /// Writes the report's files into `building`; their text names `folder`, where they end up.
     private static func build(_ video: URL, into building: URL, finalFolder folder: URL, context: CaptureContext, events: RecordingEvents?,
-                              recordedAt date: Date, screen: String?, autoCrop: Bool,
+                              recordedAt date: Date, screen: AIReport.Environment.Screen?, autoCrop: Bool,
                               progress: @escaping @Sendable (Double) -> Void) async throws -> AIReport {
         let asset = AVURLAsset(url: video)
         let duration = try await asset.load(.duration).seconds
@@ -81,24 +81,24 @@ enum AIReporter {
         progress(0.1)
 
         // What was said, and small pictures of the whole video for the screen changes, worked out side by side.
-        async let narration = narration(of: asset)
+        async let spoken = narration(of: asset)
         async let sampled = FrameSampler.samples(of: asset, duration: duration)
-        let (transcript, noNarration) = try await narration
+        let said = try await spoken
         let samples = try await sampled
         progress(0.75)
 
+        var keyframes = Keyframes.select(words: said.transcript.words, events: events, samples: samples, duration: duration)
+        if autoCrop, let events {
+            for (index, crop) in AutoCrop.crops(for: keyframes, events: events).enumerated() { keyframes[index].crop = crop }
+        }
         let os = ProcessInfo.processInfo.operatingSystemVersion
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateStyle = .long
-        dateFormatter.timeStyle = .short
         let environment = AIReport.Environment(
             app: context.app, window: context.window, page: context.page,
             system: "\(os.majorVersion).\(os.minorVersion).\(os.patchVersion)", screen: screen,
-            video: "\(Int(abs(natural.width)))×\(Int(abs(natural.height))) px, \(Duration.format(duration))",
-            date: dateFormatter.string(from: date))
-        var report = AIReport(folder: folder, environment: environment, transcript: transcript, noNarration: noNarration, events: events)
-        report.makeKeyframes(duration: duration, samples: samples)
-        if autoCrop, let events { report.crops = AutoCrop.crops(for: report.keyframes, events: events) }
+            video: AIReport.Environment.Video(width: Int(abs(natural.width)), height: Int(abs(natural.height)), duration: duration),
+            // Whole seconds, as report.json keeps it.
+            date: Date(timeIntervalSinceReferenceDate: date.timeIntervalSinceReferenceDate.rounded(.down)))
+        let report = AIReport(folder: folder, environment: environment, narration: said, recording: events, keyframes: keyframes)
 
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
@@ -118,8 +118,7 @@ enum AIReporter {
                 try full.writePNG(to: building.appendingPathComponent(ReportLayout.fullFrame(index)))
                 fullCells.append(ContactSheet.Cell(image: ContactSheet.thumbnail(full), number: index + 1, time: keyframe.time,
                                                    caption: report.caption(index)))
-                if let crop = report.crops[index], let events,
-                   let cut = cropped(decoded, to: crop.rect, area: CGSize(width: events.width, height: events.height)) {
+                if let crop = keyframe.crop, let area = report.area, let cut = cropped(decoded, to: crop.rect, area: area) {
                     frame = cut.scaledDown(maxWidth: maxFrameSide, maxHeight: maxFrameSide)
                 }
             }
@@ -164,14 +163,15 @@ enum AIReporter {
         return url
     }
 
-    /// What was said, or an empty transcript and why there is none.
-    private static func narration(of asset: AVURLAsset) async throws -> (Transcript, String) {
-        guard let audio = try await audioFile(of: asset) else { return (Transcript(), "The recording has no audio.") }
+    /// What was said, or why there is nothing.
+    private static func narration(of asset: AVURLAsset) async throws -> Narration {
+        guard let audio = try await audioFile(of: asset) else { return .silent("The recording has no audio.") }
         defer { try? FileManager.default.removeItem(at: audio) }
         do {
-            return (try await Transcription.transcribe(audio), "No speech was recognized in the recording.")
+            let transcript = try await Transcription.transcribe(audio)
+            return transcript.segments.isEmpty ? .silent("No speech was recognized in the recording.") : .spoken(transcript)
         } catch {
-            return (Transcript(), "The narration could not be transcribed: \(error.localizedDescription)")
+            return .silent("The narration could not be transcribed: \(error.localizedDescription)")
         }
     }
 

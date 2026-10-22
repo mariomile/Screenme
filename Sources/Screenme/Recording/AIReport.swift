@@ -57,79 +57,100 @@ struct Transcript: Equatable {
     var words: [TranscriptSegment] = []
 }
 
+/// What was said in a recording, or why there is nothing to read.
+enum Narration: Equatable {
+    case spoken(Transcript)
+    /// Why there is no narration: "The recording has no audio."
+    case silent(String)
+
+    /// Everything said, in order. Empty when silent.
+    var transcript: Transcript {
+        if case .spoken(let transcript) = self { return transcript }
+        return Transcript()
+    }
+}
 
 /// A report for an AI agent made from a recording: a folder with the contact sheet, the keyframes, the video,
 /// `summary.md`, which tells keyframe by keyframe what was said, clicked, pressed, switched to and drawn, and
 /// `report.json`, the manifest with every word, event, mark and window.
-/// Everything here is plain data; `AIReporter` does the transcription, the frames and the files.
+/// Built once from what `AIReporter` gathered, and plain data from then on: `AIReporter` does the transcription,
+/// the frames and the files.
 struct AIReport {
     typealias Environment = ReportManifest.Environment
 
+    /// An event as the report tells it.
+    struct Event: Equatable {
+        var recorded: RecordingEvent
+        /// "Clicked button "Pay" at 412, 300", "Switched to Safari".
+        var text: String
+        /// A drawing's number, from 1 in the order they were finished: `screenme zoom --mark N` looks at mark N.
+        var mark: Int?
+        /// The index of the keyframe it happened under.
+        var keyframe: Int
+    }
 
     /// The report folder.
-    var folder: URL
-    var environment: Environment
-    /// Everything said, in order. Empty when there was no narration.
-    var transcript: Transcript
-    /// Why there is no transcript ("The recording has no audio."), when it is empty.
-    var noNarration: String
-    /// What happened during the recording. Nil for a recording made without them.
-    var events: RecordingEvents?
-    /// The length of the video in seconds.
-    var duration: Double = 0
-    /// The keyframes in time order, `frames/frame-01.png` first, each with what was said and done while it was on screen.
-    var keyframes: [Keyframe] = []
-    /// Each keyframe's auto-crop, nil for one that stays whole. Empty when the recording is not cropped.
-    var crops: [AutoCrop.Crop?] = []
+    let folder: URL
+    let environment: Environment
+    let narration: Narration
+    /// The recorded area in points. Nil for a recording made without events.
+    let area: CGSize?
+    /// The windows over the area through the recording (display and area recordings).
+    let windows: [WindowSnapshot]?
+    /// The keyframes in time order, `frames/frame-01.png` first, each with what was said and done while it was on
+    /// screen and its auto-crop.
+    let keyframes: [Keyframe]
+    /// What happened, in order. Keyframes point into it.
+    let events: [Event]
 
-    var isCropped: Bool { crops.contains { $0 != nil } }
-
-    /// Fills `keyframes` for a video of `duration` seconds, sampled as `samples`.
-    mutating func makeKeyframes(duration: Double, samples: [FrameSample]) {
-        self.duration = duration
-        keyframes = Keyframes.select(words: transcript.words, events: events, samples: samples, duration: duration)
+    init(folder: URL, environment: Environment, narration: Narration, recording: RecordingEvents?, keyframes: [Keyframe]) {
+        self.folder = folder
+        self.environment = environment
+        self.narration = narration
+        area = recording.map { CGSize(width: $0.width, height: $0.height) }
+        windows = recording?.windows
+        self.keyframes = keyframes
+        events = Self.describe(recording, keyframes: keyframes)
     }
+
+    var isCropped: Bool { keyframes.contains { $0.crop != nil } }
 
     // MARK: Events
 
-    /// One line for each event, in the order of `events`.
-    var eventTexts: [String] {
-        Self.describe(events)
-    }
-
-    /// "Clicked button "Pay" at 412, 300", "Switched to Safari": a line for each event, in order. Drawings carry their
-    /// mark number, as in `marks`.
-    static func describe(_ events: RecordingEvents?) -> [String] {
-        guard let events else { return [] }
-        let area = CGSize(width: events.width, height: events.height)
+    /// Each event once, in order: its line, its mark number when it is a drawing, and the keyframe whose events
+    /// list it.
+    static func describe(_ recording: RecordingEvents?, keyframes: [Keyframe]) -> [Event] {
+        guard let recording else { return [] }
+        let area = CGSize(width: recording.width, height: recording.height)
+        var owners = [Int](repeating: 0, count: recording.events.count)
+        for (index, keyframe) in keyframes.enumerated() {
+            for event in keyframe.events { owners[event] = index }
+        }
         var lastApp: String?
         var marks = 0
-        return events.events.map { event in
+        return recording.events.enumerated().map { index, event in
+            var described = Event(recorded: event, text: "", mark: nil, keyframe: owners[index])
             switch event.action {
             case .click(let point, let button, let element):
-                let verb = button == .right ? "Right-clicked" : "Clicked"
-                return verb + (element.map { " \($0)" } ?? "") + " at \(coordinates(point))"
+                described.text = (button == .right ? "Right-clicked" : "Clicked") + (element.map { " \($0)" } ?? "") + " at \(coordinates(point))"
             case .drag(let from, let to, _, let element):
-                return "Dragged " + (element.map { "\($0) " } ?? "") + "from \(coordinates(from)) to \(coordinates(to))"
+                described.text = "Dragged " + (element.map { "\($0) " } ?? "") + "from \(coordinates(from)) to \(coordinates(to))"
             case .scroll(let point, let direction, _):
-                return "Scrolled \(direction.rawValue) at \(coordinates(point))"
+                described.text = "Scrolled \(direction.rawValue) at \(coordinates(point))"
             case .shortcut(let keys):
-                return "Pressed \(keys)"
+                described.text = "Pressed \(keys)"
             case .app(let app, let window):
-                defer { lastApp = app }
-                return appText(app, window: window, previous: lastApp)
+                described.text = appText(app, window: window, previous: lastApp)
+                lastApp = app
             case .drawing(let tool, let color, let box, let tip):
                 marks += 1
-                return drawingText(tool, color, box: box, tip: tip, area: area) + " (mark \(marks))"
+                described.mark = marks
+                described.text = drawingText(tool, color, box: box, tip: tip, area: area) + " (mark \(marks))"
             case .pin(let number, let point):
-                return "Dropped pin \(number) \(placeName(of: point, in: area)) (\(coordinates(point)))"
+                described.text = "Dropped pin \(number) \(placeName(of: point, in: area)) (\(coordinates(point)))"
             }
+            return described
         }
-    }
-
-    /// The drawings, numbered from 1 in the order they were finished: `screenme zoom --mark N` looks at mark N.
-    var marks: [(number: Int, event: Int)] {
-        (events?.events ?? []).indices.filter { events?.events[$0].kind == .drawing }.enumerated().map { ($0.offset + 1, $0.element) }
     }
 
     /// "412, 300".
@@ -145,7 +166,7 @@ struct AIReport {
     }
 
     private static func drawingText(_ tool: LiveDrawTool, _ color: LiveDrawColor, box: RecordingEvent.Box, tip: CGPoint?,
-                                     area: CGSize) -> String {
+                                    area: CGSize) -> String {
         let place = placeName(of: CGPoint(x: box.rect.midX, y: box.rect.midY), in: area)
         let size = "\(Int(box.x)), \(Int(box.y)), \(Int(box.width))×\(Int(box.height))"
         switch tool {
@@ -182,22 +203,24 @@ struct AIReport {
     /// else why it is there.
     func caption(_ index: Int) -> String {
         let keyframe = keyframes[index]
-        let recorded = events?.events ?? []
-        let pins = keyframe.events.compactMap { index -> String? in
-            guard case .pin(let number, _) = recorded[index].action else { return nil }
+        let pins = keyframe.events.compactMap { event -> String? in
+            guard case .pin(let number, _) = events[event].recorded.action else { return nil }
             return "pin \(number)"
         }
         let prefix = pins.isEmpty ? "" : pins.joined(separator: ", ") + " \u{00B7} "
         if !keyframe.text.isEmpty { return prefix + "\u{201C}\(keyframe.text)\u{201D}" }
         if !pins.isEmpty { return pins.joined(separator: ", ") }
-        if let first = keyframe.events.first { return eventTexts[first] }
+        if let first = keyframe.events.first { return events[first].text }
         return Self.silentText(keyframe.reason)
     }
+
+    /// "Safari + Notes": every app the crops show, in order.
+    var croppedApps: String { AutoCrop.appNames(keyframes.map(\.crop)) }
 
     // MARK: Summary
 
     var title: String {
-        guard let first = transcript.segments.first?.text else {
+        guard case .spoken(let transcript) = narration, let first = transcript.segments.first?.text else {
             return environment.app.map { "Report: \($0)" } ?? "Report"
         }
         let words = first.split(separator: " ")
@@ -221,29 +244,30 @@ struct AIReport {
         if let window = environment.window, !window.isEmpty { lines.append("- Window: \(window)") }
         if let page = environment.page { lines.append("- Page: \(page)") }
         lines.append("- macOS: \(environment.system)")
-        if let screen = environment.screen { lines.append("- Screen: \(screen)") }
-        lines.append("- Recording: \(environment.video)")
-        if let events { lines.append("- Recorded area: \(Int(events.width))×\(Int(events.height)) points") }
-        lines.append("- Date: \(environment.date)")
+        if let screen = environment.screen {
+            lines.append("- Screen: \(Int(screen.width))×\(Int(screen.height)) points at \(Int(screen.scale))x")
+        }
+        let video = environment.video
+        lines.append("- Recording: \(video.width)×\(video.height) px, \(time(video.duration))")
+        if let area { lines.append("- Recorded area: \(Int(area.width))×\(Int(area.height)) points") }
+        lines.append("- Date: \(environment.date.formatted(date: .long, time: .shortened))")
         if isCropped {
-            lines += ["", "Cropped to: \(AutoCrop.appNames(crops)) (full frames in frames-full/)"]
+            lines += ["", "Cropped to: \(croppedApps) (full frames in frames-full/)"]
         }
 
         heading("Keyframes")
         lines.append("Each keyframe `#N [time]` has what was said while it was on screen, then what happened, with the time of each event."
-            + (events == nil ? "" : " Positions are points from the top-left corner of the recorded area."))
-        if transcript.segments.isEmpty { lines.append("No narration. \(noNarration)") }
+            + (area == nil ? "" : " Positions are points from the top-left corner of the recorded area."))
+        if case .silent(let why) = narration { lines.append("No narration. \(why)") }
         lines.append("")
-        let texts = eventTexts
-        let recorded = events?.events ?? []
         for (index, keyframe) in keyframes.enumerated() {
             let said = keyframe.text.isEmpty ? Self.silentText(keyframe.reason) : "\"\(keyframe.text)\""
             lines.append("- #\(index + 1) [\(time(keyframe.time))] \(said)")
-            for event in keyframe.events { lines.append("  - \(time(recorded[event].time)) \(texts[event])") }
+            for event in keyframe.events { lines.append("  - \(time(events[event].recorded.time)) \(events[event].text)") }
         }
 
         heading("For an AI agent")
-        if transcript.segments.isEmpty {
+        if case .silent = narration {
             lines.append("The user recorded the screen without narration to show you something. Work out what they are showing from the keyframes, clicks, shortcuts and drawings, and ask them what they want if that is unclear.")
         } else {
             lines.append("The user recorded the screen while talking, to show you something and ask for something. What they said is the request; the clicks, shortcuts and app switches are what they did; the drawings mark what they are pointing at.")
@@ -266,40 +290,39 @@ struct AIReport {
 
 extension AIReport {
     var manifest: ReportManifest {
-        let recorded = events?.events ?? []
-        let texts = eventTexts
-        func owner(_ event: Int) -> Int {
-            (keyframes.firstIndex { $0.events.contains(event) } ?? 0) + 1
-        }
         let entries = keyframes.enumerated().map { index, keyframe in
             ReportManifest.KeyframeEntry(
                 number: index + 1, time: keyframe.time, moment: keyframe.moment, reason: keyframe.reason,
                 file: ReportLayout.frame(index), fullFile: isCropped ? ReportLayout.fullFrame(index) : nil,
-                crop: crops.indices.contains(index) ? crops[index].map {
+                crop: keyframe.crop.map {
                     ReportManifest.Crop(rect: ReportManifest.Rect(x: $0.rect.minX, y: $0.rect.minY, width: $0.rect.width, height: $0.rect.height),
                                         apps: $0.apps)
-                } : nil,
+                },
                 text: keyframe.text,
-                events: keyframe.events.map { ReportManifest.KeyframeEvent(index: $0, time: recorded[$0].time, kind: recorded[$0].kind, text: texts[$0]) })
+                events: keyframe.events.map {
+                    ReportManifest.KeyframeEvent(index: $0, time: events[$0].recorded.time, kind: events[$0].recorded.kind, text: events[$0].text)
+                })
         }
-        let marks = marks.compactMap { mark -> ReportManifest.Mark? in
-            let event = recorded[mark.event]
-            guard case .drawing(let tool, let color, let box, let tip) = event.action else { return nil }
-            return ReportManifest.Mark(number: mark.number, time: event.time, kind: event.kind, tool: tool, color: color,
-                                       box: box, x: tip.map { Double($0.x) }, y: tip.map { Double($0.y) }, keyframe: owner(mark.event))
+        let marks = events.compactMap { event -> ReportManifest.Mark? in
+            guard let number = event.mark, case .drawing(let tool, let color, let box, let tip) = event.recorded.action else { return nil }
+            return ReportManifest.Mark(number: number, time: event.recorded.time, kind: event.recorded.kind, tool: tool, color: color,
+                                       box: box, x: tip.map { Double($0.x) }, y: tip.map { Double($0.y) }, keyframe: event.keyframe + 1)
         }
         func segments(_ list: [TranscriptSegment]) -> [ReportManifest.Segment] {
             list.map { ReportManifest.Segment(start: $0.start, end: $0.end, text: $0.text) }
         }
+        let transcript = narration.transcript
+        var silence: String?
+        if case .silent(let why) = narration { silence = why }
         return ReportManifest(
-            title: title, environment: environment, duration: duration,
-            area: events.map { ReportManifest.Size(width: $0.width, height: $0.height) },
+            title: title, environment: environment,
+            area: area.map { ReportManifest.Size(width: $0.width, height: $0.height) },
             video: ReportLayout.video, summary: ReportLayout.summary, contactSheet: ReportLayout.contactSheet,
             contactSheetFull: isCropped ? ReportLayout.fullContactSheet : nil,
-            croppedTo: isCropped ? AutoCrop.appNames(crops) : nil,
+            croppedTo: isCropped ? croppedApps : nil,
             keyframes: entries,
             transcript: ReportManifest.Transcript(segments: segments(transcript.segments), words: segments(transcript.words),
-                                                  noNarration: transcript.segments.isEmpty ? noNarration : nil),
-            marks: marks, events: recorded, windows: events?.windows)
+                                                  noNarration: silence),
+            marks: marks, events: events.map(\.recorded), windows: windows)
     }
 }

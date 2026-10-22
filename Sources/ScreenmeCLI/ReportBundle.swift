@@ -39,7 +39,7 @@ struct ReportBundle {
             throw Failure.notAReport(url.path)
         }
         self.url = url
-        manifest = try JSONDecoder().decode(ReportManifest.self, from: data)
+        manifest = try ReportManifest.decode(data)
     }
 
     /// `latest` is the newest report in `reports`; anything else is a path to a report folder.
@@ -61,6 +61,8 @@ struct ReportBundle {
     }
 
     var video: URL { url.appendingPathComponent(manifest.video) }
+    /// The length of the video in seconds.
+    var duration: Double { manifest.environment.video.duration }
     var contactSheet: URL { url.appendingPathComponent(manifest.contactSheet) }
 
     // MARK: Moments
@@ -69,7 +71,7 @@ struct ReportBundle {
     func time(of moment: Moment) throws -> Double {
         switch moment {
         case .at(let seconds):
-            return min(max(seconds, 0), manifest.duration)
+            return min(max(seconds, 0), duration)
         case .mark(let number):
             guard let mark = manifest.marks.first(where: { $0.number == number }) else {
                 throw Failure.markNotFound(number, count: manifest.marks.count)
@@ -139,7 +141,7 @@ struct ReportBundle {
     func zoom(_ moment: Moment, span: Double = 2, columns: Int = 3, rows: Int = 3) async throws -> Zoom {
         let center = try time(of: moment)
         let count = max(columns * rows, 1)
-        let last = max(manifest.duration - 0.05, 0)
+        let last = max(duration - 0.05, 0)
         let start = min(max(center - span / 4, 0), max(last - span, 0))
         let times = (0..<count).map { min(start + (count == 1 ? 0 : span * Double($0) / Double(count - 1)), last) }
         let step = count == 1 ? span : span / Double(count - 1)
@@ -156,7 +158,7 @@ struct ReportBundle {
 
     /// Writes the frames from `from` to `to` seconds, `fps` a second, to `zoom/frames-…/` and returns their files.
     func frames(from: Double, to: Double, fps: Double = 4) async throws -> [URL] {
-        let last = max(manifest.duration - 0.05, 0)
+        let last = max(duration - 0.05, 0)
         let start = min(max(from, 0), last), end = min(max(to, start), last)
         let step = 1 / max(fps, 0.1)
         let times = Array(stride(from: start, through: end + 0.0001, by: step).prefix(600))
