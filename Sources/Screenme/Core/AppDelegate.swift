@@ -100,6 +100,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             [.recordScreen],
             [.pinLastCapture, .openHistory, .toggleDesktopIcons],
         ]
+        let combos = ShortcutStore.allCombos()
         for group in groups {
             for action in group {
                 let item = NSMenuItem(title: action == .toggleDesktopIcons && DesktopIcons.isHidden ? "Show Desktop Icons" : action.title,
@@ -108,7 +109,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 item.target = self
                 item.image = NSImage(systemSymbolName: action.symbol, accessibilityDescription: nil)
                 item.toolTip = action.help
-                if let combo = ShortcutsModel.shared.combo(for: action) {
+                if let combo = combos[action] {
                     item.keyEquivalent = combo.keyEquivalent
                     item.keyEquivalentModifierMask = combo.eventModifiers
                 }

@@ -165,18 +165,20 @@ struct KeyCombo: Codable, Hashable {
 /// an explicit `nil` (stored as empty) means "no shortcut".
 enum ShortcutStore {
     static func combo(for action: ShortcutAction) -> KeyCombo? {
-        resolve(action, in: load())
+        allCombos()[action]
     }
 
-    /// Every action's combo, with the saved shortcuts decoded once.
-    static func allCombos() -> [ShortcutAction: KeyCombo?] {
-        let saved = load()
-        return Dictionary(uniqueKeysWithValues: ShortcutAction.allCases.map { ($0, resolve($0, in: saved)) })
-    }
-
-    private static func resolve(_ action: ShortcutAction, in saved: [String: KeyCombo?]) -> KeyCombo? {
-        guard let entry = saved[action.rawValue] else { return action.defaultCombo }
-        return entry
+    /// The combo of every action that has one; an action without a shortcut is absent. The one source for the
+    /// global hot keys, the menu's key equivalents and the UI.
+    static func allCombos() -> [ShortcutAction: KeyCombo] {
+        var combos: [ShortcutAction: KeyCombo] = [:]
+        for action in ShortcutAction.allCases { combos[action] = action.defaultCombo }
+        // A saved entry replaces the default; a saved "no shortcut" removes it.
+        for (name, combo) in load() {
+            guard let action = ShortcutAction(rawValue: name) else { continue }
+            combos[action] = combo
+        }
+        return combos
     }
 
     static func set(_ combo: KeyCombo?, for action: ShortcutAction) {
@@ -194,7 +196,7 @@ enum ShortcutStore {
     /// The action already using `combo`, if any.
     static func action(using combo: KeyCombo) -> ShortcutAction? {
         let all = allCombos()
-        return ShortcutAction.allCases.first { all[$0] == .some(combo) }
+        return ShortcutAction.allCases.first { all[$0] == combo }
     }
 
     private static func load() -> [String: KeyCombo?] {
