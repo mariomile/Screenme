@@ -175,7 +175,7 @@ final class CaptureCoordinator {
     /// `target`: where the picture came from, for its notch cover and its context (Copy for AI).
     func deliver(_ image: CGImage, from target: CaptureTarget? = nil) async throws {
         let item = CaptureItem(url: Storage.newURL(extension: Prefs[Pref.imageFormat].fileExtension), kind: .image)
-        if let target { CaptureContexts.record(target, for: item.url) }
+        if let target { CaptureContexts.record(CaptureContexts.context(of: target), for: item.url) }
         let cover = target.flatMap(Notch.cover(for:))
         Sounds.shutter()
         let file = Task.detached(priority: .userInitiated) {

@@ -85,14 +85,16 @@ final class RecordingController {
         if let restarting { await restarting.value }
         guard let session = takeRunning() else { return nil }
         let size = session.size
+        // The app and window as the recording stops: the file is finished and maybe rendered after, while the user moves on.
+        let context = CaptureContexts.context(of: session.target)
         guard let url = await end(session, keep: true) else { return nil }
-        return await finalize(url, size: size, session: session)
+        return await finalize(url, size: size, context: context, session: session)
     }
 
     /// What the stopped recording `video` becomes: a GIF for a GIF recording, the cursor drawn in for a Smooth cursor
     /// one (the raw file kept as its source), else the recording itself, also when that work fails (with the error
-    /// shown). The final file gets the recorded app and window and, for a video, the events, for Report for AI.
-    private func finalize(_ video: URL, size: CGSize, session: Session) async -> CaptureItem {
+    /// shown). The final file gets `context`, read when the recording stopped, and, for a video, the events, for Report for AI.
+    private func finalize(_ video: URL, size: CGSize, context: CaptureContext, session: Session) async -> CaptureItem {
         let defaults = VideoEditorDefaults.saved
         let gif = session.settings.format == .gif
         let drawsCursor = session.settings.rendersCursorLater && defaults.cursor.show
@@ -115,7 +117,7 @@ final class RecordingController {
                 CaptureCoordinator.shared.report(error)
             }
         }
-        CaptureContexts.record(session.target, for: item.url)
+        CaptureContexts.record(context, for: item.url)
         if item.kind == .video, let events { RecordingEvents.record(events, for: item.url) }
         return item
     }

@@ -41,9 +41,10 @@ enum CaptureContexts {
     /// A capture that goes to the Trash is forgotten.
     private static let forgetsTrashed = Sidecar.onTrash { contexts[$0] = nil }
 
-    static func record(_ target: CaptureTarget, for url: URL) {
+    /// `context`, read with `context(of:)` when the capture was taken, becomes the context of the file at `url`.
+    static func record(_ context: CaptureContext, for url: URL) {
         _ = forgetsTrashed
-        contexts[url] = context(of: target)
+        contexts[url] = context
     }
 
     static func setNotes(_ notes: [String], for url: URL) {
@@ -64,7 +65,9 @@ enum CaptureContexts {
 
     // MARK: Window under the capture
 
-    private static func context(of target: CaptureTarget) -> CaptureContext {
+    /// The app and window `target` shows now. Read when the capture is taken, before anything slow, so a switch
+    /// to another app meanwhile is not recorded.
+    static func context(of target: CaptureTarget) -> CaptureContext {
         switch target {
         case .window(let window):
             let app = window.owningApplication
