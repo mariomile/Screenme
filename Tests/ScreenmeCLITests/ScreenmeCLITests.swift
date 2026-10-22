@@ -373,6 +373,19 @@ final class ReportBundleTests: XCTestCase {
         XCTAssertEqual(try ReportBundle(url).manifest, Self.manifest)
     }
 
+    /// A report.json of version 1 (the environment's date as text, no transcript) asks for a new report instead of
+    /// failing to decode.
+    func testAReportFromAnOlderScreenmeAsksForANewOne() throws {
+        let url = try Self.writeReport(in: folder, name: "Report 1", video: false, made: Date())
+        let old = #"{"version":1,"title":"Report: Look","environment":{"app":"Safari","system":"26.0.0","date":"21 Oct 2026 at 10:00"},"keyframes":[]}"#
+        try Data(old.utf8).write(to: url.appendingPathComponent(ReportLayout.manifest))
+
+        XCTAssertThrowsError(try ReportBundle(url)) { XCTAssertEqual($0 as? ReportBundle.Failure, .olderReport(url.path)) }
+        XCTAssertThrowsError(try ReportBundle.open("latest", reports: folder)) { error in
+            XCTAssertTrue("\(error)".hasSuffix("Report 1 was made by an older Screenme: run Report for AI again on the recording"), "\(error)")
+        }
+    }
+
     /// A 3 second, 320 × 240 H.264 video with no audio, 10 frames a second, a little brighter every frame.
     static func writeVideo(to url: URL) async throws {
         let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)

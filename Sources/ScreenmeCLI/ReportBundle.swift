@@ -20,6 +20,7 @@ struct ReportBundle {
 
     enum Failure: Error, CustomStringConvertible, Equatable {
         case notAReport(String)
+        case olderReport(String)
         case noReports(String)
         case noVideo(String)
         case phraseNotFound(String)
@@ -28,6 +29,7 @@ struct ReportBundle {
         var description: String {
             switch self {
             case .notAReport(let path): "\(path) is not a Report for AI folder (no \(ReportLayout.manifest))"
+            case .olderReport(let path): "\(path) was made by an older Screenme: run Report for AI again on the recording"
             case .noReports(let path): "there are no reports yet in \(path). Make one with Report for AI on a recording."
             case .noVideo(let path): "the report's video is missing: \(path)"
             case .phraseNotFound(let phrase): "nobody said \"\(phrase)\" in this recording"
@@ -39,9 +41,17 @@ struct ReportBundle {
     let url: URL
     let manifest: ReportManifest
 
+    /// `report.json`'s version, read before the rest: an older report has fields this one cannot read.
+    private struct Version: Decodable {
+        var version: Int
+    }
+
     init(_ url: URL) throws {
         guard let data = try? Data(contentsOf: url.appendingPathComponent(ReportLayout.manifest)) else {
             throw Failure.notAReport(url.path)
+        }
+        if let version = try? JSONDecoder().decode(Version.self, from: data).version, version < ReportManifest.currentVersion {
+            throw Failure.olderReport(url.path)
         }
         self.url = url
         manifest = try ReportManifest.decode(data)

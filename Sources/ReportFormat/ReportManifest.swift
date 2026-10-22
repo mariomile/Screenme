@@ -98,7 +98,10 @@ struct ReportManifest: Codable, Equatable {
         var keyframe: Int
     }
 
-    var version = 2
+    /// The version this Screenme writes and reads. Reports of an older version are made again, not converted.
+    static let currentVersion = 2
+
+    var version = currentVersion
     var title: String
     var environment: Environment
     /// The recorded area in points, when the recording has events.
