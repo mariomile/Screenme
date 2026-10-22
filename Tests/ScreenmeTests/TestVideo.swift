@@ -91,7 +91,14 @@ enum TestVideo {
         // when it is ready. Waiting on one input alone can wait forever for the other.
         let frames = Int(seconds * Double(fps))
         var videoFrame = 0, audioFrame = audioInput == nil ? frames : 0
+        var idleSince = Date()
         while videoFrame < frames || audioFrame < frames {
+            // A writer that failed is never ready again: say why instead of waiting forever.
+            guard writer.status == .writing, Date().timeIntervalSince(idleSince) < 30 else {
+                throw writer.error ?? NSError(domain: "TestVideo", code: writer.status.rawValue, userInfo: [
+                    NSLocalizedDescriptionKey: "The writer took no media for 30 s (status \(writer.status.rawValue), video \(videoFrame), audio \(audioFrame) of \(frames)).",
+                ])
+            }
             var appended = false
             if audioFrame < frames, let audioInput, audioInput.isReadyForMoreMediaData {
                 appendTone(frame: audioFrame, to: audioInput)
@@ -103,7 +110,7 @@ enum TestVideo {
                 videoFrame += 1
                 appended = true
             }
-            if !appended { Thread.sleep(forTimeInterval: 0.001) }
+            if appended { idleSince = Date() } else { Thread.sleep(forTimeInterval: 0.001) }
         }
         input.markAsFinished()
         audioInput?.markAsFinished()
