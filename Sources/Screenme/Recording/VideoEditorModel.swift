@@ -11,21 +11,20 @@ enum ExportFormat: String, CaseIterable, Identifiable {
 
 /// What the video editor does with a file it exported. Never the after-recording actions: with Open in video
 /// editor on they would open another editor on the export, and with Save to folder on save it a second time.
-@MainActor
-struct VideoEditorDelivery {
-    var record: (CaptureItem) -> Void
-    var copy: (CaptureItem) -> Void
+struct VideoEditorDelivery: Sendable {
+    var record: @MainActor @Sendable (CaptureItem) -> Void
+    var copy: @MainActor @Sendable (CaptureItem) -> Void
 
     static let live = VideoEditorDelivery(record: { CaptureCoordinator.shared.record($0) }, copy: { Clipboard.copy($0) })
 
     /// Done: the export becomes the latest capture in History, and is copied when Copy file to clipboard is on.
-    func finished(_ item: CaptureItem) {
+    @MainActor func finished(_ item: CaptureItem) {
         record(item)
         if Prefs[Pref.afterRecordingCopy] { copy(item) }
     }
 
     /// Save already put the file where the user asked; the new file still goes to History.
-    func saved(_ item: CaptureItem) {
+    @MainActor func saved(_ item: CaptureItem) {
         record(item)
     }
 }

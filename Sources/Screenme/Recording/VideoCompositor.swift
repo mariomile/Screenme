@@ -60,7 +60,7 @@ final class FrameRenderer: @unchecked Sendable {
 }
 
 /// The one instruction of an edited video: the whole timeline, drawn by a `FrameRenderer`.
-final class FrameInstruction: NSObject, AVVideoCompositionInstructionProtocol {
+final class FrameInstruction: NSObject, AVVideoCompositionInstructionProtocol, @unchecked Sendable {
     let timeRange: CMTimeRange
     let enablePostProcessing = false
     let containsTweening = true
