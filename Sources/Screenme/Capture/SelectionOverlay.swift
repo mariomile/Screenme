@@ -19,6 +19,12 @@ enum SelectionOverlay {
     static func select(_ mode: SelectionMode) async -> SelectionResult? {
         await SelectionSession(mode: mode).run()
     }
+
+    /// Repeat capture: the picker stays open after each area or window pick, which `shoot` turns into a capture,
+    /// and the selection stays so it can be shot again (Return) or adjusted. Returns when the user closes it with Esc.
+    static func selectRepeatedly(shoot: @escaping (SelectionResult) async -> Void) async {
+        _ = await SelectionSession(mode: .screenshot, shoot: shoot).run()
+    }
 }
 
 /// One run of the picker: owns the panels, the pointer, the drag and the way out.
@@ -27,7 +33,12 @@ final class SelectionSession {
     private let mode: SelectionMode
     private let freeze: Bool
     private let showCrosshair = Prefs[Pref.showCrosshair]
-    private let showMagnifier = Prefs[Pref.showMagnifier]
+    /// Off while repeating: the picker is not frozen, so the pixels it loaded at the start go stale after the first shot.
+    private let showMagnifier: Bool
+    /// Set for a repeat capture: each pick goes here instead of ending the picker.
+    private let shoot: ((SelectionResult) async -> Void)?
+    private var shooting = false
+    private var shotTask: Task<Void, Never>?
     private let retina = Prefs[Pref.retinaResolution]
 
     private var windowMode: Bool
@@ -64,12 +75,16 @@ final class SelectionSession {
     private var outcome: SelectionResult??
     private var continuation: CheckedContinuation<SelectionResult?, Never>?
 
-    init(mode: SelectionMode) {
+    init(mode: SelectionMode, shoot: ((SelectionResult) async -> Void)? = nil) {
         self.mode = mode
+        self.shoot = shoot
         windowMode = mode == .window
-        // Freezing only makes sense when the result is a still taken from the snapshot.
-        freeze = Prefs[Pref.freezeScreen] && (mode == .screenshot || mode == .window || mode == .text)
+        // Freezing only makes sense when the result is a still taken from the snapshot; every shot of a repeat is fresh.
+        freeze = Prefs[Pref.freezeScreen] && (mode == .screenshot || mode == .window || mode == .text) && shoot == nil
+        showMagnifier = Prefs[Pref.showMagnifier] && shoot == nil
     }
+
+    private var repeating: Bool { shoot != nil }
 
     func run() async -> SelectionResult? {
         previousApp = FocusKeeper.frontmostExternal()
@@ -93,6 +108,8 @@ final class SelectionSession {
                 self.continuation = continuation
             }
         }
+        // Closing a repeat capture lets a shot in flight finish first.
+        await shotTask?.value
         // A cancel has no screenshot to wait for: hand focus back in the background.
         let app = previousApp
         if result == nil {
@@ -124,7 +141,7 @@ final class SelectionSession {
         FocusKeeper.allowBackgroundCursor()
         let hint = hintText()
         for screen in screens {
-            let panel = OverlayPanel(screen: screen)
+            let panel = OverlayPanel(screen: screen, level: repeating ? .statusBar : .screenSaver)
             let view = OverlayView(screen: screen, backdrop: freeze ? snapshot.images[screen.displayID] : nil)
             view.source = snapshot.images[screen.displayID]
             view.setHint(hint)
@@ -286,16 +303,36 @@ final class SelectionSession {
         let rect = selectionRect()
         stopDragPolling()
         dragging = false
-        dragScreen = nil
         spaceHeld = false
-        fixedRect = nil
         if rect.width >= 3, rect.height >= 3 {
-            finish(SelectionResult(target: .area(rect, screen), frozenImage: frozenImage(forArea: rect, on: screen)))
-        } else if mode == .recording {
+            // A repeat capture keeps the selection on screen for the next shot.
+            if repeating { fixedRect = rect } else { dragScreen = nil; fixedRect = nil }
+            deliver(SelectionResult(target: .area(rect, screen), frozenImage: frozenImage(forArea: rect, on: screen)))
+            return
+        }
+        dragScreen = nil
+        fixedRect = nil
+        if mode == .recording {
             finish(SelectionResult(target: .display(screen), frozenImage: nil))
         } else {
             refresh()
         }
+    }
+
+    /// Ends the picker with `result`, or in a repeat capture takes the shot and stays open.
+    /// A second pick while a shot is still being taken is ignored.
+    private func deliver(_ result: SelectionResult) {
+        guard let shoot else {
+            finish(result)
+            return
+        }
+        guard !shooting else { return }
+        shooting = true
+        shotTask = Task { [weak self] in
+            await shoot(result)
+            self?.shooting = false
+        }
+        refresh()
     }
 
     private func keyDown(_ event: NSEvent) {
@@ -308,12 +345,17 @@ final class SelectionSession {
                 spaceHeld = true
             } else {
                 windowMode.toggle()
+                // A held selection of a repeat capture gives way to picking a window.
+                fixedRect = nil
+                dragScreen = nil
                 for view in views { view.setHint(hintText()) }
                 refresh()
             }
         case kVK_Return, kVK_ANSI_KeypadEnter:
             if dragging {
                 confirmDrag()
+            } else if repeating, let rect = fixedRect, let screen = dragScreen {
+                deliver(SelectionResult(target: .area(rect, screen), frozenImage: nil))
             } else if mode == .recording {
                 finish(SelectionResult(target: .display(NSScreen.at(pointer)), frozenImage: nil))
             }
@@ -328,7 +370,7 @@ final class SelectionSession {
     /// With a selection (the button is held) an arrow moves it by one point, ten with Shift; with Option it resizes
     /// from the bottom and right edges. Without one it moves the pointer.
     private func arrowPressed(_ arrow: SelectionNudge.Arrow, dx: CGFloat, dy: CGFloat) {
-        guard dragging, !windowMode, let screen = dragScreen else {
+        guard dragging || fixedRect != nil, !windowMode, let screen = dragScreen else {
             nudge(dx: dx, dy: dy)
             return
         }
@@ -428,7 +470,7 @@ final class SelectionSession {
     /// the capture takes the window on its own (`SCContentFilter(desktopIndependentWindow:)`), frozen or not.
     private func pickWindow(at point: CGPoint) {
         guard let entry = window(at: point) else { return }
-        finish(SelectionResult(target: .window(entry.window), frozenImage: nil))
+        deliver(SelectionResult(target: .window(entry.window), frozenImage: nil))
     }
 
     // MARK: Drawing
@@ -437,7 +479,7 @@ final class SelectionSession {
         guard !finished else { return }
         let activeScreen = dragScreen ?? NSScreen.at(pointer)
         let pointerPoint = dragScreen.map { Self.clamp(pointer, to: $0.frame) } ?? pointer
-        let selection: CGRect? = dragging ? selectionRect() : nil
+        let selection: CGRect? = dragging || fixedRect != nil ? selectionRect() : nil
         let hovered = windowMode && !dragging ? window(at: pointer) : nil
         let style: PointerStyle = windowMode ? .glyph(pointerSymbol) : (showCrosshair ? .full : .small)
 
@@ -483,6 +525,8 @@ final class SelectionSession {
     private func hintText() -> NSAttributedString {
         let parts: [String]
         switch (mode, windowMode) {
+        case (_, false) where repeating: parts = ["Drag to capture an area", "Enter to capture again", "Space for window", "Esc to close"]
+        case (_, true) where repeating: parts = ["Click a window to capture it", "Space for area", "Esc to close"]
         case (.recording, false): parts = ["Drag to record an area", "Space for window", "Enter for full screen", "Esc to cancel"]
         case (.recording, true): parts = ["Click a window to record it", "Space for area", "Enter for full screen", "Esc to cancel"]
         case (.scrolling, false): parts = ["Drag over the area to scroll", "Space for window", "Esc to cancel"]

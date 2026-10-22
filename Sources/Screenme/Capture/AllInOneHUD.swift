@@ -8,6 +8,15 @@ enum AllInOneHUD {
 
     static var isOpen: Bool { controller != nil }
 
+    /// Set when Area was picked with the Repeat toggle on. The coordinator takes it with the capture.
+    fileprivate(set) static var repeatNext = false
+
+    /// True once if the bar's Repeat toggle was on for the capture that was just picked.
+    static func takeRepeat() -> Bool {
+        defer { repeatNext = false }
+        return repeatNext
+    }
+
     /// Shows the bar. Showing it again while it is open closes it, so the shortcut toggles.
     /// `perform` gets the chosen action and, when a link chose it, the link's target.
     static func show(perform: @escaping (ShortcutAction, ActionLink.Target?) -> Void) {
@@ -59,6 +68,8 @@ private final class HUDModel: ObservableObject {
     let items = HUDItem.all()
     @Published var focus = 0
     @Published var appeared = false
+    /// Keeps the Area picker open after each shot. Only for the next Area capture.
+    @Published var repeatArea = false
     var choose: (Int) -> Void = { _ in }
 
     func move(_ step: Int) {
@@ -134,6 +145,7 @@ private final class HUDController {
         case 123: model.move(-1)                             // left
         case 124, 48: model.move(1)                          // right, tab
         case 36, 76: model.choose(model.focus)               // return, enter
+        case 15: model.repeatArea.toggle()                   // R
         default: return true
         }
         return true
@@ -143,6 +155,7 @@ private final class HUDController {
     // capture what they need by value instead of reaching back through a weak self.
     func choose(_ action: ShortcutAction, target: ActionLink.Target? = nil) {
         guard !closing else { return }
+        AllInOneHUD.repeatNext = model.repeatArea && action == .captureArea
         let previousApp = previousApp
         let perform = perform
         close {
@@ -196,6 +209,15 @@ private struct HUDBarView: View {
                     .help(item.tooltip)
                     .onHover { inside in if inside { model.focus = index } }
             }
+            Rectangle()
+                .fill(Color.primary.opacity(0.12))
+                .frame(width: 1, height: 34)
+                .padding(.horizontal, 5)
+            Button { model.repeatArea.toggle() } label: { HUDRepeatLabel(on: model.repeatArea) }
+                .buttonStyle(HUDButtonStyle(.tile(focused: model.repeatArea)))
+                .help("Repeat Area  R\nKeeps the Area picker open after each shot, to capture the same or an adjusted area again. Return shoots again, Esc closes. Applies to the next Area capture.")
+                .accessibilityLabel("Repeat Area")
+                .accessibilityValue(model.repeatArea ? "On" : "Off")
         }
         .padding(8)
         .overlay(
@@ -206,6 +228,27 @@ private struct HUDBarView: View {
         .scaleEffect(model.appeared ? 1 : 0.95)
         .opacity(model.appeared ? 1 : 0)
         .background(VisualEffectBackground(material: .popover).clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous)))
+    }
+}
+
+/// The Repeat toggle at the end of the bar: lit while it is on.
+private struct HUDRepeatLabel: View {
+    let on: Bool
+
+    var body: some View {
+        VStack(spacing: 6) {
+            Image(systemName: "repeat")
+                .font(.system(size: 21, weight: .regular))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(on ? Color.accentColor : Color.primary)
+                .frame(height: 26)
+            Text("Repeat")
+                .font(.system(size: 11, weight: .medium))
+                .lineLimit(1)
+                .foregroundStyle(on ? Color.accentColor : Color.primary.opacity(0.85))
+        }
+        .frame(width: 82, height: 64)
+        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 

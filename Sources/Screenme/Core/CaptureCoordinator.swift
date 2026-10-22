@@ -51,19 +51,22 @@ final class CaptureCoordinator {
             AllInOneHUD.choose(action, target: target)
             return
         }
+        // The bar's Repeat toggle is for the one Area capture it was picked with, whatever happens to it.
+        let repeating = AllInOneHUD.takeRepeat() && action == .captureArea && target == nil
         guard !busy else { return }
         busy = true
         Task {
             defer { busy = false }
             do {
-                try await capture(action, target: target)
+                try await capture(action, target: target, repeating: repeating)
             } catch {
                 report(error)
             }
         }
     }
 
-    private func capture(_ action: ShortcutAction, target: ActionLink.Target?) async throws {
+    /// `repeating`: an Area capture whose picker stays open for several shots.
+    private func capture(_ action: ShortcutAction, target: ActionLink.Target?, repeating: Bool = false) async throws {
         var hidIcons = false
         if action.writesScreenshot, Prefs[Pref.hideDesktopIconsInShots] {
             hidIcons = await DesktopIcons.hideForCapture(settle: true)
@@ -75,6 +78,13 @@ final class CaptureCoordinator {
             return // handled in `perform`
 
         case .captureArea:
+            if repeating {
+                // Each shot goes through the normal after-capture flow; a failed one is a toast and the picker stays.
+                await SelectionOverlay.selectRepeatedly { [weak self] result in
+                    do { try await self?.finishScreenshot(result) } catch { self?.report(error) }
+                }
+                return
+            }
             guard let result = try await select(.screenshot, target) else { return }
             try await finishScreenshot(result)
 
