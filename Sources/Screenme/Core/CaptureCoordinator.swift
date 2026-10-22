@@ -14,8 +14,16 @@ final class CaptureCoordinator {
     private var previousArea: CaptureTarget?
     private(set) var lastCapture: CaptureItem?
 
-    /// `target` comes from a `screenme://` link and replaces the selection overlay.
-    func perform(_ action: ShortcutAction, target: ActionLink.Target? = nil) {
+    private init() {
+        // A capture that no longer exists (moved to the Trash) is no longer the one to pin.
+        Sidecar.onTrash { [weak self] url in
+            if self?.lastCapture?.url == url { self?.lastCapture = nil }
+        }
+    }
+
+    /// `target` comes from a `screenme://` link and replaces the selection overlay. `repeating`: an Area capture picked
+    /// from the All-in-One bar with its Repeat toggle on.
+    func perform(_ action: ShortcutAction, target: ActionLink.Target? = nil, repeating: Bool = false) {
         if action == .recordScreen, RecordingController.shared.isRecording {
             Task { await stopRecording() }
             return
@@ -31,7 +39,7 @@ final class CaptureCoordinator {
         case .allInOne:
             // Not over a capture in progress; the shortcut still closes an open bar.
             guard !busy || AllInOneHUD.isOpen else { return }
-            AllInOneHUD.show { [weak self] choice, target in self?.perform(choice, target: target) }
+            AllInOneHUD.show { [weak self] choice, target, repeating in self?.perform(choice, target: target, repeating: repeating) }
             return
         case .pinLastCapture:
             if let lastCapture { PinWindow.pin(lastCapture) }
@@ -51,14 +59,13 @@ final class CaptureCoordinator {
             AllInOneHUD.choose(action, target: target)
             return
         }
-        // The bar's Repeat toggle is for the one Area capture it was picked with, whatever happens to it.
-        let repeating = AllInOneHUD.takeRepeat() && action == .captureArea && target == nil
         guard !busy else { return }
         busy = true
         Task {
             defer { busy = false }
             do {
-                try await capture(action, target: target, repeating: repeating)
+                // A link's target replaces the picker, so there is nothing to repeat.
+                try await capture(action, target: target, repeating: repeating && target == nil)
             } catch {
                 report(error)
             }
@@ -234,11 +241,6 @@ final class CaptureCoordinator {
                 QuickAccess.shared.show(item)
             }
         }
-    }
-
-    /// A capture that no longer exists (moved to the Trash) is no longer the one to pin.
-    func forget(_ item: CaptureItem) {
-        if lastCapture?.url == item.url { lastCapture = nil }
     }
 
     // MARK: Helpers

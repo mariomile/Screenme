@@ -8,18 +8,12 @@ enum AllInOneHUD {
 
     static var isOpen: Bool { controller != nil }
 
-    /// Set when Area was picked with the Repeat toggle on. The coordinator takes it with the capture.
-    fileprivate(set) static var repeatNext = false
-
-    /// True once if the bar's Repeat toggle was on for the capture that was just picked.
-    static func takeRepeat() -> Bool {
-        defer { repeatNext = false }
-        return repeatNext
-    }
+    /// What `perform` gets: the chosen action, the link's target when a link chose it, and whether it is an Area
+    /// capture picked with the Repeat toggle on.
+    typealias Perform = (_ action: ShortcutAction, _ target: ActionLink.Target?, _ repeating: Bool) -> Void
 
     /// Shows the bar. Showing it again while it is open closes it, so the shortcut toggles.
-    /// `perform` gets the chosen action and, when a link chose it, the link's target.
-    static func show(perform: @escaping (ShortcutAction, ActionLink.Target?) -> Void) {
+    static func show(perform: @escaping Perform) {
         if let controller {
             controller.dismiss()
             return
@@ -81,7 +75,7 @@ private final class HUDModel: ObservableObject {
 
 @MainActor
 private final class HUDController {
-    private let perform: (ShortcutAction, ActionLink.Target?) -> Void
+    private let perform: AllInOneHUD.Perform
     private let released: () -> Void
     private let model = HUDModel()
     private let panel: FloatingPanel
@@ -90,7 +84,7 @@ private final class HUDController {
     private var resignObserver: NSObjectProtocol?
     private var closing = false
 
-    init(perform: @escaping (ShortcutAction, ActionLink.Target?) -> Void, released: @escaping () -> Void) {
+    init(perform: @escaping AllInOneHUD.Perform, released: @escaping () -> Void) {
         self.perform = perform
         self.released = released
         panel = FloatingPanel(frame: .zero, level: .statusBar, canBeKey: true, collectionBehavior: [.canJoinAllSpaces, .fullScreenAuxiliary])
@@ -155,14 +149,14 @@ private final class HUDController {
     // capture what they need by value instead of reaching back through a weak self.
     func choose(_ action: ShortcutAction, target: ActionLink.Target? = nil) {
         guard !closing else { return }
-        AllInOneHUD.repeatNext = model.repeatArea && action == .captureArea
+        let repeating = model.repeatArea && action == .captureArea
         let previousApp = previousApp
         let perform = perform
         close {
             Task { @MainActor in
                 // Hand focus back first so the capture sees the app the user was in.
                 await FocusKeeper.restore(previousApp)
-                perform(action, target)
+                perform(action, target, repeating)
             }
         }
     }

@@ -84,6 +84,15 @@ struct Annotation: Identifiable, Equatable, Codable {
         self.style = style
         self.shape = kind.traits.shape(p)
     }
+
+    /// Fields added later decode with their defaults, so an older edit sidecar still opens.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(kind: try c.decode(ToolKind.self, forKey: .kind), style: try c.decode(ToolStyle.self, forKey: .style), at: .zero)
+        shape = try c.decode(Shape.self, forKey: .shape)
+        try c.decodeIfPresent(.id, into: &id)
+        try c.decodeIfPresent(.note, into: &note)
+    }
 }
 
 // MARK: - Background
@@ -146,6 +155,21 @@ struct BackgroundSettings: Codable, Equatable {
     var alignment = Alignment9.center
 }
 
+extension BackgroundSettings {
+    /// Fields added later decode with their defaults, so an older edit sidecar still opens.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init()
+        try c.decodeIfPresent(.enabled, into: &enabled)
+        try c.decodeIfPresent(.padding, into: &padding)
+        try c.decodeIfPresent(.fill, into: &fill)
+        try c.decodeIfPresent(.cornerRadius, into: &cornerRadius)
+        try c.decodeIfPresent(.shadow, into: &shadow)
+        try c.decodeIfPresent(.aspect, into: &aspect)
+        try c.decodeIfPresent(.alignment, into: &alignment)
+    }
+}
+
 struct BackgroundPreset: Codable, Equatable, Identifiable {
     var id = UUID()
     var name: String
@@ -204,7 +228,8 @@ enum SolidSwatches {
 
 /// Everything that is undoable. The image itself is never modified: crop, resize and
 /// background are all applied only when the picture is flattened.
-/// Codable for the edit sidecar next to a saved capture (`EditSidecar`): property names are its JSON, keep them stable.
+/// Codable for the edit sidecar next to a saved capture (`EditSidecar`): property names are its JSON, keep them stable,
+/// and a new property gets a default and a line in `init(from:)` so older files still open.
 struct EditState: Equatable, Codable {
     var annotations: [Annotation] = []
     /// The visible part of the image, in image pixels. May extend past the image (Resize Canvas).
@@ -216,6 +241,18 @@ struct EditState: Equatable, Codable {
     var background = BackgroundSettings()
     /// How dark the picture gets around spotlights, 0...1. One level for the whole document.
     var spotlightDim = 0.6
+}
+
+extension EditState {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(cropRect: try c.decode(CGRect.self, forKey: .cropRect))
+        try c.decodeIfPresent(.annotations, into: &annotations)
+        try c.decodeIfPresent(.outputScale, into: &outputScale)
+        try c.decodeIfPresent(.canvasFill, into: &canvasFill)
+        try c.decodeIfPresent(.background, into: &background)
+        try c.decodeIfPresent(.spotlightDim, into: &spotlightDim)
+    }
 }
 
 extension EditState {

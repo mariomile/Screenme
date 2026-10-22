@@ -12,20 +12,10 @@ enum BakedCursor {
         style.show && events?.cursor?.hidden == true
     }
 
-    /// Where the cursorless recording of `capture` is kept.
-    static func sourceURL(for capture: URL) -> URL {
-        capture.deletingLastPathComponent().appendingPathComponent(".\(capture.lastPathComponent).screenme-source.mp4")
-    }
-
     /// The cursorless recording of `capture`, or nil when the capture has none.
     static func source(for capture: URL) -> URL? {
-        let url = sourceURL(for: capture)
+        let url = Sidecar.source.url(for: capture)
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
-    }
-
-    /// The capture went to the Trash: its source goes too.
-    static func removeSource(for capture: URL) {
-        try? FileManager.default.trashItem(at: sourceURL(for: capture), resultingItemURL: nil)
     }
 
     /// The recording with the cursor drawn in, and its events marked accordingly; `video` becomes its hidden source.
@@ -43,7 +33,7 @@ enum BakedCursor {
                                            quality: .high, codec: Prefs[Pref.videoCodec], mute: false)
         let url = try await VideoTranscoder.export(video, settings: settings, progress: progress)
         do {
-            try FileManager.default.moveItem(at: video, to: sourceURL(for: url))
+            try FileManager.default.moveItem(at: video, to: Sidecar.source.url(for: url))
         } catch {
             try? FileManager.default.removeItem(at: url)
             throw error
