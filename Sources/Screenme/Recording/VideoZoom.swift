@@ -1,11 +1,6 @@
 import CoreGraphics
 import Foundation
 
-extension Pref {
-    static let videoAutoZoom = PrefKey(name: "videoAutoZoom", defaultValue: false)
-    static let videoZoomStrength = PrefKey(name: "videoZoomStrength", defaultValue: 1.8)
-}
-
 /// A stretch of the video shown zoomed in. Positions are unit coordinates of the video, from the top-left.
 struct ZoomSegment: Identifiable, Equatable {
     var id = UUID()

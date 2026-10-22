@@ -86,38 +86,38 @@ final class RecordingController {
         guard let session = takeRunning() else { return nil }
         let size = session.size
         guard let url = await end(session, keep: true) else { return nil }
-        // The recorded app and window, and what happened during the recording, for Report for AI.
-        CaptureContexts.record(session.target, for: url)
-        if session.settings.format == .gif {
-            let gif = await convertToGIF(url, size: size)
-            // The video is gone after the conversion: the context belongs to the GIF.
-            if let gif, gif.url != url { CaptureContexts.move(url, to: gif.url) }
-            return gif
-        }
-        guard var events = session.recordedEvents else { return CaptureItem(url: url, kind: .video) }
-        var file = url
-        if session.settings.rendersCursorLater, let baked = await bakeCursor(url, size: size, events: events, style: .saved) {
-            (file, events) = baked
-            CaptureContexts.move(url, to: file)
-        }
-        RecordingEvents.record(events, for: file)
-        return CaptureItem(url: file, kind: .video)
+        return await finalize(url, size: size, session: session)
     }
 
-    /// A Smooth cursor recording as a file with the cursor drawn in; the raw file becomes its hidden source. Nil when
-    /// the cursor is off, or when drawing it failed (the raw file is delivered then, with the error shown).
-    private func bakeCursor(_ video: URL, size: CGSize, events: RecordingEvents, style: CursorStyle) async -> (url: URL, events: RecordingEvents)? {
-        guard style.show else { return nil }
-        let toast = Toast.progress("Adding the cursor")
-        defer { toast.finish() }
-        do {
-            return try await BakedCursor.render(video, size: size, events: events, style: style) { value in
-                Task { @MainActor in toast.update(value) }
+    /// What the stopped recording `video` becomes: a GIF for a GIF recording, the cursor drawn in for a Smooth cursor
+    /// one (the raw file kept as its source), else the recording itself, also when that work fails (with the error
+    /// shown). The final file gets the recorded app and window and, for a video, the events, for Report for AI.
+    private func finalize(_ video: URL, size: CGSize, session: Session) async -> CaptureItem {
+        let defaults = VideoEditorDefaults.saved
+        let gif = session.settings.format == .gif
+        let drawsCursor = session.settings.rendersCursorLater && defaults.cursor.show
+        var item = CaptureItem(url: video, kind: .video)
+        var events = session.recordedEvents
+        if gif || drawsCursor {
+            let toast = Toast.progress(gif ? "Creating GIF" : "Adding the cursor")
+            defer { toast.finish() }
+            let progress = VideoOutput.onMain { toast.update($0) }
+            do {
+                if gif {
+                    item = try await VideoOutput.render(video, source: VideoSource(size: size, events: events), edit: VideoEdit(),
+                                                        spec: defaults.gif, progress: progress)
+                    try? FileManager.default.removeItem(at: video)
+                } else if let recorded = events {
+                    (item, events) = try await BakedCursor.render(video, size: size, events: recorded, style: defaults.cursor,
+                                                                  codec: defaults.codec, progress: progress)
+                }
+            } catch {
+                CaptureCoordinator.shared.report(error)
             }
-        } catch {
-            CaptureCoordinator.shared.report(error)
-            return nil
         }
+        CaptureContexts.record(session.target, for: item.url)
+        if item.kind == .video, let events { RecordingEvents.record(events, for: item.url) }
+        return item
     }
 
     /// Moves the running session into a transition, so no other control can act on it meanwhile.
@@ -133,25 +133,6 @@ final class RecordingController {
         let url = await session.tearDown(keep: keep)
         phase = .idle
         return url
-    }
-
-    /// `size` is the recording's pixel size; the GIF gets the video editor's starting size for it.
-    private func convertToGIF(_ video: URL, size: CGSize) async -> CaptureItem? {
-        let toast = Toast.progress("Creating GIF")
-        defer { toast.finish() }
-        do {
-            let duration = try await AVURLAsset(url: video).load(.duration)
-            let renderer = FrameRenderer(renderSize: ExportResolution.gif(for: size).outputSize(for: size))
-            let gif = try await GIFExporter.export(video, range: CMTimeRange(start: .zero, duration: duration), renderer: renderer,
-                                                   fps: 15, quality: .high) { value in
-                Task { @MainActor in toast.update(value) }
-            }
-            try? FileManager.default.removeItem(at: video)
-            return CaptureItem(url: gif, kind: .gif)
-        } catch {
-            CaptureCoordinator.shared.report(error)
-            return CaptureItem(url: video, kind: .video)
-        }
     }
 
     // MARK: Controls

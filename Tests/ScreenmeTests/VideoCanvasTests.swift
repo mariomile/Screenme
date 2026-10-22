@@ -44,15 +44,33 @@ final class VideoCanvasTests: PrefsSandboxTestCase {
         XCTAssertEqual(rect, CGRect(x: 50, y: 175, width: 500, height: 250))
     }
 
-    func testTheLastBackgroundIsRememberedWithinTheVideoLimits() {
+    func testTheEditorsChoicesAreRememberedWithinTheVideoLimits() {
+        let realStore = Prefs.store
+        let suite = "dev.mariomiletta.ScreenmeTests.\(UUID().uuidString)"
+        Prefs.store = UserDefaults(suiteName: suite)!
+        defer {
+            Prefs.store.removePersistentDomain(forName: suite)
+            Prefs.store = realStore
+        }
+        XCTAssertEqual(VideoEditorDefaults.saved, VideoEditorDefaults(), "nothing saved yet")
         var wide = settings(padding: 35, aspect: .linkedin)
         wide.alignment = .topLeft
-        VideoCanvas.saved = wide
-        let saved = VideoCanvas.saved
-        XCTAssertEqual(saved.padding, 20)
-        XCTAssertEqual(saved.aspect, .auto)
-        XCTAssertEqual(saved.alignment, .center)
-        XCTAssertTrue(saved.enabled)
+        var defaults = VideoEditorDefaults()
+        defaults.canvas = wide
+        defaults.zoomStrength = 9
+        defaults.cursor.size = 0.2
+        defaults.codec = .hevc
+        defaults.gifFPS = 30
+        VideoEditorDefaults.saved = defaults
+        let saved = VideoEditorDefaults.saved
+        XCTAssertEqual(saved.canvas.padding, 20)
+        XCTAssertEqual(saved.canvas.aspect, .auto)
+        XCTAssertEqual(saved.canvas.alignment, .center)
+        XCTAssertTrue(saved.canvas.enabled)
+        XCTAssertEqual(saved.zoomStrength, AutoZoom.strengthRange.upperBound)
+        XCTAssertEqual(saved.cursor.size, CursorStyle.sizeRange.lowerBound)
+        XCTAssertEqual(saved.codec, .hevc)
+        XCTAssertEqual(saved.gif, .gif(fps: 30, maxWidth: 1280, quality: .high))
     }
 
     /// A green video on a red square canvas: red in the corners, green in the middle, the corners rounded off.

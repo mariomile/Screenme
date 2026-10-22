@@ -53,7 +53,7 @@ final class VideoEditorSourceTests: PrefsSandboxTestCase {
     @MainActor
     func testACaptureWithASourceOpensTheSourceWithTheCursorControlsOn() async throws {
         let style = CursorStyle(show: true, size: 2, clickHighlight: false, hideWhenIdle: false)
-        CursorStyle.saved = style
+        VideoEditorDefaults.saved.cursor = style
         let capture = try await capture(baked: style)
         try await addSource(to: capture)
 
@@ -78,11 +78,12 @@ final class VideoEditorSourceTests: PrefsSandboxTestCase {
         let drawn = CursorStyle(show: true, size: 2.5, clickHighlight: true, hideWhenIdle: false)
         let capture = try await capture(baked: drawn)
         try await addSource(to: capture)
-        CursorStyle.saved = CursorStyle(show: true, size: 1, clickHighlight: false, hideWhenIdle: true)
+        let saved = CursorStyle(show: true, size: 1, clickHighlight: false, hideWhenIdle: true)
+        VideoEditorDefaults.saved.cursor = saved
 
         let model = try await loaded(capture)
 
-        XCTAssertEqual(model.edit.cursor, CursorStyle.saved, "the editor opens with the saved style")
+        XCTAssertEqual(model.edit.cursor, saved, "the editor opens with the saved style")
         XCTAssertFalse(model.isUnmodified, "the saved style is not the one in the capture")
         model.edit.cursor = drawn
         XCTAssertTrue(model.isUnmodified, "the style drawn into the capture")
@@ -113,14 +114,14 @@ final class VideoEditorSourceTests: PrefsSandboxTestCase {
     /// The codec the editor exports in is a saved choice; Done skips the export when it matches the capture's codec.
     @MainActor
     func testAnHEVCCaptureIsUnmodifiedInHEVCOnly() async throws {
-        Prefs[Pref.videoCodec] = .hevc
+        VideoEditorDefaults.saved.codec = .hevc
         let hevc = try await loaded(capture(hidden: false, baked: nil, codec: .hevc))
         XCTAssertEqual(hevc.codec, .hevc)
         XCTAssertTrue(hevc.isUnmodified, "an untouched HEVC capture is not encoded again")
         hevc.codec = .h264
         XCTAssertFalse(hevc.isUnmodified)
 
-        Prefs[Pref.videoCodec] = .hevc
+        VideoEditorDefaults.saved.codec = .hevc
         let h264 = try await loaded(capture(hidden: false, baked: nil))
         XCTAssertFalse(h264.isUnmodified, "an H.264 capture exported as HEVC")
         h264.codec = .h264

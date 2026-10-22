@@ -76,11 +76,6 @@ enum ExportResolution: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Where a GIF starts: full-size GIFs are huge, so a source wider than 1280 goes to 720p.
-    static func gif(for size: CGSize) -> ExportResolution {
-        size.width > 1280 ? .p720 : .original
-    }
-
     /// `size` scaled down to at most `maxWidth` pixels wide (0: any width), for GIFs. Never scales up; dimensions are even.
     static func fitting(_ size: CGSize, maxWidth: Int) -> CGSize {
         guard size.width > 0, size.height > 0 else { return size }
@@ -109,8 +104,7 @@ enum GIFExporter {
     static func export(_ url: URL, range: CMTimeRange, renderer: FrameRenderer, fps: Int, quality: VideoQuality,
                        progress: @escaping @Sendable (Double) -> Void) async throws -> URL {
         let source = try await EditedVideo.source(url, range: range, speed: renderer.speed, mute: true)
-        let composition = EditedVideo.videoComposition(renderer: renderer, trackID: source.videoTrack.trackID,
-                                                       duration: source.composition.duration, fps: source.fps)
+        let composition = source.videoComposition(renderer)
         let width = max(2, Int(renderer.renderSize.width.rounded()))
         let height = max(2, Int(renderer.renderSize.height.rounded()))
         let rate = Double(min(max(fps, 1), 30))
@@ -166,11 +160,7 @@ enum GIFExporter {
 
         // Pass 2: read every drawn frame in order and hold each one until the next tick of the GIF clock.
         let reader = try AVAssetReader(asset: asset)
-        let output = AVAssetReaderVideoCompositionOutput(videoTracks: [source.videoTrack], videoSettings: [
-            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
-        ])
-        output.videoComposition = composition
-        output.alwaysCopiesSampleData = false
+        let output = source.drawnFrames(composition)
         reader.add(output)
         guard reader.startReading() else { throw reader.error ?? ScreenmeError.recordingFailed }
 
@@ -219,7 +209,7 @@ enum GIFExporter {
 
 // MARK: - MP4
 
-enum VideoCodec: String, CaseIterable, Identifiable {
+enum VideoCodec: String, Codable, CaseIterable, Identifiable {
     case h264, hevc
 
     var id: String { rawValue }
@@ -281,12 +271,7 @@ private final class TranscodeJob: @unchecked Sendable {
         let size = settings.renderer.renderSize
 
         reader = try AVAssetReader(asset: asset)
-        videoOutput = AVAssetReaderVideoCompositionOutput(videoTracks: [source.videoTrack], videoSettings: [
-            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
-        ])
-        videoOutput.videoComposition = EditedVideo.videoComposition(renderer: settings.renderer, trackID: source.videoTrack.trackID,
-                                                                    duration: asset.duration, fps: source.fps)
-        videoOutput.alwaysCopiesSampleData = false
+        videoOutput = source.drawnFrames(source.videoComposition(settings.renderer))
         reader.add(videoOutput)
 
         writer = try AVAssetWriter(outputURL: outputURL, fileType: .mp4)

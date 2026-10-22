@@ -9,12 +9,6 @@ enum ExportFormat: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
-extension Pref {
-    static let videoCodec = PrefKey(name: "videoCodec", defaultValue: VideoCodec.h264)
-    static let videoGIFFPS = PrefKey(name: "videoGIFFPS", defaultValue: 15)
-    static let videoGIFMaxWidth = PrefKey(name: "videoGIFMaxWidth", defaultValue: 1280)
-}
-
 /// What the video editor does with a file it exported. Never the after-recording actions: with Open in video
 /// editor on they would open another editor on the export, and with Save to folder on save it a second time.
 @MainActor
@@ -67,29 +61,28 @@ final class VideoEditorModel: ObservableObject {
     @Published var format = ExportFormat.mp4
     @Published var resolution = ExportResolution.original
     @Published var quality = VideoQuality.high
-    @Published var gifFPS = Prefs[Pref.videoGIFFPS] {
-        didSet { Prefs[Pref.videoGIFFPS] = gifFPS }
+    @Published var gifFPS: Int {
+        didSet { remember() }
     }
     /// The widest a GIF gets, in pixels; 0 keeps the full width.
-    @Published var gifMaxWidth = Prefs[Pref.videoGIFMaxWidth] {
-        didSet { Prefs[Pref.videoGIFMaxWidth] = gifMaxWidth }
+    @Published var gifMaxWidth: Int {
+        didSet { remember() }
     }
     @Published var mute = false {
         didSet { player.isMuted = mute }
     }
-    @Published var codec = Prefs[Pref.videoCodec] {
-        didSet { Prefs[Pref.videoCodec] = codec }
+    @Published var codec: VideoCodec {
+        didSet { remember() }
     }
     @Published private(set) var exportProgress: Double?
     @Published private(set) var exportTitle = ""
 
-    /// What the editor draws on the recording. Every change redraws the preview; the canvas is remembered for next time.
+    /// What the editor draws on the recording. Every change redraws the preview; the background, zoom strength and
+    /// cursor style are remembered for next time.
     @Published var edit = VideoEdit() {
         didSet {
             guard edit != oldValue else { return }
-            if edit.canvas != oldValue.canvas { VideoCanvas.saved = edit.canvas }
-            if edit.zoomStrength != oldValue.zoomStrength { Prefs[Pref.videoZoomStrength] = edit.zoomStrength }
-            if edit.cursor != oldValue.cursor { CursorStyle.saved = edit.cursor }
+            remember()
             if edit.speed != oldValue.speed {
                 player.defaultRate = Float(edit.speed)
                 if isPlaying { player.rate = Float(edit.speed) }
@@ -98,13 +91,15 @@ final class VideoEditorModel: ObservableObject {
         }
     }
     /// Zooms made from the recording's clicks. Remembered for next time.
-    @Published var autoZoom = Prefs[Pref.videoAutoZoom] {
+    @Published var autoZoom: Bool {
         didSet {
             guard autoZoom != oldValue else { return }
-            Prefs[Pref.videoAutoZoom] = autoZoom
+            remember()
             applyAutoZoom()
         }
     }
+    /// The choices saved last, so only a change is written.
+    private var remembered: VideoEditorDefaults
     @Published var selectedZoom: UUID?
     /// The zoom whose region is being dragged out on the preview.
     @Published private(set) var pickingZoom: UUID? {
@@ -137,9 +132,15 @@ final class VideoEditorModel: ObservableObject {
             source = VideoSource(size: .zero, events: events)
         }
         asset = AVURLAsset(url: videoURL)
-        edit.canvas = VideoCanvas.saved
-        edit.cursor = CursorStyle.saved
-        edit.zoomStrength = min(max(Prefs[Pref.videoZoomStrength], AutoZoom.strengthRange.lowerBound), AutoZoom.strengthRange.upperBound)
+        let defaults = VideoEditorDefaults.saved
+        remembered = defaults
+        autoZoom = defaults.autoZoom
+        codec = defaults.codec
+        gifFPS = defaults.gifFPS
+        gifMaxWidth = defaults.gifMaxWidth
+        edit.canvas = defaults.canvas
+        edit.cursor = defaults.cursor
+        edit.zoomStrength = defaults.zoomStrength
         player.replaceCurrentItem(with: AVPlayerItem(asset: asset))
         player.actionAtItemEnd = .pause
 
@@ -151,6 +152,15 @@ final class VideoEditorModel: ObservableObject {
             MainActor.assumeIsolated { self?.reachedEnd() }
         })
         Task { await load() }
+    }
+
+    /// Saves the choices the next editor opens with, when one changed.
+    private func remember() {
+        let current = VideoEditorDefaults(canvas: edit.canvas, autoZoom: autoZoom, zoomStrength: edit.zoomStrength, cursor: edit.cursor,
+                                          codec: codec, gifFPS: gifFPS, gifMaxWidth: gifMaxWidth)
+        guard current != remembered else { return }
+        remembered = current
+        VideoEditorDefaults.saved = current
     }
 
     func attach(to window: NSWindow) {
@@ -181,8 +191,7 @@ final class VideoEditorModel: ObservableObject {
             source.size = try await Self.pixelSize(of: track)
             capture = try await captureFile(playing: track)
             videoTrackID = track.trackID
-            let nominal = try await track.load(.nominalFrameRate)
-            fps = nominal > 1 ? Int(min(max(nominal, 24), 60).rounded()) : 30
+            fps = try await EditedVideo.frameRate(nominal: track.load(.nominalFrameRate))
             hasAudio = try await !asset.loadTracks(withMediaType: .audio).isEmpty
             duration = length
             trimStart = 0
@@ -297,12 +306,14 @@ final class VideoEditorModel: ObservableObject {
 
     // MARK: Export
 
-    var outputSize: CGSize {
+    /// What an export writes, from the choices in the editor.
+    var spec: ExportSpec {
         switch format {
-        case .mp4: edit.outputSize(for: source, resolution: resolution)
-        case .gif: ExportResolution.fitting(edit.outputSize(for: source, resolution: .original), maxWidth: gifMaxWidth)
+        case .mp4: .mp4(codec: codec, quality: quality, resolution: resolution, mute: mute)
+        case .gif: .gif(fps: gifFPS, maxWidth: gifMaxWidth, quality: quality)
         }
     }
+    var outputSize: CGSize { spec.outputSize(for: edit.layout(for: source).canvasSize) }
     var clipDuration: Double { trimEnd - trimStart }
     /// How long the export plays, at its speed.
     var outputDuration: Double { clipDuration / edit.speed }
@@ -310,8 +321,8 @@ final class VideoEditorModel: ObservableObject {
     /// True when the output would be the capture as it is: an MP4 in its codec and size, untrimmed, with its sound,
     /// the cursor it has and nothing else drawn. The editor opens at High quality, which stands for the capture's own.
     var isUnmodified: Bool {
-        guard let capture, format == .mp4, codec == capture.codec, quality == .high, outputSize == capture.size,
-              trimStart <= 0.001, trimEnd >= duration - 0.001, !mute || !hasAudio else { return false }
+        guard let capture, case .mp4(let codec, let quality, _, let mute) = spec, codec == capture.codec, quality == .high,
+              outputSize == capture.size, trimStart <= 0.001, trimEnd >= duration - 0.001, !mute || !hasAudio else { return false }
         let drawnCursor = edit.drawsCursor(for: source) ? edit.cursor : nil
         return drawnCursor == capturedCursor && !edit.canvas.enabled && edit.zooms.isEmpty && edit.speed == 1
     }
@@ -374,35 +385,16 @@ final class VideoEditorModel: ObservableObject {
         if isUnmodified { return item }
         exportTitle = format == .gif ? "Creating GIF" : title
         exportProgress = 0
-        let progress: @Sendable (Double) -> Void = { [weak self] value in
-            Task { @MainActor in
-                guard let self, let current = self.exportProgress else { return }
-                self.exportProgress = max(current, value)
-            }
-        }
         let range = CMTimeRange(start: CMTime(seconds: trimStart, preferredTimescale: 600),
                                 end: CMTime(seconds: trimEnd, preferredTimescale: 600))
-        let renderer = makeRenderer(size: outputSize, timeOffset: trimStart, speed: edit.speed)
-        switch format {
-        case .mp4:
-            let settings = VideoExportSettings(range: range, renderer: renderer, quality: quality, codec: codec, mute: mute)
-            let url = try await VideoTranscoder.export(videoURL, settings: settings, progress: progress)
-            return CaptureItem(url: url, kind: .video)
-        case .gif:
-            let url = try await GIFExporter.export(videoURL, range: range, renderer: renderer, fps: gifFPS, quality: quality,
-                                                   progress: progress)
-            return CaptureItem(url: url, kind: .gif)
-        }
+        return try await VideoOutput.render(videoURL, source: source, edit: edit, range: range, spec: spec,
+                                            progress: VideoOutput.onMain { [weak self] value in
+            guard let self, let current = exportProgress else { return }
+            exportProgress = max(current, value)
+        })
     }
 
     // MARK: Rendering
-
-    /// The renderer for an output of `size`. Exports start at the trim start; the preview plays the whole recording.
-    /// While a zoom's region is being picked, the preview shows the whole video.
-    private func makeRenderer(size: CGSize, timeOffset: Double, speed: Double, preview: Bool = false) -> FrameRenderer {
-        edit.renderer(for: source, renderSize: size, duration: duration, timeOffset: timeOffset, speed: speed,
-                      zoomed: !(preview && pickingZoom != nil))
-    }
 
     /// Where the video shows inside a view of `size` that fits the preview, y-down: for picking a zoom region.
     func videoFrame(in size: CGSize) -> CGRect {
@@ -488,9 +480,10 @@ final class VideoEditorModel: ObservableObject {
     /// The preview draws through the same compositor as the export, so what it shows is what gets exported.
     private func updatePreview() {
         guard let playerItem = player.currentItem, videoTrackID != kCMPersistentTrackID_Invalid else { return }
-        playerItem.videoComposition = EditedVideo.videoComposition(renderer: makeRenderer(size: previewSize, timeOffset: 0, speed: 1, preview: true),
-                                                                   trackID: videoTrackID, duration: CMTime(seconds: duration, preferredTimescale: 600),
-                                                                   fps: fps)
+        // While a zoom's region is being picked, the preview shows the whole video.
+        let renderer = edit.renderer(for: source, renderSize: previewSize, duration: duration, zoomed: pickingZoom == nil)
+        playerItem.videoComposition = EditedVideo.videoComposition(renderer: renderer, trackID: videoTrackID,
+                                                                   duration: CMTime(seconds: duration, preferredTimescale: 600), fps: fps)
         // A paused player keeps showing the old frame until it seeks.
         if !isPlaying { seek(to: currentTime) }
     }

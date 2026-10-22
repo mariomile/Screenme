@@ -78,6 +78,28 @@ final class VideoExportTests: XCTestCase {
         XCTAssertEqual(ExportResolution.fitting(CGSize(width: 1921, height: 1081), maxWidth: 0), CGSize(width: 1920, height: 1080), "even")
     }
 
+    func testASpecSizesItsOutput() {
+        let canvas = CGSize(width: 1921, height: 1081)
+        XCTAssertEqual(ExportSpec.mp4(codec: .h264, quality: .high, resolution: .original, mute: false).outputSize(for: canvas),
+                       CGSize(width: 1920, height: 1080))
+        XCTAssertEqual(ExportSpec.mp4(codec: .h264, quality: .high, resolution: .p720, mute: false).outputSize(for: CGSize(width: 1920, height: 1080)),
+                       CGSize(width: 1280, height: 720))
+        XCTAssertEqual(ExportSpec.gif(fps: 15, maxWidth: 800, quality: .high).outputSize(for: canvas), CGSize(width: 800, height: 450))
+    }
+
+    /// A GIF recording is converted with the video editor's GIF settings when it stops.
+    @MainActor
+    func testTheOneOutputWritesAGIFAtItsMaxWidth() async throws {
+        let source = try await video(width: 640, height: 360, seconds: 1)
+        let output = try await VideoOutput.render(source, source: VideoSource(size: CGSize(width: 640, height: 360), events: nil),
+                                                  edit: VideoEdit(), spec: .gif(fps: 10, maxWidth: 320, quality: .low))
+        cleanup.append(output.url)
+        XCTAssertEqual(output.kind, .gif)
+        let image = try XCTUnwrap(CGImageSourceCreateWithURL(output.url as CFURL, nil))
+        XCTAssertEqual(CGImageSourceGetCount(image), 10)
+        XCTAssertEqual(CGImageSourceCreateImageAtIndex(image, 0, nil)?.width, 320)
+    }
+
     func testHEVCExport() async throws {
         let source = try await video(width: 640, height: 360, seconds: 1)
         let renderer = FrameRenderer(renderSize: CGSize(width: 640, height: 360))

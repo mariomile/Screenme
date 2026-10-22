@@ -119,6 +119,26 @@ enum EditedVideo {
         let videoTrack: AVMutableCompositionTrack
         let audioTracks: [AVMutableCompositionTrack]
         let fps: Int
+
+        /// The video track drawn by `renderer` over the whole composition.
+        func videoComposition(_ renderer: FrameRenderer) -> AVMutableVideoComposition {
+            EditedVideo.videoComposition(renderer: renderer, trackID: videoTrack.trackID, duration: composition.duration, fps: fps)
+        }
+
+        /// The drawn frames of `videoComposition`, in BGRA, for an `AVAssetReader` of `composition`.
+        func drawnFrames(_ videoComposition: AVVideoComposition) -> AVAssetReaderVideoCompositionOutput {
+            let output = AVAssetReaderVideoCompositionOutput(videoTracks: [videoTrack], videoSettings: [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+            ])
+            output.videoComposition = videoComposition
+            output.alwaysCopiesSampleData = false
+            return output
+        }
+    }
+
+    /// The frame rate a video is drawn and encoded at: its own, between 24 and 60, or 30 when it does not say.
+    static func frameRate(nominal: Float) -> Int {
+        nominal > 1 ? Int(min(max(nominal, 24), 60).rounded()) : 30
     }
 
     /// `range` of the asset at `url` from time zero, played `speed` times faster, without sound when `mute` is set.
@@ -126,8 +146,7 @@ enum EditedVideo {
         let asset = AVURLAsset(url: url)
         guard let video = try await asset.loadTracks(withMediaType: .video).first else { throw ScreenmeError.recordingFailed }
         let audio = mute ? [] : try await asset.loadTracks(withMediaType: .audio)
-        let nominal = try await video.load(.nominalFrameRate)
-        let fps = nominal > 1 ? Int(min(max(nominal, 24), 60).rounded()) : 30
+        let fps = try await frameRate(nominal: video.load(.nominalFrameRate))
 
         let composition = AVMutableComposition()
         guard let videoTrack = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid) else {

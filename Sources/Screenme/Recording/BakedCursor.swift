@@ -18,27 +18,23 @@ enum BakedCursor {
         try? FileManager.default.trashItem(at: sourceURL(for: capture), resultingItemURL: nil)
     }
 
-    /// The cursorless recording `video` with the cursor drawn in `style`, and its events with that style; `video`
-    /// becomes its hidden source. `events` must hold the cursor track of a recording filmed without the cursor.
+    /// The cursorless recording `video` (`size` pixels) with the cursor drawn in `style`, as an MP4 in `codec`, and
+    /// its events with that style; `video` becomes its hidden source. `events` hold the recording's cursor track.
     @MainActor
-    static func render(_ video: URL, size: CGSize, events: RecordingEvents, style: CursorStyle,
-                       progress: (@Sendable (Double) -> Void)? = nil) async throws -> (url: URL, events: RecordingEvents) {
-        let duration = try await AVURLAsset(url: video).load(.duration)
+    static func render(_ video: URL, size: CGSize, events: RecordingEvents, style: CursorStyle, codec: VideoCodec,
+                       progress: @escaping @Sendable (Double) -> Void = { _ in }) async throws -> (item: CaptureItem, events: RecordingEvents) {
         var edit = VideoEdit()
         edit.cursor = style
-        let renderer = edit.renderer(for: VideoSource(size: size, events: events),
-                                     renderSize: ExportResolution.original.outputSize(for: size), duration: duration.seconds)
-        let settings = VideoExportSettings(range: CMTimeRange(start: .zero, duration: duration), renderer: renderer,
-                                           quality: .high, codec: Prefs[Pref.videoCodec], mute: false)
-        let url = try await VideoTranscoder.export(video, settings: settings, progress: progress)
+        let item = try await VideoOutput.render(video, source: VideoSource(size: size, events: events, cursorless: true), edit: edit,
+                                                spec: .mp4(codec: codec, quality: .high, resolution: .original, mute: false), progress: progress)
         do {
-            try FileManager.default.moveItem(at: video, to: sourceURL(for: url))
+            try FileManager.default.moveItem(at: video, to: sourceURL(for: item.url))
         } catch {
-            try? FileManager.default.removeItem(at: url)
+            try? FileManager.default.removeItem(at: item.url)
             throw error
         }
         var baked = events
         baked.cursor?.bakedStyle = style
-        return (url, baked)
+        return (item, baked)
     }
 }

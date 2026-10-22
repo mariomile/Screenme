@@ -1,13 +1,6 @@
 import AppKit
 import CoreImage
 
-extension Pref {
-    static let videoCursorShow = PrefKey(name: "videoCursorShow", defaultValue: true)
-    static let videoCursorSize = PrefKey(name: "videoCursorSize", defaultValue: 1.5)
-    static let videoCursorClicks = PrefKey(name: "videoCursorClicks", defaultValue: true)
-    static let videoCursorHideIdle = PrefKey(name: "videoCursorHideIdle", defaultValue: false)
-}
-
 /// How the editor draws the cursor of a recording made with Smooth cursor.
 struct CursorStyle: Codable, Equatable {
     var show = true
@@ -17,20 +10,6 @@ struct CursorStyle: Codable, Equatable {
     var hideWhenIdle = false
 
     static let sizeRange = 1.0...3.0
-
-    static var saved: CursorStyle {
-        get {
-            CursorStyle(show: Prefs[Pref.videoCursorShow],
-                        size: min(max(Prefs[Pref.videoCursorSize], sizeRange.lowerBound), sizeRange.upperBound),
-                        clickHighlight: Prefs[Pref.videoCursorClicks], hideWhenIdle: Prefs[Pref.videoCursorHideIdle])
-        }
-        set {
-            Prefs[Pref.videoCursorShow] = newValue.show
-            Prefs[Pref.videoCursorSize] = newValue.size
-            Prefs[Pref.videoCursorClicks] = newValue.clickHighlight
-            Prefs[Pref.videoCursorHideIdle] = newValue.hideWhenIdle
-        }
-    }
 }
 
 /// Draws the smooth cursor onto a source frame: the arrow at the smoothed position, the click highlight of

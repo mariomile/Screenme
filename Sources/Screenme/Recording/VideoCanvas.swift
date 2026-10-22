@@ -1,11 +1,6 @@
 import AppKit
 import CoreImage
 
-extension Pref {
-    /// The video editor's last background, as JSON `BackgroundSettings`. Empty: off.
-    static let videoCanvas = PrefKey(name: "videoCanvas", defaultValue: Data())
-}
-
 /// The background around an edited video. It reuses the image editor's background: the same `BackgroundSettings`,
 /// fills, `Layout` math and drawing, so a video and a screenshot wrapped alike look alike.
 enum VideoCanvas {
@@ -13,17 +8,6 @@ enum VideoCanvas {
     static let aspects: [AspectPreset] = [.auto, .sixteenNine, .nineSixteen, .square, .fourThree]
     static let paddingRange = 0.0...20.0
     static let cornerRange = 0.0...40.0
-
-    static var saved: BackgroundSettings {
-        get {
-            var settings = (try? JSONDecoder().decode(BackgroundSettings.self, from: Prefs[Pref.videoCanvas])) ?? BackgroundSettings()
-            settings.padding = min(max(settings.padding, paddingRange.lowerBound), paddingRange.upperBound)
-            if !aspects.contains(settings.aspect) { settings.aspect = .auto }
-            settings.alignment = .center
-            return settings
-        }
-        set { Prefs[Pref.videoCanvas] = (try? JSONEncoder().encode(newValue)) ?? Data() }
-    }
 
     /// Where a video of `videoSize` pixels sits on the canvas, y-down, in video pixels. The video is centered.
     static func layout(videoSize: CGSize, settings: BackgroundSettings) -> Layout {
