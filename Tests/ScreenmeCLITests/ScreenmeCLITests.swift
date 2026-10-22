@@ -373,6 +373,22 @@ final class ReportBundleTests: XCTestCase {
         XCTAssertEqual(try ReportBundle(url).manifest, Self.manifest)
     }
 
+    /// Only a `Report …` folder with a report.json is a report: a newer folder of the user's named "Report Q3" is not.
+    func testTheLatestReportIsTheNewestFolderWithAManifest() throws {
+        try Self.writeReport(in: folder, name: "Report 2026-10-21 at 10.00.00", video: false, made: Date().addingTimeInterval(-60))
+        let mine = folder.appendingPathComponent("Report Q3", isDirectory: true)
+        try FileManager.default.createDirectory(at: mine, withIntermediateDirectories: true)
+        try Data("notes".utf8).write(to: mine.appendingPathComponent("notes.txt"))
+        try FileManager.default.setAttributes([.creationDate: Date()], ofItemAtPath: mine.path)
+
+        XCTAssertEqual(ReportLayout.latest(in: folder)?.lastPathComponent, "Report 2026-10-21 at 10.00.00")
+        try FileManager.default.removeItem(at: folder.appendingPathComponent("Report 2026-10-21 at 10.00.00"))
+        XCTAssertNil(ReportLayout.latest(in: folder))
+        XCTAssertThrowsError(try ReportBundle.open("latest", reports: folder)) {
+            XCTAssertEqual($0 as? ReportBundle.Failure, .noReports(folder.path))
+        }
+    }
+
     /// A report.json of version 1 (the environment's date as text, no transcript) asks for a new report instead of
     /// failing to decode.
     func testAReportFromAnOlderScreenmeAsksForANewOne() throws {

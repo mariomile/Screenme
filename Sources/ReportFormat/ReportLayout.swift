@@ -61,13 +61,15 @@ enum ReportLayout {
         return folderPrefix + formatter.string(from: date)
     }
 
-    /// The newest report folder in `parent`, by when it was made. Nil when there is none.
+    /// The newest report folder in `parent`, by when it was made: a `Report …` folder that holds a `report.json`, so
+    /// a folder of the user's named "Report Q3" is not one. Nil when there is none.
     static func latest(in parent: URL) -> URL? {
         let folders = (try? FileManager.default.contentsOfDirectory(at: parent, includingPropertiesForKeys: [.creationDateKey, .isDirectoryKey],
                                                                     options: .skipsHiddenFiles)) ?? []
         let reports: [(url: URL, date: Date)] = folders.compactMap { folder in
             let values = try? folder.resourceValues(forKeys: [.creationDateKey, .isDirectoryKey])
-            guard folder.lastPathComponent.hasPrefix(folderPrefix), values?.isDirectory == true else { return nil }
+            guard folder.lastPathComponent.hasPrefix(folderPrefix), values?.isDirectory == true,
+                  FileManager.default.fileExists(atPath: folder.appendingPathComponent(manifest).path) else { return nil }
             return (folder, values?.creationDate ?? .distantPast)
         }
         return reports.max { $0.date < $1.date }?.url
