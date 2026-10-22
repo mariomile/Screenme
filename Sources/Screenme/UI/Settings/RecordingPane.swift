@@ -43,7 +43,7 @@ struct RecordingPane: View {
                 PrefToggle("Show cursor", Pref.recordingShowCursor)
                 PrefToggle("Smooth cursor (render after recording)", Pref.recordingSmoothCursor,
                            detail: "Films the video without the cursor and draws a smooth one with click highlights when the recording stops.")
-                    .help("Smooth cursor (render after recording)\nVideos are filmed without the cursor and Screenme records where it went. When you stop, it draws a smooth cursor with click highlights into the video, in the style last used in the video editor. GIF recordings keep the filmed cursor.")
+                    .help("Smooth cursor (render after recording)\nVideos are filmed without the cursor and Screenme records where it went. When you stop, it draws a smooth cursor with click highlights into the video, in the style last used in the video editor. A copy without the cursor stays with the recording, so the video editor can still change its size, smoothing, click highlight and hide when idle. GIF recordings keep the filmed cursor.")
                 PrefToggle("Highlight clicks", Pref.recordingHighlightClicks)
                 Toggle("Show keystrokes", isOn: $keystrokes)
                 if keystrokes && !permissions.isGranted(.accessibility) {

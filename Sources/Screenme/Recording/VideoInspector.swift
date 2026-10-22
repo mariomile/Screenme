@@ -18,7 +18,7 @@ struct VideoInspector: View {
             switch self {
             case .background: "Background\nPuts the video on a gradient, color, wallpaper or image, with padding, rounded corners and a shadow."
             case .speed: "Speed\nPlays the whole clip faster, up to 3x."
-            case .cursor: "Cursor\nDraws a smooth cursor with click highlights. Recordings made with Smooth cursor have it drawn in when they stop."
+            case .cursor: "Cursor\nDraws a smooth cursor with click highlights. Recordings made with Smooth cursor keep a copy without the cursor, so it can be restyled here."
             case .zoom: "Zoom\nZooms in on your clicks, or on regions you pick, and back out."
             }
         }
@@ -198,7 +198,7 @@ private struct CursorControls: View {
             .disabled(!model.canDrawCursor)
 
             if !model.canDrawCursor {
-                Text("The cursor is part of this recording.")
+                Text("The cursor is part of this recording. Record with Smooth cursor to restyle it.")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .fixedSize()
