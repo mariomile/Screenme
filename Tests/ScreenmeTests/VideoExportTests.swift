@@ -72,6 +72,55 @@ final class VideoExportTests: XCTestCase {
         XCTAssertEqual(mutedLength, 2, accuracy: 0.1)
     }
 
+    /// An input waiting for room is never called again once the writer stops, so the export used to wait forever.
+    /// Here the writer holds the video back for an audio track that gets nothing, and stops while the video waits.
+    func testThePumpEndsWhenTheWriterStopsWhileAnInputWaits() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("screenme-pump-\(UUID().uuidString).mp4")
+        cleanup.append(url)
+        let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
+        let video = AVAssetWriterInput(mediaType: .video, outputSettings: H264.settings(width: 64, height: 64, fps: 30, quality: .low, realTime: false))
+        let audio = AVAssetWriterInput(mediaType: .audio, outputSettings: [
+            AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 48000, AVNumberOfChannelsKey: 1, AVEncoderBitRateKey: 64_000,
+        ])
+        for input in [video, audio] {
+            input.expectsMediaDataInRealTime = false
+            writer.add(input)
+        }
+        XCTAssertTrue(writer.startWriting())
+        writer.startSession(atSourceTime: .zero)
+
+        var pixels: CVPixelBuffer?
+        CVPixelBufferCreate(nil, 64, 64, kCVPixelFormatType_32BGRA, nil, &pixels)
+        let frame = try XCTUnwrap(pixels)
+        var description: CMVideoFormatDescription?
+        CMVideoFormatDescriptionCreateForImageBuffer(allocator: nil, imageBuffer: frame, formatDescriptionOut: &description)
+        let format = try XCTUnwrap(description)
+        let fed = FrameCount()
+        let track = MediaPump.Track(input: video, label: "test", next: {
+            var timing = CMSampleTimingInfo(duration: CMTime(value: 1, timescale: 30),
+                                            presentationTimeStamp: CMTime(value: CMTimeValue(fed.next()), timescale: 30), decodeTimeStamp: .invalid)
+            var sample: CMSampleBuffer?
+            CMSampleBufferCreateReadyWithImageBuffer(allocator: nil, imageBuffer: frame, formatDescription: format, sampleTiming: &timing,
+                                                     sampleBufferOut: &sample)
+            return sample
+        })
+
+        // Once the video has waited for room a while, the writer stops under it.
+        let stopper = Task.detached {
+            var last = -1
+            while fed.value == 0 || fed.value != last {
+                last = fed.value
+                try await Task.sleep(for: .milliseconds(300))
+            }
+            XCTAssertFalse(video.isReadyForMoreMediaData, "the video waits for the audio")
+            writer.cancelWriting()
+        }
+        await MediaPump.run([track], writer: writer)
+        try await stopper.value
+        XCTAssertEqual(writer.status, .cancelled)
+        XCTAssertGreaterThan(fed.value, 0)
+    }
+
     func testGIFMaxWidthScalesDownOnly() {
         XCTAssertEqual(ExportResolution.fitting(CGSize(width: 1920, height: 1080), maxWidth: 800), CGSize(width: 800, height: 450))
         XCTAssertEqual(ExportResolution.fitting(CGSize(width: 640, height: 360), maxWidth: 1280), CGSize(width: 640, height: 360))
@@ -133,6 +182,22 @@ final class VideoExportTests: XCTestCase {
         let last = try XCTUnwrap(CGImageSourceCreateImageAtIndex(image, 9, nil))
         XCTAssertEqual(last.width, 160)
         XCTAssertEqual(last.height, 90)
+    }
+}
+
+/// How many frames a test source has handed out, read from another thread.
+private final class FrameCount: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+
+    var value: Int { lock.withLock { count } }
+
+    /// The index of the next frame.
+    func next() -> Int {
+        lock.withLock {
+            count += 1
+            return count - 1
+        }
     }
 }
 

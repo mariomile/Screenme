@@ -316,16 +316,15 @@ private final class TranscodeJob: @unchecked Sendable {
         guard writer.startWriting() else { throw writer.error ?? ScreenmeError.recordingFailed }
         writer.startSession(atSourceTime: .zero)
 
-        let group = DispatchGroup()
-        pump(output: videoOutput, input: videoInput, label: "video", group: group, reportsProgress: true)
+        let videoOutput = videoOutput, duration = duration, progress = progress
+        var tracks = [MediaPump.Track(input: videoInput, label: "video", next: { videoOutput.copyNextSampleBuffer() },
+                                      appended: { progress?(min(max($0.presentationTimeStamp.seconds / duration, 0), 1) * 0.99) })]
         if let audioOutput, let audioInput {
-            pump(output: audioOutput, input: audioInput, label: "audio", group: group, reportsProgress: false)
+            tracks.append(MediaPump.Track(input: audioInput, label: "audio", next: { audioOutput.copyNextSampleBuffer() }))
         }
-        await withCheckedContinuation { continuation in
-            group.notify(queue: .global()) { continuation.resume() }
-        }
+        await MediaPump.run(tracks, writer: writer) { [self] in cancelFlag.isCancelled || reader.status == .failed }
 
-        if cancelFlag.isCancelled || reader.status == .failed || writer.status == .failed {
+        if cancelFlag.isCancelled || reader.status == .failed || writer.status != .writing {
             let error = cancelFlag.isCancelled ? CancellationError() : (reader.error ?? writer.error ?? ScreenmeError.recordingFailed)
             reader.cancelReading()
             writer.cancelWriting()
@@ -342,27 +341,56 @@ private final class TranscodeJob: @unchecked Sendable {
         progress?(1)
         return outputURL
     }
+}
 
-    private func pump(output: AVAssetReaderOutput, input: AVAssetWriterInput, label: String, group: DispatchGroup, reportsProgress: Bool) {
+/// Feeds a writer's inputs, each from its own source on its own queue, until every one is done: its source ran dry,
+/// an append failed, or `stopped` turned true. An input waiting for room is never called again once the writer has
+/// failed or been cancelled, so a watchdog checks the writer and `stopped` every 100 ms and ends whatever still waits.
+enum MediaPump {
+    struct Track {
+        var input: AVAssetWriterInput
+        var label: String
+        /// The next sample; nil when there are no more.
+        var next: () -> CMSampleBuffer?
+        /// Called after each sample is appended.
+        var appended: (CMSampleBuffer) -> Void = { _ in }
+    }
+
+    static func run(_ tracks: [Track], writer: AVAssetWriter, stopped: @escaping @Sendable () -> Bool = { false }) async {
+        let group = DispatchGroup()
+        let ends = tracks.map { feed($0, group: group, stopped: stopped) }
+        let watchdog = DispatchSource.makeTimerSource(queue: .global())
+        watchdog.schedule(deadline: .now() + .milliseconds(100), repeating: .milliseconds(100))
+        watchdog.setEventHandler {
+            guard writer.status != .writing || stopped() else { return }
+            ends.forEach { $0() }
+            watchdog.cancel()
+        }
+        watchdog.resume()
+        await withCheckedContinuation { continuation in
+            group.notify(queue: .global()) { continuation.resume() }
+        }
+        watchdog.cancel()
+    }
+
+    /// Starts feeding `track` and returns what ends it early, safe from any thread and more than once.
+    private static func feed(_ track: Track, group: DispatchGroup, stopped: @escaping @Sendable () -> Bool) -> () -> Void {
         group.enter()
-        let queue = DispatchQueue(label: "dev.mariomiletta.screenme.export." + label)
+        let queue = DispatchQueue(label: "dev.mariomiletta.screenme.export." + track.label)
         var finished = false
-        input.requestMediaDataWhenReady(on: queue) { [self] in
-            while input.isReadyForMoreMediaData, !finished {
-                guard !cancelFlag.isCancelled, let sample = output.copyNextSampleBuffer() else {
-                    finished = true
-                    input.markAsFinished()
-                    group.leave()
-                    return
-                }
-                if !input.append(sample) {
-                    finished = true
-                    input.markAsFinished()
-                    group.leave()
-                    return
-                }
-                if reportsProgress { progress?(min(max(sample.presentationTimeStamp.seconds / duration, 0), 1) * 0.99) }
+        // On `queue`. Ended from outside, the writer has stopped, so the input is not marked finished.
+        func finish(markingInput: Bool) {
+            guard !finished else { return }
+            finished = true
+            if markingInput { track.input.markAsFinished() }
+            group.leave()
+        }
+        track.input.requestMediaDataWhenReady(on: queue) {
+            while track.input.isReadyForMoreMediaData, !finished {
+                guard !stopped(), let sample = track.next(), track.input.append(sample) else { return finish(markingInput: true) }
+                track.appended(sample)
             }
         }
+        return { queue.async { finish(markingInput: false) } }
     }
 }
