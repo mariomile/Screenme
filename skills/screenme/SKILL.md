@@ -67,7 +67,7 @@ screenme zoom "<report>" --mark 2                # when mark 2 was drawn
 screenme zoom "<report>" --at 0:21 --span 1 --grid 4x4
 ```
 
-It prints the path of a PNG grid of frames around that moment, the time of each cell, and what was said then. Open the PNG and look at it before you act. `--span` is the seconds covered (default 2, a quarter of it before the moment) and `--grid` the columns and rows (default 3x3). The cells are numbered from #1 within the grid; those numbers are not keyframe numbers.
+It prints the path of a PNG grid of frames around that moment, each cell captioned with its time and what was said until the next one, then the time of each cell and what was said then. Open the PNG and look at it before you act. `--span` is the seconds covered (default 2, a quarter of it before the moment) and `--grid` the columns and rows (default 3x3). The cells are numbered from #1 within the grid; those numbers are not keyframe numbers.
 
 ### Other commands
 

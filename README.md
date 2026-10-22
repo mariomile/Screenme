@@ -29,7 +29,7 @@ A report folder holds:
 
 **Keyframes** are cut where something happened, not every few seconds: when a drawing is finished or a pin dropped, after a click, drag or scroll, after an app or window switch, when the screen settles after a real change (the video is sampled twice a second at 64 pixels and compared), and when you say "now", "here", "look", "watch" (or "qui", "guarda", "ora", "vedi"), where "this", "that" or "questo" count only with a screen change. Pauses never cut, and a screen change or a spoken cue adds a keyframe only when its picture differs from every keyframe already chosen. Each keyframe owns what you said from its moment until the next one. At most 24, drawings and pins first.
 
-**Auto-crop** (Settings > Recording > Auto-crop frames, on by default): screen and area recordings note the windows on screen about once a second and the pointer about 20 times a second. Each keyframe is cropped to the window where you were working at that moment (ink, pins, clicks, drags and scrolls first, then where the pointer rested), with 24 points around it and at least 480 points wide. Neighbouring crops that mostly overlap become one, and a crop that would cover most of the screen is skipped. Window recordings are not cropped.
+**Auto-crop** (Settings > Recording > Auto-crop frames, on by default): screen and area recordings note the windows on screen about once a second, and every recording follows the pointer. Each keyframe is cropped to the window where you were working at that moment (ink, pins, clicks, drags and scrolls first, then where the pointer rested), with 24 points around it and at least 480 points wide. Neighbouring crops that mostly overlap become one, and a crop that would cover most of the screen is skipped. Window recordings are not cropped.
 
 ## Share links (S3-compatible storage)
 
@@ -118,7 +118,7 @@ screenme skill                                 # the agent skill, below
 
 That block goes in the client's MCP config (Claude Desktop: `~/Library/Application Support/Claude/claude_desktop_config.json`; Cursor: `~/.cursor/mcp.json`). In Claude Code: `claude mcp add screenme -- /Applications/Screenme.app/Contents/Helpers/screenme mcp`. In Codex: `codex mcp add screenme -- /Applications/Screenme.app/Contents/Helpers/screenme mcp`.
 
-The agent then has six tools: `take_screenshot` (mode `fullscreen`, `area` with `x`, `y`, `width`, `height`, or `window` with `app`), `get_latest_capture`, `get_latest_report` (the newest Report for AI in your save folder: `summary.md` and the contact sheet), `zoom_report` (`at`, `phrase` or `mark`, with `span` and `grid`: the zoom grid as an image), `inspect_report` (`summary.md`, or `report.json` with `json`) and `list_captures`. Screenshots come back as an image (scaled to at most 1568 pixels on the long side) plus the path of the full-size file.
+The agent then has six tools: `take_screenshot` (mode `fullscreen`, `area` with `x`, `y`, `width`, `height`, or `window` with `app`), `get_latest_capture`, `get_latest_report` (the newest Report for AI in your save folder: `summary.md` and the contact sheet), `zoom_report` (`at`, `phrase` or `mark`, with `span` and `grid`: the zoom grid as an image), `inspect_report` (`summary.md` and the contact sheet, or `report.json` with `json`) and `list_captures` (one path per line). Screenshots come back as an image (scaled to at most 1568 pixels on the long side) plus the path of the full-size file.
 
 ### Agent skill
 
