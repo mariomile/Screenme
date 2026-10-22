@@ -52,7 +52,7 @@ final class CursorOverlayTests: XCTestCase {
     /// recorded position, and the click highlight tints the video around it.
     @MainActor
     func testExportDrawsTheCursorAndItsClickHighlight() async throws {
-        let video = try await TestVideo.make(width: 400, height: 200, seconds: 2)
+        let video = try await TestVideo.makeOffMain(width: 400, height: 200, seconds: 2)
         defer { try? FileManager.default.removeItem(at: video) }
         var events = RecordingEvents(width: 200, height: 100, events: [])
         var track = CursorTrack(hidden: true)

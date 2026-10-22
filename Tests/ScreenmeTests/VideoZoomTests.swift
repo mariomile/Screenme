@@ -123,7 +123,7 @@ final class VideoZoomTests: XCTestCase {
     /// A 3x zoom on the white block of the test video fills the middle of the frame with white.
     @MainActor
     func testExportZoomsInOnTheSegment() async throws {
-        let video = try await TestVideo.make(width: 320, height: 180, seconds: 3)
+        let video = try await TestVideo.makeOffMain(width: 320, height: 180, seconds: 3)
         defer { try? FileManager.default.removeItem(at: video) }
         // The block of frame 32 covers x 0...40, y 60...82.
         let zoom = ZoomSegment(start: 0, end: 3, center: CGPoint(x: 20.0 / 320, y: 71.0 / 180), zoom: 3, isAuto: false)

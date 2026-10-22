@@ -34,7 +34,7 @@ final class BakedCursorTests: XCTestCase {
 
     @MainActor
     func testRenderingDrawsTheCursorAndMarksTheEventsAsBaked() async throws {
-        let video = try await TestVideo.make(width: 400, height: 200, seconds: 2)
+        let video = try await TestVideo.makeOffMain(width: 400, height: 200, seconds: 2)
         cleanup.append(video)
         let size = CGSize(width: 400, height: 200)
 

@@ -3,10 +3,17 @@ import CoreImage
 import XCTest
 @testable import Screenme
 
-/// Generated H.264 videos for the export tests (async, so a test on the main actor does not write them on the main thread): a solid color with a white block moving across it, so every frame differs.
+/// Generated H.264 videos for the export tests: a solid color with a white block moving across it, so every frame differs.
 enum TestVideo {
+    /// `make` on a background thread, for tests on the main actor: writing a video blocks, and AVFoundation logs a
+    /// warning when that happens on the main thread.
+    static func makeOffMain(width: Int, height: Int, seconds: Double, fps: Int = 30,
+                            color: (r: UInt8, g: UInt8, b: UInt8) = (0, 160, 0)) async throws -> URL {
+        try await Task.detached { try make(width: width, height: height, seconds: seconds, fps: fps, color: color) }.value
+    }
+
     static func make(width: Int, height: Int, seconds: Double, fps: Int = 30,
-                     color: (r: UInt8, g: UInt8, b: UInt8) = (0, 160, 0), tone: Bool = false) async throws -> URL {
+                     color: (r: UInt8, g: UInt8, b: UInt8) = (0, 160, 0), tone: Bool = false) throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("screenme-test-\(UUID().uuidString).mp4")
         let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: H264.settings(width: width, height: height, fps: fps,

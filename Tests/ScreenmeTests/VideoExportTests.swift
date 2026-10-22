@@ -12,7 +12,7 @@ final class VideoExportTests: XCTestCase {
     }
 
     private func video(width: Int, height: Int, seconds: Double) async throws -> URL {
-        let url = try await TestVideo.make(width: width, height: height, seconds: seconds)
+        let url = try await TestVideo.makeOffMain(width: width, height: height, seconds: seconds)
         cleanup.append(url)
         return url
     }
@@ -52,7 +52,7 @@ final class VideoExportTests: XCTestCase {
     }
 
     func testSpeedUpShortensTheSoundTooAndMuteDropsIt() async throws {
-        let source = try await TestVideo.make(width: 320, height: 180, seconds: 4, tone: true)
+        let source = try TestVideo.make(width: 320, height: 180, seconds: 4, tone: true)
         cleanup.append(source)
         let renderer = FrameRenderer(renderSize: CGSize(width: 320, height: 180), timeOffset: 0, speed: 2)
         let output = try await VideoTranscoder.export(source, settings: VideoExportSettings(range: range(0, 4), renderer: renderer,
