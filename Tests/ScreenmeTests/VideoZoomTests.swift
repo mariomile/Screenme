@@ -50,7 +50,7 @@ final class VideoZoomTests: XCTestCase {
     func testSegmentsFromRecordingEventsUseUnitCoordinatesAndSkipTheFirstApp() {
         let events = RecordingEvents(width: 200, height: 100, events: [
             .app("Safari", window: nil, time: 0),
-            .click(at: CGPoint(x: 50, y: 25), right: false, time: 0.5),
+            .click(at: CGPoint(x: 50, y: 25), time: 0.5),
             .shortcut("⌘S", time: 2),
         ])
         let segments = AutoZoom.segments(for: events, duration: 10)

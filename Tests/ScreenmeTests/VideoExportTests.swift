@@ -150,8 +150,7 @@ enum TimingFixture {
             track.add(time: t, x: points.width * (0.5 + 0.35 * cos(t)), y: points.height * (0.5 + 0.35 * sin(t)))
         }
         for t in stride(from: 3.0, to: duration, by: 6) {
-            clicks.append(.click(at: CGPoint(x: points.width * (0.5 + 0.35 * cos(t)), y: points.height * (0.5 + 0.35 * sin(t))),
-                                 right: false, time: t))
+            clicks.append(.click(at: CGPoint(x: points.width * (0.5 + 0.35 * cos(t)), y: points.height * (0.5 + 0.35 * sin(t))), time: t))
         }
         track.down = clicks.map(\.time)
         track.up = clicks.map { $0.time + 0.2 }

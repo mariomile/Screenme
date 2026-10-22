@@ -1,26 +1,17 @@
 import AppKit
 import ApplicationServices
 
-extension RecordingEvent {
-    static func drawing(_ tool: LiveDrawTool, color: LiveDrawColor, box: CGRect, tip: CGPoint?, time: Double) -> RecordingEvent {
-        RecordingEvent(time: time, kind: .drawing, x: tip.map { $0.x.rounded() }, y: tip.map { $0.y.rounded() },
-                       tool: tool.rawValue, color: color.rawValue,
-                       box: Box(x: box.minX.rounded(), y: box.minY.rounded(), width: box.width.rounded(), height: box.height.rounded()))
-    }
-}
-
 /// Everything recorded during one recording: the size of the recorded area and the events in time order.
 /// Kept in memory by recording file, and next to it as a hidden JSON file so a report made later still finds it.
+/// Older files also hold `pointer`, a coarser pointer path the cursor track replaced; it is not read.
 struct RecordingEvents: Codable, Equatable {
     var width: Double
     var height: Double
     var events: [RecordingEvent]
     /// Display and area recordings: the windows over the area, stored when they changed, about once a second.
     var windows: [WindowSnapshot]?
-    /// Where the pointer was, `[time, x, y]` in points from the top-left corner of the area, about 20 times a second
-    /// while it moves inside the area.
-    var pointer: [[Double]]?
-    /// The pointer's path and button presses, for the video editor's zoom and Smooth cursor. Nil in older recordings.
+    /// The pointer's path and button presses, for the video editor's zoom and Smooth cursor, and for auto-crop.
+    /// Nil in older recordings.
     var cursor: CursorTrack? = nil
 
     func json() throws -> Data {
@@ -64,42 +55,45 @@ struct RecordingEvents: Codable, Equatable {
 }
 
 /// Records the events of a running recording: clicks (with the element under the pointer when Accessibility is
-/// allowed), shortcuts, app and window switches, and drawings. `time` gives the video time of now, nil while paused.
+/// allowed), drags, scrolls, shortcuts, app and window switches, drawings and pins, with the pointer's path through
+/// its `CursorRecorder`. `time` gives the video time of now, nil while paused.
 @MainActor
 final class RecordingEventRecorder {
     private let area: CGRect
     private let recordsWindows: Bool
-    private let time: () -> Double?
+    private let cursorless: Bool
+    private var time: @Sendable () -> Double?
+    private var cursor: CursorRecorder
     private(set) var events: [RecordingEvent] = []
     private var windows: [WindowSnapshot] = []
-    private var pointer: [[Double]] = []
     private var monitors: [Any] = []
     private var poll: Timer?
-    private var cursorPoll: Timer?
     private var lastApp: (app: String, window: String?)?
-    /// Bumped by `reset`, so an element name looked up for a thrown-away take is not added to the new one.
+    /// Bumped by `restart`, so an element name looked up for a thrown-away take is not added to the new one.
     private var take = 0
 
     /// `area` is the recorded area in global Cocoa coordinates. `recordsWindows` (display and area recordings) also
-    /// records the windows over it and the pointer, so the report can crop each keyframe to where things happened.
-    init(area: CGRect, recordsWindows: Bool, time: @escaping () -> Double?) {
+    /// records the windows over it, so the report can crop each keyframe to where things happened. `cursorless`: the
+    /// recording is filmed without the cursor (Smooth cursor).
+    init(area: CGRect, recordsWindows: Bool, cursorless: Bool, time: @escaping @Sendable () -> Double?) {
         self.area = area
         self.recordsWindows = recordsWindows
+        self.cursorless = cursorless
         self.time = time
+        cursor = CursorRecorder(area: area, hidden: cursorless, time: time)
     }
 
+    /// Everything recorded so far, events in time order, with the pointer's path.
     var recorded: RecordingEvents {
         RecordingEvents(width: area.width, height: area.height, events: events.sorted { $0.time < $1.time },
-                        windows: recordsWindows ? windows : nil, pointer: recordsWindows ? pointer : nil)
+                        windows: recordsWindows ? windows : nil, cursor: cursor.track)
     }
 
     func start() {
-        if let monitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown], handler: { [weak self] event in
-            let right = event.type == .rightMouseDown
-            MainActor.assumeIsolated { self?.click(right: right) }
-        }) { monitors.append(monitor) }
-        if let monitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseUp, handler: { [weak self] _ in
-            MainActor.assumeIsolated { self?.mouseUp() }
+        cursor.start()
+        if let monitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .leftMouseUp], handler: { [weak self] event in
+            let type = event.type
+            MainActor.assumeIsolated { self?.mouse(type) }
         }) { monitors.append(monitor) }
         if let monitor = NSEvent.addGlobalMonitorForEvents(matching: .scrollWheel, handler: { [weak self] event in
             let delta = CGVector(dx: event.scrollingDeltaX, dy: event.scrollingDeltaY)
@@ -118,27 +112,24 @@ final class RecordingEventRecorder {
                 self?.checkWindows()
             }
         }
-        if recordsWindows {
-            cursorPoll = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
-                MainActor.assumeIsolated { self?.checkCursor() }
-            }
-        }
     }
 
     func stop() {
+        cursor.stop()
         monitors.forEach { NSEvent.removeMonitor($0) }
         monitors.removeAll()
         poll?.invalidate()
         poll = nil
-        cursorPoll?.invalidate()
-        cursorPoll = nil
     }
 
-    /// A restart: the events so far belong to the take that was thrown away.
-    func reset() {
+    /// A restart: what was recorded so far belongs to the take that was thrown away. The new take runs on `time`.
+    func restart(time: @escaping @Sendable () -> Double?) {
+        self.time = time
+        cursor.stop()
+        cursor = CursorRecorder(area: area, hidden: cursorless, time: time)
+        cursor.start()
         events.removeAll()
         windows.removeAll()
-        pointer.removeAll()
         pressed = nil
         lastApp = nil
         take += 1
@@ -169,12 +160,27 @@ final class RecordingEventRecorder {
         CGPoint(x: location.x - area.minX, y: area.maxY - location.y)
     }
 
-    private func click(right: Bool) {
+    private func mouse(_ type: NSEvent.EventType) {
+        switch type {
+        case .leftMouseDown:
+            cursor.press(down: true)
+            click(.left)
+        case .rightMouseDown:
+            click(.right)
+        case .leftMouseUp:
+            cursor.press(down: false)
+            mouseUp()
+        default:
+            break
+        }
+    }
+
+    private func click(_ button: MouseButton) {
         let location = NSEvent.mouseLocation
         guard area.contains(location), let now = time() else { return }
         let point = local(location)
-        events.append(.click(at: point, right: right, time: now))
-        pressed = right ? nil : (events.count - 1, point)
+        events.append(.click(at: point, button: button, time: now))
+        pressed = button == .left ? (events.count - 1, point) : nil
         guard Permission.accessibility.isGranted else { return }
         let index = events.count - 1, take = self.take
         // Accessibility asks the clicked app, which is busy with the click: never on the main thread.
@@ -182,8 +188,9 @@ final class RecordingEventRecorder {
         Task.detached {
             guard let name = Self.element(at: global) else { return }
             await MainActor.run {
-                guard self.take == take, index < self.events.count else { return }
-                self.events[index].element = name
+                guard self.take == take, index < self.events.count,
+                      case .click(let point, let button, nil) = self.events[index].action else { return }
+                self.events[index].action = .click(point, button, element: name)
             }
         }
     }
@@ -193,11 +200,9 @@ final class RecordingEventRecorder {
         guard let pressed, pressed.index < events.count else { return }
         self.pressed = nil
         let end = local(NSEvent.mouseLocation)
-        guard hypot(end.x - pressed.point.x, end.y - pressed.point.y) > 12, let now = time() else { return }
-        events[pressed.index].kind = .drag
-        events[pressed.index].toX = end.x.rounded()
-        events[pressed.index].toY = end.y.rounded()
-        events[pressed.index].until = now
+        guard hypot(end.x - pressed.point.x, end.y - pressed.point.y) > 12, let now = time(),
+              case .click(let start, _, let element) = events[pressed.index].action else { return }
+        events[pressed.index].action = .drag(from: start, to: CGPoint(x: end.x.rounded(), y: end.y.rounded()), until: now, element: element)
     }
 
     // MARK: Scrolls
@@ -206,12 +211,12 @@ final class RecordingEventRecorder {
     private func scroll(_ delta: CGVector) {
         let location = NSEvent.mouseLocation
         guard delta != .zero, area.contains(location), let now = time() else { return }
-        if let index = events.indices.last, events[index].kind == .scroll, now - (events[index].until ?? events[index].time) < 0.6 {
-            events[index].until = now
+        if let index = events.indices.last, case .scroll(let point, let direction, let until) = events[index].action, now - until < 0.6 {
+            events[index].action = .scroll(at: point, direction, until: now)
             return
         }
-        let direction = abs(delta.dy) >= abs(delta.dx) ? (delta.dy < 0 ? "down" : "up") : (delta.dx < 0 ? "right" : "left")
-        events.append(.scroll(at: local(location), direction: direction, time: now))
+        let direction: ScrollDirection = abs(delta.dy) >= abs(delta.dx) ? (delta.dy < 0 ? .down : .up) : (delta.dx < 0 ? .right : .left)
+        events.append(.scroll(at: local(location), direction, time: now))
     }
 
     /// `button "Save"`: the role and the title or description of the element at a point in global top-left
@@ -254,7 +259,7 @@ final class RecordingEventRecorder {
         events.append(.app(name, window: window, time: now))
     }
 
-    // MARK: Windows and pointer
+    // MARK: Windows
 
     /// Stores the windows over the area when they changed since the last look.
     private func checkWindows() {
@@ -279,15 +284,6 @@ final class RecordingEventRecorder {
                                          x: (bounds.minX - top.minX).rounded(), y: (bounds.minY - top.minY).rounded(),
                                          width: bounds.width.rounded(), height: bounds.height.rounded())
         }
-    }
-
-    /// Adds the pointer when it moved inside the area.
-    private func checkCursor() {
-        let location = NSEvent.mouseLocation
-        guard area.contains(location), let now = time() else { return }
-        let point = local(location)
-        if let last = pointer.last, abs(last[1] - point.x) < 1, abs(last[2] - point.y) < 1 { return }
-        pointer.append([(now * 100).rounded() / 100, point.x.rounded(), point.y.rounded()])
     }
 
     private static func frontWindowTitle(of pid: pid_t) -> String? {

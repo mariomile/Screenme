@@ -15,19 +15,20 @@ final class AutoCropTests: XCTestCase {
         times.map { Keyframe(time: $0, moment: $0, reason: .click) }
     }
 
+    /// `cursor` is the pointer's path, `[time, x, y]`.
     private func events(_ list: [RecordingEvent], windows: [WindowSnapshot.Window]? = nil, cursor: [[Double]] = []) -> RecordingEvents {
-        RecordingEvents(width: 1440, height: 900, events: list,
-                        windows: [WindowSnapshot(time: 0, windows: windows ?? desk)], pointer: cursor)
+        RecordingEvents(width: 1440, height: 900, events: list, windows: [WindowSnapshot(time: 0, windows: windows ?? desk)],
+                        cursor: CursorTrack(hidden: false, t: cursor.map { $0[0] }, x: cursor.map { $0[1] }, y: cursor.map { $0[2] }))
     }
 
     func testCropsToTheWindowThatWasClickedWithPadding() {
-        let crops = AutoCrop.crops(for: keyframes([1]), events: events([.click(at: CGPoint(x: 400, y: 300), right: false, time: 1)]))
+        let crops = AutoCrop.crops(for: keyframes([1]), events: events([.click(at: CGPoint(x: 400, y: 300), time: 1)]))
         XCTAssertEqual(crops, [AutoCrop.Crop(rect: CGRect(x: 0, y: 0, width: 924, height: 724), apps: ["Safari"])])
     }
 
     func testTheFrontmostWindowUnderThePointWins() {
         // 850, 300 is in both windows: Safari is in front.
-        let crops = AutoCrop.crops(for: keyframes([1]), events: events([.click(at: CGPoint(x: 850, y: 300), right: false, time: 1)]))
+        let crops = AutoCrop.crops(for: keyframes([1]), events: events([.click(at: CGPoint(x: 850, y: 300), time: 1)]))
         XCTAssertEqual(crops.first??.apps, ["Safari"])
     }
 
@@ -40,18 +41,23 @@ final class AutoCropTests: XCTestCase {
         XCTAssertEqual(AutoCrop.activity(from: 0, to: 1, in: events), [AutoCrop.Activity(point: CGPoint(x: 1000, y: 400), weight: 0.5)])
     }
 
+    func testThePointerOutsideTheAreaDoesNotCount() {
+        let events = events([], cursor: [[0.5, 1000, 400], [1, 1500, 400]])
+        XCTAssertEqual(AutoCrop.activity(from: 0, to: 1, in: events), [AutoCrop.Activity(point: CGPoint(x: 1000, y: 400), weight: 0.5)])
+    }
+
     func testClicksOutweighAWanderingPointer() {
-        let events = events([.click(at: CGPoint(x: 100, y: 100), right: false, time: 1)], cursor: [[0, 1000, 400], [1.5, 1001, 400]])
+        let events = events([.click(at: CGPoint(x: 100, y: 100), time: 1)], cursor: [[0, 1000, 400], [1.5, 1001, 400]])
         XCTAssertEqual(AutoCrop.crops(for: keyframes([1]), events: events).first??.apps, ["Safari"])
     }
 
     func testAWindowFillingTheScreenStaysWhole() {
-        let events = events([.click(at: CGPoint(x: 400, y: 300), right: false, time: 1)], windows: [window("Xcode", 0, 0, 1440, 900)])
+        let events = events([.click(at: CGPoint(x: 400, y: 300), time: 1)], windows: [window("Xcode", 0, 0, 1440, 900)])
         XCTAssertEqual(AutoCrop.crops(for: keyframes([1]), events: events), [nil])
     }
 
     func testASmallWindowIsWidenedInsideTheScreen() {
-        let events = events([.click(at: CGPoint(x: 150, y: 150), right: false, time: 1)], windows: [window("Calculator", 100, 100, 200, 150)])
+        let events = events([.click(at: CGPoint(x: 150, y: 150), time: 1)], windows: [window("Calculator", 100, 100, 200, 150)])
         XCTAssertEqual(AutoCrop.crops(for: keyframes([1]), events: events),
                        [AutoCrop.Crop(rect: CGRect(x: 0, y: 76, width: 480, height: 198), apps: ["Calculator"])])
     }
@@ -67,7 +73,7 @@ final class AutoCropTests: XCTestCase {
 
     func testInkOutsideTheWindowIsKeptInTheCrop() {
         let events = events([
-            .click(at: CGPoint(x: 150, y: 150), right: false, time: 1),
+            .click(at: CGPoint(x: 150, y: 150), time: 1),
             .drawing(.pen, color: .red, box: CGRect(x: 1300, y: 850, width: 40, height: 30), tip: nil, time: 1.2),
         ], windows: [window("Calculator", 100, 100, 200, 150)])
         let crop = AutoCrop.crops(for: keyframes([1]), events: events).first ?? nil
@@ -85,7 +91,7 @@ final class AutoCropTests: XCTestCase {
     }
 
     func testWithoutRecordedWindowsNothingIsCropped() {
-        let events = RecordingEvents(width: 1440, height: 900, events: [.click(at: CGPoint(x: 400, y: 300), right: false, time: 1)])
+        let events = RecordingEvents(width: 1440, height: 900, events: [.click(at: CGPoint(x: 400, y: 300), time: 1)])
         XCTAssertEqual(AutoCrop.crops(for: keyframes([1, 2]), events: events), [nil, nil])
     }
 

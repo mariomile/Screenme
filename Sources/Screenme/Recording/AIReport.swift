@@ -105,24 +105,24 @@ struct AIReport {
         var lastApp: String?
         var marks = 0
         return events.events.map { event in
-            switch event.kind {
-            case .click:
-                return clickText(event)
-            case .drag:
-                let from = "\(Int(event.x ?? 0)), \(Int(event.y ?? 0))", to = "\(Int(event.toX ?? 0)), \(Int(event.toY ?? 0))"
-                return "Dragged " + (event.element.map { "\($0) " } ?? "") + "from \(from) to \(to)"
-            case .scroll:
-                return "Scrolled \(event.direction ?? "down") at \(Int(event.x ?? 0)), \(Int(event.y ?? 0))"
-            case .shortcut:
-                return "Pressed \(event.keys ?? "a shortcut")"
-            case .app:
-                defer { lastApp = event.app }
-                return appText(event, previous: lastApp)
-            case .drawing:
+            switch event.action {
+            case .click(let point, let button, let element):
+                let verb = button == .right ? "Right-clicked" : "Clicked"
+                return verb + (element.map { " \($0)" } ?? "") + " at \(coordinates(point))"
+            case .drag(let from, let to, _, let element):
+                return "Dragged " + (element.map { "\($0) " } ?? "") + "from \(coordinates(from)) to \(coordinates(to))"
+            case .scroll(let point, let direction, _):
+                return "Scrolled \(direction.rawValue) at \(coordinates(point))"
+            case .shortcut(let keys):
+                return "Pressed \(keys)"
+            case .app(let app, let window):
+                defer { lastApp = app }
+                return appText(app, window: window, previous: lastApp)
+            case .drawing(let tool, let color, let box, let tip):
                 marks += 1
-                return drawingText(event, area: area) + " (mark \(marks))"
-            case .pin:
-                return "Dropped pin \(event.number ?? 0) \(placeName(of: CGPoint(x: event.x ?? 0, y: event.y ?? 0), in: area)) (\(Int(event.x ?? 0)), \(Int(event.y ?? 0)))"
+                return drawingText(tool, color, box: box, tip: tip, area: area) + " (mark \(marks))"
+            case .pin(let number, let point):
+                return "Dropped pin \(number) \(placeName(of: point, in: area)) (\(coordinates(point)))"
             }
         }
     }
@@ -132,34 +132,27 @@ struct AIReport {
         (events?.events ?? []).indices.filter { events?.events[$0].kind == .drawing }.enumerated().map { ($0.offset + 1, $0.element) }
     }
 
-    private static func clickText(_ event: RecordingEvent) -> String {
-        let verb = event.button == "right" ? "Right-clicked" : "Clicked"
-        let point = "\(Int(event.x ?? 0)), \(Int(event.y ?? 0))"
-        guard let element = event.element else { return "\(verb) at \(point)" }
-        return "\(verb) \(element) at \(point)"
+    /// "412, 300".
+    private static func coordinates(_ point: CGPoint) -> String {
+        "\(Int(point.x)), \(Int(point.y))"
     }
 
-    private static func appText(_ event: RecordingEvent, previous: String?) -> String {
-        let app = event.app ?? "an app"
-        let window = event.window.map { "window \"\($0)\"" }
+    private static func appText(_ app: String, window: String?, previous: String?) -> String {
+        let window = window.map { "window \"\($0)\"" }
         guard let previous else { return "In \(app)" + (window.map { ", \($0)" } ?? "") }
         if previous == app, let window { return "Switched to \(window) in \(app)" }
         return "Switched to \(app)" + (window.map { ", \($0)" } ?? "")
     }
 
-    private static func drawingText(_ event: RecordingEvent, area: CGSize) -> String {
-        let color = event.color ?? ""
-        let box = event.box ?? RecordingEvent.Box(x: 0, y: 0, width: 0, height: 0)
-        let rect = CGRect(x: box.x, y: box.y, width: box.width, height: box.height)
-        let place = placeName(of: CGPoint(x: rect.midX, y: rect.midY), in: area)
+    private static func drawingText(_ tool: LiveDrawTool, _ color: LiveDrawColor, box: RecordingEvent.Box, tip: CGPoint?,
+                                     area: CGSize) -> String {
+        let place = placeName(of: CGPoint(x: box.rect.midX, y: box.rect.midY), in: area)
         let size = "\(Int(box.x)), \(Int(box.y)), \(Int(box.width))×\(Int(box.height))"
-        switch LiveDrawTool(rawValue: event.tool ?? "") {
-        case .arrow:
-            let tip = "\(Int(event.x ?? 0)), \(Int(event.y ?? 0))"
-            return "Drew a \(color) arrow \(place), pointing at \(tip)"
-        case .rectangle: return "Drew a \(color) rectangle \(place) (\(size))"
-        case .highlighter: return "Highlighted in \(color) \(place) (\(size))"
-        case .pen, .pin, nil: return "Drew in \(color) \(place) (\(size))"
+        switch tool {
+        case .arrow: return "Drew a \(color.rawValue) arrow \(place), pointing at \(coordinates(tip ?? CGPoint(x: box.rect.maxX, y: box.rect.midY)))"
+        case .rectangle: return "Drew a \(color.rawValue) rectangle \(place) (\(size))"
+        case .highlighter: return "Highlighted in \(color.rawValue) \(place) (\(size))"
+        case .pen, .pin: return "Drew in \(color.rawValue) \(place) (\(size))"
         }
     }
 
@@ -190,7 +183,10 @@ struct AIReport {
     func caption(_ index: Int) -> String {
         let keyframe = keyframes[index]
         let recorded = events?.events ?? []
-        let pins = keyframe.events.compactMap { recorded[$0].kind == .pin ? recorded[$0].number.map { "pin \($0)" } : nil }
+        let pins = keyframe.events.compactMap { index -> String? in
+            guard case .pin(let number, _) = recorded[index].action else { return nil }
+            return "pin \(number)"
+        }
         let prefix = pins.isEmpty ? "" : pins.joined(separator: ", ") + " \u{00B7} "
         if !keyframe.text.isEmpty { return prefix + "\u{201C}\(keyframe.text)\u{201D}" }
         if !pins.isEmpty { return pins.joined(separator: ", ") }
@@ -286,10 +282,11 @@ extension AIReport {
                 text: keyframe.text,
                 events: keyframe.events.map { ReportManifest.KeyframeEvent(index: $0, time: recorded[$0].time, kind: recorded[$0].kind, text: texts[$0]) })
         }
-        let marks = marks.map { mark in
+        let marks = marks.compactMap { mark -> ReportManifest.Mark? in
             let event = recorded[mark.event]
-            return ReportManifest.Mark(number: mark.number, time: event.time, kind: event.kind, tool: event.tool, color: event.color,
-                                       box: event.box, x: event.x, y: event.y, keyframe: owner(mark.event))
+            guard case .drawing(let tool, let color, let box, let tip) = event.action else { return nil }
+            return ReportManifest.Mark(number: mark.number, time: event.time, kind: event.kind, tool: tool, color: color,
+                                       box: box, x: tip.map { Double($0.x) }, y: tip.map { Double($0.y) }, keyframe: owner(mark.event))
         }
         func segments(_ list: [TranscriptSegment]) -> [ReportManifest.Segment] {
             list.map { ReportManifest.Segment(start: $0.start, end: $0.end, text: $0.text) }

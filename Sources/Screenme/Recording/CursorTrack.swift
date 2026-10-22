@@ -43,12 +43,12 @@ struct CursorTrack: Codable, Equatable {
     }
 }
 
-/// Samples the pointer 60 times a second on a background queue while a recording runs, with left button presses
-/// from a global monitor. `time` is the recorder's pause-aware clock: nil while paused, so paused time adds nothing.
+/// Samples the pointer 60 times a second on a background queue while a recording runs, with the left button
+/// presses `RecordingEventRecorder` hands it. `time` is the recorder's pause-aware clock: nil while paused, so
+/// paused time adds nothing.
 @MainActor
 final class CursorRecorder {
     private let sampler: CursorSampler
-    private var monitor: Any?
 
     /// `area` is the recorded area in global Cocoa coordinates.
     init(area: CGRect, hidden: Bool, time: @escaping @Sendable () -> Double?) {
@@ -59,21 +59,12 @@ final class CursorRecorder {
 
     var track: CursorTrack { sampler.track }
 
-    func start() {
-        sampler.start()
-        monitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp]) { [sampler] event in
-            sampler.press(down: event.type == .leftMouseDown)
-        }
-    }
+    func start() { sampler.start() }
 
-    func stop() {
-        sampler.stop()
-        if let monitor { NSEvent.removeMonitor(monitor) }
-        monitor = nil
-    }
+    func stop() { sampler.stop() }
 
-    /// A restart: the samples so far belong to the take that was thrown away.
-    func reset() { sampler.reset() }
+    /// The left button went down or up.
+    func press(down: Bool) { sampler.press(down: down) }
 }
 
 /// The queue-confined half of `CursorRecorder`.
@@ -108,10 +99,6 @@ private final class CursorSampler: @unchecked Sendable {
             timer = nil
             sample()
         }
-    }
-
-    func reset() {
-        queue.async { self.current = CursorTrack(hidden: self.hidden) }
     }
 
     func press(down: Bool) {

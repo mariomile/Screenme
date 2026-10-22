@@ -291,8 +291,8 @@ final class ReportBundleTests: XCTestCase {
         func segment(_ start: Double, _ end: Double, _ text: String) -> ReportManifest.Segment {
             ReportManifest.Segment(start: start, end: end, text: text)
         }
-        let arrow = RecordingEvent(time: 2, kind: .drawing, x: 90, y: 40, tool: "arrow", color: "red",
-                                   box: RecordingEvent.Box(x: 10, y: 20, width: 80, height: 30))
+        let box = RecordingEvent.Box(x: 10, y: 20, width: 80, height: 30)
+        let arrow = RecordingEvent(time: 2, action: .drawing(.arrow, .red, box: box, tip: CGPoint(x: 90, y: 40)))
         return ReportManifest(
             title: "Report: Look at the total.",
             environment: ReportManifest.Environment(app: "Safari", window: "Checkout", page: nil, system: "26.0.0", screen: nil,
@@ -305,7 +305,7 @@ final class ReportBundleTests: XCTestCase {
             transcript: ReportManifest.Transcript(segments: [segment(1, 2, "Look at the total.")],
                                                   words: [segment(1, 1.2, "Look"), segment(1.2, 1.4, "at"), segment(1.4, 1.6, "the"),
                                                           segment(1.6, 2, "total.")], noNarration: nil),
-            marks: [ReportManifest.Mark(number: 1, time: 2, kind: .drawing, tool: "arrow", color: "red", box: arrow.box, x: 90, y: 40, keyframe: 1)],
+            marks: [ReportManifest.Mark(number: 1, time: 2, kind: .drawing, tool: .arrow, color: .red, box: box, x: 90, y: 40, keyframe: 1)],
             events: [arrow], windows: nil)
     }()
 

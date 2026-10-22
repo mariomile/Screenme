@@ -126,17 +126,17 @@ enum Keyframes {
         ]
         let recorded = events?.events ?? []
         for event in recorded {
-            switch event.kind {
+            switch event.action {
             case .drawing:
                 candidates.append((Keyframe(time: clamp(event.time + 0.2), moment: event.time, reason: .drawing), 0, false))
             case .pin:
                 candidates.append((Keyframe(time: clamp(event.time + 0.2), moment: event.time, reason: .pin), 0, false))
             case .click:
                 candidates.append((Keyframe(time: clamp(event.time + 0.4), moment: event.time, reason: .click), 1, false))
-            case .drag:
-                candidates.append((Keyframe(time: clamp((event.until ?? event.time) + 0.3), moment: event.time, reason: .drag), 1, false))
-            case .scroll:
-                candidates.append((Keyframe(time: clamp((event.until ?? event.time) + 0.3), moment: event.time, reason: .scroll), 1, false))
+            case .drag(_, _, let until, _):
+                candidates.append((Keyframe(time: clamp(until + 0.3), moment: event.time, reason: .drag), 1, false))
+            case .scroll(_, _, let until):
+                candidates.append((Keyframe(time: clamp(until + 0.3), moment: event.time, reason: .scroll), 1, false))
             case .app:
                 candidates.append((Keyframe(time: clamp(event.time + 0.3), moment: event.time, reason: .app), 2, false))
             case .shortcut:

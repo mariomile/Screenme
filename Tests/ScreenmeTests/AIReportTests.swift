@@ -45,7 +45,7 @@ final class AIReportTests: XCTestCase {
     /// An app, a click on a named button, a shortcut, an arrow and a window switch, in a 1000 × 600 point area.
     private let sampleEvents = RecordingEvents(width: 1000, height: 600, events: [
         .app("Safari", window: "Checkout", time: 0),
-        RecordingEvent(time: 2, kind: .click, x: 412, y: 300, element: "button \"Pay\""),
+        .click(at: CGPoint(x: 412, y: 300), element: "button \"Pay\"", time: 2),
         .shortcut("⌘R", time: 3),
         .drawing(.arrow, color: .red, box: CGRect(x: 600, y: 40, width: 200, height: 100), tip: CGPoint(x: 790, y: 50), time: 4),
         .app("Safari", window: "Receipt", time: 8),
@@ -103,8 +103,8 @@ final class AIReportTests: XCTestCase {
 
     func testDragsAndScrollsCutWhenTheyEnd() {
         let events = RecordingEvents(width: 100, height: 100, events: [
-            RecordingEvent(time: 2, kind: .drag, x: 10, y: 10, toX: 80, toY: 10, until: 3),
-            RecordingEvent(time: 5, kind: .scroll, x: 50, y: 50, until: 6.5, direction: "down"),
+            RecordingEvent(time: 2, action: .drag(from: CGPoint(x: 10, y: 10), to: CGPoint(x: 80, y: 10), until: 3, element: nil)),
+            RecordingEvent(time: 5, action: .scroll(at: CGPoint(x: 50, y: 50), .down, until: 6.5)),
         ])
         let keyframes = Keyframes.select(words: [], events: events, samples: [], duration: 10)
         XCTAssertEqual(keyframes.map(\.reason), [.start, .drag, .scroll])
@@ -152,7 +152,7 @@ final class AIReportTests: XCTestCase {
     }
 
     func testEachKeyframeOwnsTheSpeechFromTheClauseInProgressUntilTheNext() {
-        let events = RecordingEvents(width: 100, height: 100, events: [.click(at: CGPoint(x: 5, y: 5), right: false, time: 2)])
+        let events = RecordingEvents(width: 100, height: 100, events: [.click(at: CGPoint(x: 5, y: 5), time: 2)])
         let said = words([("Open", 0.5), ("the", 0.8), ("menu.", 1.0), ("Then", 1.8), ("click", 2.1), ("save.", 2.4),
                           ("It", 4.0), ("fails.", 4.3)])
         let keyframes = Keyframes.select(words: said, events: events, samples: [], duration: 6)
@@ -164,7 +164,7 @@ final class AIReportTests: XCTestCase {
 
     func testPinsGetAKeyframeAndShowOnTheSheetAndInTheSummary() {
         let events = RecordingEvents(width: 900, height: 600, events: [
-            .click(at: CGPoint(x: 10, y: 10), right: false, time: 2),
+            .click(at: CGPoint(x: 10, y: 10), time: 2),
             .pin(1, at: CGPoint(x: 100, y: 80), time: 2.3),
             .pin(2, at: CGPoint(x: 850, y: 550), time: 6),
         ])
@@ -180,7 +180,7 @@ final class AIReportTests: XCTestCase {
     }
 
     func testKeyframesAreCappedByPriorityAndInsideTheVideo() {
-        var list = (0..<30).map { RecordingEvent.click(at: .zero, right: false, time: Double($0)) }
+        var list = (0..<30).map { RecordingEvent.click(at: .zero, time: Double($0)) }
         list.append(.drawing(.pen, color: .red, box: CGRect(x: 0, y: 0, width: 20, height: 20), tip: nil, time: 29.95))
         let keyframes = Keyframes.select(words: [], events: RecordingEvents(width: 100, height: 100, events: list), samples: [], duration: 30)
         XCTAssertEqual(keyframes.count, Keyframes.maxFrames)
@@ -203,7 +203,7 @@ final class AIReportTests: XCTestCase {
     func testEventsReadWell() {
         let events = RecordingEvents(width: 900, height: 600, events: [
             .app("Notes", window: nil, time: 0),
-            .click(at: CGPoint(x: 10.4, y: 20.6), right: true, time: 1),
+            .click(at: CGPoint(x: 10.4, y: 20.6), button: .right, time: 1),
             .app("Safari", window: "Docs", time: 2),
             .app("Safari", window: "Docs 2", time: 3),
             .drawing(.rectangle, color: .blue, box: CGRect(x: 10, y: 400, width: 100, height: 50), tip: nil, time: 4),
@@ -281,7 +281,7 @@ final class AIReportTests: XCTestCase {
         XCTAssertNil(manifest.keyframes[0].crop)
         XCTAssertEqual(manifest.keyframes[1].events.map(\.text), ["Clicked button \"Pay\" at 412, 300", "Pressed ⌘R"])
         XCTAssertEqual(manifest.keyframes[2].text, "It should be 42.")
-        XCTAssertEqual(manifest.marks, [ReportManifest.Mark(number: 1, time: 4, kind: .drawing, tool: "arrow", color: "red",
+        XCTAssertEqual(manifest.marks, [ReportManifest.Mark(number: 1, time: 4, kind: .drawing, tool: .arrow, color: .red,
                                                             box: RecordingEvent.Box(x: 600, y: 40, width: 200, height: 100),
                                                             x: 790, y: 50, keyframe: 3)])
         XCTAssertEqual(manifest.transcript.words.count, 8)
@@ -436,7 +436,7 @@ final class AIReportTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
         let video = directory.appendingPathComponent("input.mp4")
         try await Self.writeSilentVideo(to: video, seconds: 3)
-        let events = RecordingEvents(width: 320, height: 240, events: [.click(at: CGPoint(x: 50, y: 50), right: false, time: 1)],
+        let events = RecordingEvents(width: 320, height: 240, events: [.click(at: CGPoint(x: 50, y: 50), time: 1)],
                                      windows: [WindowSnapshot(time: 0, windows: [
                                          WindowSnapshot.Window(app: "Notes", title: "Ideas", x: 10, y: 10, width: 100, height: 80),
                                      ])])

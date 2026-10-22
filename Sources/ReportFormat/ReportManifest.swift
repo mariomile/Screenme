@@ -72,9 +72,9 @@ struct ReportManifest: Codable, Equatable {
         var number: Int
         var time: Double
         var kind: RecordingEvent.Kind
-        var tool: String?
-        var color: String?
-        var box: RecordingEvent.Box?
+        var tool: LiveDrawTool
+        var color: LiveDrawColor
+        var box: RecordingEvent.Box
         /// An arrow's tip.
         var x: Double?
         var y: Double?

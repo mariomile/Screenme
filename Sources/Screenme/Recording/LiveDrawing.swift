@@ -7,12 +7,9 @@ extension Pref {
     static let liveDrawKeep = PrefKey(name: "liveDrawKeep", defaultValue: false)
 }
 
-/// The tools for drawing on the screen while recording. Each is an editor annotation kind, drawn by
-/// `EditorRenderer`, so live drawings look like annotations. A pin is the editor's numbered counter.
-enum LiveDrawTool: String, CaseIterable, Identifiable {
-    case pen, arrow, rectangle, highlighter, pin
-
-    var id: String { rawValue }
+/// Each live drawing tool is an editor annotation kind, drawn by `EditorRenderer`, so live drawings look like
+/// annotations. A pin is the editor's numbered counter.
+extension LiveDrawTool {
     var kind: ToolKind { self == .pin ? .counter : ToolKind(rawValue: rawValue)! }
     var title: String { self == .pin ? "Pin" : kind.traits.title }
     var symbol: String { self == .pin ? "mappin" : kind.traits.symbol }
@@ -28,12 +25,7 @@ enum LiveDrawTool: String, CaseIterable, Identifiable {
     }
 }
 
-enum LiveDrawColor: String, CaseIterable, Identifiable {
-    case red, yellow, green, blue
-
-    var id: String { rawValue }
-    var title: String { rawValue.capitalized }
-
+extension LiveDrawColor {
     var rgba: RGBA {
         switch self {
         case .red: Palette.red

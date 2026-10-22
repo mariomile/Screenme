@@ -48,37 +48,35 @@ enum AutoCrop {
     }
 
     /// What happened between `from` and `to`: ink and pins, clicks and drags, scrolls, and where the pointer rested
-    /// (weighed by the seconds it stayed, at most 2 a place).
+    /// inside the area (weighed by the seconds it stayed, at most 2 a place), from the cursor track.
     static func activity(from: Double, to: Double, in events: RecordingEvents) -> [Activity] {
         var found: [Activity] = []
         for event in events.events where event.time >= from && event.time < to {
-            let point = CGPoint(x: event.x ?? 0, y: event.y ?? 0)
-            switch event.kind {
-            case .drawing:
-                if let box = event.box {
-                    let rect = CGRect(x: box.x, y: box.y, width: box.width, height: box.height)
-                    found += [CGPoint(x: rect.minX, y: rect.minY), CGPoint(x: rect.maxX, y: rect.maxY)].map { Activity(point: $0, weight: 5) }
-                }
-            case .pin:
+            switch event.action {
+            case .drawing(_, _, let box, _):
+                found += [CGPoint(x: box.rect.minX, y: box.rect.minY), CGPoint(x: box.rect.maxX, y: box.rect.maxY)].map { Activity(point: $0, weight: 5) }
+            case .pin(_, let point):
                 found.append(Activity(point: point, weight: 5))
-            case .click:
+            case .click(let point, _, _):
                 found.append(Activity(point: point, weight: 4))
-            case .drag:
-                found.append(Activity(point: point, weight: 4))
-                found.append(Activity(point: CGPoint(x: event.toX ?? point.x, y: event.toY ?? point.y), weight: 4))
-            case .scroll:
+            case .drag(let start, let end, _, _):
+                found += [Activity(point: start, weight: 4), Activity(point: end, weight: 4)]
+            case .scroll(let point, _, _):
                 found.append(Activity(point: point, weight: 3))
             case .shortcut, .app:
                 break
             }
         }
-        let cursor = events.pointer ?? []
-        for (index, sample) in cursor.enumerated() where sample.count == 3 {
+        guard let track = events.cursor else { return found }
+        let area = CGRect(x: 0, y: 0, width: events.width, height: events.height)
+        for index in track.t.indices {
+            let point = CGPoint(x: track.x[index], y: track.y[index])
+            guard area.contains(point) else { continue }
             // The pointer counts from when it got here (or from `from`, when it was already resting) until it moved on.
-            let start = max(sample[0], from)
-            let end = min(index + 1 < cursor.count ? cursor[index + 1][0] : sample[0] + 2, to, start + 2)
+            let start = max(track.t[index], from)
+            let end = min(index + 1 < track.t.count ? track.t[index + 1] : track.t[index] + 2, to, start + 2)
             guard end > start else { continue }
-            found.append(Activity(point: CGPoint(x: sample[1], y: sample[2]), weight: end - start))
+            found.append(Activity(point: point, weight: end - start))
         }
         return found
     }

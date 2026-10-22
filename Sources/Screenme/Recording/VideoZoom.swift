@@ -31,9 +31,9 @@ enum AutoZoom {
 
     static func segments(for events: RecordingEvents, duration: Double) -> [ZoomSegment] {
         let width = max(events.width, 1), height = max(events.height, 1)
-        let clicks = events.events.filter { $0.kind == .click }.compactMap { event -> (Double, CGPoint)? in
-            guard let x = event.x, let y = event.y else { return nil }
-            return (event.time, CGPoint(x: x / width, y: y / height))
+        let clicks = events.events.compactMap { event -> (Double, CGPoint)? in
+            guard case .click(let point, _, _) = event.action else { return nil }
+            return (event.time, CGPoint(x: point.x / width, y: point.y / height))
         }
         // The first app event is where the recording started, not a switch.
         let switches = events.events.filter { $0.kind == .app && $0.time > 0.1 }.map(\.time)
