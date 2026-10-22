@@ -379,6 +379,9 @@ final class AIReportTests: XCTestCase {
 
         XCTAssertEqual(report.folder.deletingLastPathComponent().standardizedFileURL, directory.standardizedFileURL)
         XCTAssertTrue(report.folder.lastPathComponent.hasPrefix("Report "))
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path).sorted(),
+                       [report.folder.lastPathComponent, "input.mp4"], "built in a hidden folder that was moved into place")
+        XCTAssertEqual(ReportLayout.latest(in: directory)?.lastPathComponent, report.folder.lastPathComponent)
         // The video only gets brighter: a change, but every picture looks the same as the start's.
         XCTAssertEqual(report.keyframes.map(\.reason), [.start, .drawing])
         XCTAssertEqual(report.keyframes[1].time, 1.2, accuracy: 0.001)
@@ -414,6 +417,18 @@ final class AIReportTests: XCTestCase {
         XCTAssertNotEqual(again.folder, report.folder)
         XCTAssertNil(again.manifest.area)
         XCTAssertEqual(again.keyframes.map(\.time), [0.3])
+    }
+
+    func testAFailedReportLeavesNothingBehind() async throws {
+        let directory = try Self.temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let notAVideo = directory.appendingPathComponent("input.mp4")
+        try Data("not a video".utf8).write(to: notAVideo)
+        do {
+            _ = try await AIReporter.write(notAVideo, context: CaptureContext(), events: nil, recordedAt: Date(), in: directory)
+            XCTFail("a file that is not a video makes no report")
+        } catch {}
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path), ["input.mp4"])
     }
 
     func testCropsKeyframesOfAScreenRecordingAndKeepsTheFullFrames() async throws {

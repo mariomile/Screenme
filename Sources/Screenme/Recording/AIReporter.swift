@@ -45,11 +45,30 @@ enum AIReporter {
         NSScreen.main.map { "\(Int($0.frame.width))×\(Int($0.frame.height)) points at \(Int($0.backingScaleFactor))x" }
     }
 
-    /// Writes the report folder for `video` inside `parent` and returns the report. Asks for speech recognition
-    /// only when the video has sound. Not on the main actor: copying, decoding and writing PNGs take a while.
+    /// Writes the report folder for `video` inside `parent` and returns the report. The folder is built as a hidden
+    /// sibling and moved into place when it is complete, so a `Report …` folder is never half written; a failure
+    /// leaves nothing behind. Asks for speech recognition only when the video has sound. Not on the main actor:
+    /// copying, decoding and writing PNGs take a while.
     static func write(_ video: URL, context: CaptureContext, events: RecordingEvents?, recordedAt date: Date,
                       screen: String? = nil, autoCrop: Bool = true, in parent: URL,
                       progress: @escaping @Sendable (Double) -> Void = { _ in }) async throws -> AIReport {
+        let folder = newFolder(in: parent)
+        let building = parent.appendingPathComponent(".\(folder.lastPathComponent) \(UUID().uuidString)", isDirectory: true)
+        do {
+            let report = try await build(video, into: building, finalFolder: folder, context: context, events: events, recordedAt: date,
+                                         screen: screen, autoCrop: autoCrop, progress: progress)
+            try FileManager.default.moveItem(at: building, to: folder)
+            return report
+        } catch {
+            try? FileManager.default.removeItem(at: building)
+            throw error
+        }
+    }
+
+    /// Writes the report's files into `building`; their text names `folder`, where they end up.
+    private static func build(_ video: URL, into building: URL, finalFolder folder: URL, context: CaptureContext, events: RecordingEvents?,
+                              recordedAt date: Date, screen: String?, autoCrop: Bool,
+                              progress: @escaping @Sendable (Double) -> Void) async throws -> AIReport {
         let asset = AVURLAsset(url: video)
         let duration = try await asset.load(.duration).seconds
         guard let track = try await asset.loadTracks(withMediaType: .video).first else {
@@ -57,26 +76,15 @@ enum AIReporter {
         }
         let natural = try await track.load(.naturalSize).applying(track.load(.preferredTransform))
 
-        let folder = newFolder(in: parent)
-        try FileManager.default.createDirectory(at: folder.appendingPathComponent(ReportLayout.frames), withIntermediateDirectories: true)
-        try FileManager.default.copyItem(at: video, to: folder.appendingPathComponent(ReportLayout.video))
+        try FileManager.default.createDirectory(at: building.appendingPathComponent(ReportLayout.frames), withIntermediateDirectories: true)
+        try FileManager.default.copyItem(at: video, to: building.appendingPathComponent(ReportLayout.video))
         progress(0.1)
 
-        var transcript = Transcript()
-        var noNarration = "No speech was recognized in the recording."
-        if let audio = try await audioFile(of: asset) {
-            defer { try? FileManager.default.removeItem(at: audio) }
-            do {
-                transcript = try await Transcription.transcribe(audio)
-            } catch {
-                noNarration = "The narration could not be transcribed: \(error.localizedDescription)"
-            }
-        } else {
-            noNarration = "The recording has no audio."
-        }
-        progress(0.6)
-        // Small pictures of the whole video, for the screen changes and for telling pictures apart.
-        let samples = try await FrameSampler.samples(of: asset, duration: duration)
+        // What was said, and small pictures of the whole video for the screen changes, worked out side by side.
+        async let narration = narration(of: asset)
+        async let sampled = FrameSampler.samples(of: asset, duration: duration)
+        let (transcript, noNarration) = try await narration
+        let samples = try await sampled
         progress(0.75)
 
         let os = ProcessInfo.processInfo.operatingSystemVersion
@@ -99,7 +107,7 @@ enum AIReporter {
         generator.requestedTimeToleranceBefore = .zero
         generator.requestedTimeToleranceAfter = .zero
         if report.isCropped {
-            try FileManager.default.createDirectory(at: folder.appendingPathComponent(ReportLayout.fullFrames), withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: building.appendingPathComponent(ReportLayout.fullFrames), withIntermediateDirectories: true)
         }
         var cells: [ContactSheet.Cell] = [], fullCells: [ContactSheet.Cell] = []
         for (index, keyframe) in report.keyframes.enumerated() {
@@ -107,7 +115,7 @@ enum AIReporter {
             let full = decoded.scaledDown(maxWidth: maxFrameSide, maxHeight: maxFrameSide)
             var frame = full
             if report.isCropped {
-                try full.writePNG(to: folder.appendingPathComponent(ReportLayout.fullFrame(index)))
+                try full.writePNG(to: building.appendingPathComponent(ReportLayout.fullFrame(index)))
                 fullCells.append(ContactSheet.Cell(image: ContactSheet.thumbnail(full), number: index + 1, time: keyframe.time,
                                                    caption: report.caption(index)))
                 if let crop = report.crops[index], let events,
@@ -115,20 +123,20 @@ enum AIReporter {
                     frame = cut.scaledDown(maxWidth: maxFrameSide, maxHeight: maxFrameSide)
                 }
             }
-            try frame.writePNG(to: folder.appendingPathComponent(ReportLayout.frame(index)))
+            try frame.writePNG(to: building.appendingPathComponent(ReportLayout.frame(index)))
             cells.append(ContactSheet.Cell(image: ContactSheet.thumbnail(frame), number: index + 1, time: keyframe.time,
                                            caption: report.caption(index)))
             progress(0.75 + 0.2 * Double(index + 1) / Double(report.keyframes.count))
         }
         if let sheet = ContactSheet.render(cells) {
-            try sheet.writePNG(to: folder.appendingPathComponent(ReportLayout.contactSheet))
+            try sheet.writePNG(to: building.appendingPathComponent(ReportLayout.contactSheet))
         }
         if let sheet = ContactSheet.render(fullCells) {
-            try sheet.writePNG(to: folder.appendingPathComponent(ReportLayout.fullContactSheet))
+            try sheet.writePNG(to: building.appendingPathComponent(ReportLayout.fullContactSheet))
         }
 
-        try report.manifest.json().write(to: folder.appendingPathComponent(ReportLayout.manifest))
-        try report.summary.write(to: folder.appendingPathComponent(ReportLayout.summary), atomically: true, encoding: .utf8)
+        try report.manifest.json().write(to: building.appendingPathComponent(ReportLayout.manifest))
+        try report.summary.write(to: building.appendingPathComponent(ReportLayout.summary), atomically: true, encoding: .utf8)
         return report
     }
 
@@ -154,6 +162,17 @@ enum AIReporter {
             number += 1
         }
         return url
+    }
+
+    /// What was said, or an empty transcript and why there is none.
+    private static func narration(of asset: AVURLAsset) async throws -> (Transcript, String) {
+        guard let audio = try await audioFile(of: asset) else { return (Transcript(), "The recording has no audio.") }
+        defer { try? FileManager.default.removeItem(at: audio) }
+        do {
+            return (try await Transcription.transcribe(audio), "No speech was recognized in the recording.")
+        } catch {
+            return (Transcript(), "The narration could not be transcribed: \(error.localizedDescription)")
+        }
     }
 
     /// The sound of the recording as a temporary M4A file, which both speech APIs read. Nil without an audio track.
