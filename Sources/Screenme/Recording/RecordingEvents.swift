@@ -102,12 +102,6 @@ struct RecordingEvents: Codable, Equatable {
     /// The pointer's path and button presses, for the video editor's zoom and Smooth cursor. Nil in older recordings.
     var cursor: CursorTrack? = nil
 
-    /// `.Screenme 2026-10-21 at 10.22.33.mp4.events.json` next to the recording. Hidden, so neither History
-    /// nor the command line's capture list ever shows it as a capture.
-    static func sidecarURL(for video: URL) -> URL {
-        video.deletingLastPathComponent().appendingPathComponent(".\(video.lastPathComponent).events.json")
-    }
-
     func json() throws -> Data {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
@@ -117,26 +111,23 @@ struct RecordingEvents: Codable, Equatable {
     // MARK: Store
 
     @MainActor private static var recorded: [URL: RecordingEvents] = [:]
+    /// A recording that goes to the Trash is forgotten; its sidecar goes with it (`Sidecar.trash(with:)`).
+    @MainActor private static let forgetsTrashed = Sidecar.onTrash { recorded[$0] = nil }
 
+    /// Kept in memory and in the hidden sidecar `Sidecar.events` next to the recording.
     @MainActor
     static func record(_ events: RecordingEvents, for video: URL) {
+        _ = forgetsTrashed
         recorded[video] = events
-        try? events.json().write(to: sidecarURL(for: video), options: .atomic)
+        try? events.json().write(to: Sidecar.events.url(for: video), options: .atomic)
     }
 
     /// The events of a recording, from memory or from its sidecar. Nil for recordings made without them.
     @MainActor
     static func events(for video: URL) -> RecordingEvents? {
         if let events = recorded[video] { return events }
-        guard let data = try? Data(contentsOf: sidecarURL(for: video)) else { return nil }
+        guard let data = try? Data(contentsOf: Sidecar.events.url(for: video)) else { return nil }
         return try? JSONDecoder().decode(RecordingEvents.self, from: data)
-    }
-
-    /// The recording went to the Trash: its events go too.
-    @MainActor
-    static func forget(_ video: URL) {
-        recorded[video] = nil
-        try? FileManager.default.removeItem(at: sidecarURL(for: video))
     }
 
     // MARK: Shortcuts

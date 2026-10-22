@@ -38,17 +38,17 @@ struct CaptureContext: Equatable {
 @MainActor
 enum CaptureContexts {
     private static var contexts: [URL: CaptureContext] = [:]
+    /// A capture that goes to the Trash is forgotten.
+    private static let forgetsTrashed = Sidecar.onTrash { contexts[$0] = nil }
 
     static func record(_ target: CaptureTarget, for url: URL) {
+        _ = forgetsTrashed
         contexts[url] = context(of: target)
     }
 
     static func setNotes(_ notes: [String], for url: URL) {
+        _ = forgetsTrashed
         contexts[url, default: CaptureContext()].notes = notes
-    }
-
-    static func forget(_ url: URL) {
-        contexts[url] = nil
     }
 
     /// The capture's file was replaced by another one (a recording converted to GIF).

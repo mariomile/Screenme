@@ -14,6 +14,13 @@ final class CaptureCoordinator {
     private var previousArea: CaptureTarget?
     private(set) var lastCapture: CaptureItem?
 
+    private init() {
+        // A capture that no longer exists (moved to the Trash) is no longer the one to pin.
+        Sidecar.onTrash { [weak self] url in
+            if self?.lastCapture?.url == url { self?.lastCapture = nil }
+        }
+    }
+
     /// `target` comes from a `screenme://` link and replaces the selection overlay.
     func perform(_ action: ShortcutAction, target: ActionLink.Target? = nil) {
         if action == .recordScreen, RecordingController.shared.isRecording {
@@ -234,11 +241,6 @@ final class CaptureCoordinator {
                 QuickAccess.shared.show(item)
             }
         }
-    }
-
-    /// A capture that no longer exists (moved to the Trash) is no longer the one to pin.
-    func forget(_ item: CaptureItem) {
-        if lastCapture?.url == item.url { lastCapture = nil }
     }
 
     // MARK: Helpers

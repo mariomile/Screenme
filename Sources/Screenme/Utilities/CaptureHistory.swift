@@ -28,6 +28,8 @@ final class CaptureHistory: ObservableObject {
     /// Screenme's own captures folder: expired captures in it go to the Trash. Files anywhere else are never touched.
     private let capturesDirectory: URL
     private let writer = DispatchQueue(label: "dev.mariomiletta.Screenme.history", qos: .utility)
+    /// Moves one file to the Trash. Tests replace it.
+    var moveToTrash: (URL) throws -> Void = Sidecar.moveToTrash
     /// Reads the text of an image file. Tests replace it.
     var textReader: @Sendable (URL) async -> String = CaptureHistory.recognizeFile
     private var reading = Set<URL>()
@@ -76,17 +78,14 @@ final class CaptureHistory: ObservableObject {
         save()
     }
 
-    /// Moves the file to the Trash and removes the entry. Its saved annotations (`EditSidecar`) and a recording's
-    /// cursorless source (`BakedCursor`) go with it.
+    /// Moves the file and its sidecars to the Trash and removes the entry.
     func trash(_ item: CaptureItem) {
-        try? FileManager.default.trashItem(at: item.url, resultingItemURL: nil)
-        EditSidecar.remove(for: item.url)
-        if item.kind == .video { BakedCursor.removeSource(for: item.url) }
+        Sidecar.trash(with: item.url, moveToTrash: moveToTrash)
         remove(item)
     }
 
     /// Drops entries older than `Pref.historyDays` (0 keeps everything) and entries whose file is gone.
-    /// An expired capture in Screenme's own captures folder goes to the Trash with its entry;
+    /// An expired capture in Screenme's own captures folder goes to the Trash with its sidecars;
     /// a file anywhere else (the user's save folder) stays where it is.
     func prune(now: Date = Date()) {
         let days = Prefs[Pref.historyDays]
@@ -94,15 +93,7 @@ final class CaptureHistory: ObservableObject {
         var kept: [CaptureItem] = []
         for item in items {
             if let cutoff, item.date < cutoff {
-                if isOwnCapture(item.url) {
-                    try? FileManager.default.trashItem(at: item.url, resultingItemURL: nil)
-                    EditSidecar.remove(for: item.url)
-                    // A recording's hidden events file and cursorless source go with it.
-                    if item.kind == .video {
-                        try? FileManager.default.trashItem(at: RecordingEvents.sidecarURL(for: item.url), resultingItemURL: nil)
-                        BakedCursor.removeSource(for: item.url)
-                    }
-                }
+                if isOwnCapture(item.url) { Sidecar.trash(with: item.url, moveToTrash: moveToTrash) }
                 continue
             }
             if FileManager.default.fileExists(atPath: item.url.path) { kept.append(item) }

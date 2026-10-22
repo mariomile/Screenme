@@ -7,7 +7,7 @@ import Foundation
 /// Copy and Share use it and never the sidecar.
 enum EditSidecar {
     static func folder(for capture: URL) -> URL {
-        capture.deletingLastPathComponent().appendingPathComponent(".\(capture.lastPathComponent).screenme-edit", isDirectory: true)
+        Sidecar.edit.url(for: capture)
     }
 
     static func originalURL(for capture: URL) -> URL {
@@ -41,10 +41,5 @@ enum EditSidecar {
               let data = try? Data(contentsOf: stateURL(for: capture)),
               let state = try? JSONDecoder().decode(EditState.self, from: data) else { return nil }
         return (original, state)
-    }
-
-    /// The capture went to the Trash: its editable document goes too.
-    static func remove(for capture: URL) {
-        try? FileManager.default.removeItem(at: folder(for: capture))
     }
 }
