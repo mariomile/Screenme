@@ -12,6 +12,19 @@ struct CursorStyle: Codable, Equatable {
     static let sizeRange = 1.0...3.0
 }
 
+extension CursorStyle {
+    /// Fields added later decode with their defaults, so saved choices and the events sidecar of a recording whose
+    /// cursor was drawn in still read.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init()
+        try c.decodeIfPresent(.show, into: &show)
+        try c.decodeIfPresent(.size, into: &size)
+        try c.decodeIfPresent(.clickHighlight, into: &clickHighlight)
+        try c.decodeIfPresent(.hideWhenIdle, into: &hideWhenIdle)
+    }
+}
+
 /// Draws the smooth cursor onto a source frame: the arrow at the smoothed position, the click highlight of
 /// the recording controls (a yellow disc that springs in on press and grows and fades on release), and an
 /// optional fade when the pointer rests. Everything is prepared once; a frame only moves small images.

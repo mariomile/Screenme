@@ -58,4 +58,15 @@ final class RecordingEventCodingTests: XCTestCase {
         let json = #"{"time": 1, "kind": "hover", "x": 1, "y": 2}"#
         XCTAssertThrowsError(try JSONDecoder().decode(RecordingEvent.self, from: Data(json.utf8)))
     }
+
+    /// The sidecar of a recording whose cursor was drawn in with a style missing a field still reads, the field at its default.
+    func testADrawnCursorStyleMissingAFieldStillReads() throws {
+        let json = #"""
+        {"width": 320, "height": 240, "events": [],
+         "cursor": {"hidden": true, "bakedStyle": {"show": true, "size": 2.5, "clickHighlight": false},
+                    "t": [], "x": [], "y": [], "down": [], "up": []}}
+        """#
+        let events = try JSONDecoder().decode(RecordingEvents.self, from: Data(json.utf8))
+        XCTAssertEqual(events.cursor?.bakedStyle, CursorStyle(show: true, size: 2.5, clickHighlight: false, hideWhenIdle: false))
+    }
 }

@@ -73,6 +73,19 @@ final class VideoCanvasTests: PrefsSandboxTestCase {
         XCTAssertEqual(saved.gif, .gif(fps: 30, maxWidth: 1280, quality: .high))
     }
 
+    /// Choices saved before a field existed keep their values; the missing fields take their defaults.
+    func testSavedChoicesMissingAFieldKeepTheRest() {
+        let json = #"{"autoZoom": true, "zoomStrength": 2.5, "cursor": {"show": false, "size": 2}, "codec": "hevc", "gifFPS": 10}"#
+        Prefs[Pref.videoEditorDefaults] = Data(json.utf8)
+        let saved = VideoEditorDefaults.saved
+        XCTAssertTrue(saved.autoZoom)
+        XCTAssertEqual(saved.zoomStrength, 2.5)
+        XCTAssertEqual(saved.cursor, CursorStyle(show: false, size: 2, clickHighlight: true, hideWhenIdle: false))
+        XCTAssertEqual(saved.codec, .hevc)
+        XCTAssertEqual(saved.gif, .gif(fps: 10, maxWidth: 1280, quality: .high))
+        XCTAssertEqual(saved.canvas, BackgroundSettings())
+    }
+
     /// A green video on a red square canvas: red in the corners, green in the middle, the corners rounded off.
     @MainActor
     func testExportDrawsTheBackgroundAroundTheVideo() async throws {

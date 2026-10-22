@@ -35,3 +35,18 @@ struct VideoEditorDefaults: Codable, Equatable {
     /// A GIF as these settings make it.
     var gif: ExportSpec { .gif(fps: gifFPS, maxWidth: gifMaxWidth, quality: .high) }
 }
+
+extension VideoEditorDefaults {
+    /// Fields added later decode with their defaults, so a new choice never resets the ones already saved.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init()
+        try c.decodeIfPresent(.canvas, into: &canvas)
+        try c.decodeIfPresent(.autoZoom, into: &autoZoom)
+        try c.decodeIfPresent(.zoomStrength, into: &zoomStrength)
+        try c.decodeIfPresent(.cursor, into: &cursor)
+        try c.decodeIfPresent(.codec, into: &codec)
+        try c.decodeIfPresent(.gifFPS, into: &gifFPS)
+        try c.decodeIfPresent(.gifMaxWidth, into: &gifMaxWidth)
+    }
+}
