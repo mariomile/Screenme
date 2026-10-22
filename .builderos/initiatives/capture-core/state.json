@@ -5,10 +5,10 @@
   "mode": "full",
   "track": "product",
   "status": "open",
-  "current_phase": 1,
+  "current_phase": 2,
   "cycle": 1,
   "created_at": "2026-10-20T12:01:07.474Z",
-  "updated_at": "2026-10-20T14:32:39.597Z",
+  "updated_at": "2026-10-21T22:18:26.974Z",
   "review_due": null,
   "phases": {
     "0": {
@@ -35,12 +35,33 @@
       }
     },
     "1": {
-      "status": "in_progress",
-      "artifact": null,
-      "gate": null
+      "status": "passed",
+      "artifact": "01-discovery.md",
+      "gate": {
+        "passed": true,
+        "checked_at": "2026-10-21T22:18:26.974Z",
+        "checked_by": {
+          "script": [
+            "E.1",
+            "1.1",
+            "1.2",
+            "1.3",
+            "1.4"
+          ],
+          "model": [
+            "1.5"
+          ]
+        },
+        "failed_conditions": [
+          "1.5"
+        ],
+        "overridden": true,
+        "override_reason": "Built before it was researched. The capture diary was replaced on 2026-10-20 by Mario's choice to build and use for 10 working days; no log was kept, so disconfirming evidence was never sought. The only result is Mario's statement that the product is in daily use (user-2026-10-22-in-daily-use). Whether he stopped opening the other tools is unknown."
+      },
+      "verdict": "validated"
     },
     "2": {
-      "status": "pending",
+      "status": "in_progress",
       "artifact": null,
       "gate": null
     },
@@ -82,6 +103,16 @@
       "event": "gate_passed",
       "phase": 0,
       "accepted_by": "Mario"
+    },
+    {
+      "at": "2026-10-21T22:18:26.974Z",
+      "event": "gate_overridden",
+      "phase": 1,
+      "verdict": "validated",
+      "failed_conditions": [
+        "1.5"
+      ],
+      "reason": "Built before it was researched. The capture diary was replaced on 2026-10-20 by Mario's choice to build and use for 10 working days; no log was kept, so disconfirming evidence was never sought. The only result is Mario's statement that the product is in daily use (user-2026-10-22-in-daily-use). Whether he stopped opening the other tools is unknown."
     }
   ]
 }

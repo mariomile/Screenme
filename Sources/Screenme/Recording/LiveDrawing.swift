@@ -247,7 +247,7 @@ final class DrawPalette {
         var body: some View {
             HStack(spacing: 2) {
                 ForEach(LiveDrawTool.allCases) { tool in
-                    BarButton(symbol: tool.symbol, active: drawing.tool == tool, help: tool.help) { drawing.tool = tool }
+                    SymbolButton(symbol: tool.symbol, help: tool.help, style: .bar(active: drawing.tool == tool)) { drawing.tool = tool }
                 }
                 divider
                 ForEach(LiveDrawColor.allCases) { color in
@@ -263,13 +263,14 @@ final class DrawPalette {
                     .help("\(color.title)\nDraws in \(color.rawValue).")
                 }
                 divider
-                BarButton(symbol: drawing.keep ? "pin.fill" : "pin", active: drawing.keep,
-                          help: drawing.keep ? "Keep Drawings: on\nDrawings stay on screen until you clear them."
-                                             : "Keep Drawings: off\nEach drawing fades out 3 seconds after you finish it. Turn on to keep them until Clear.") {
+                SymbolButton(symbol: drawing.keep ? "pin.fill" : "pin",
+                             help: drawing.keep ? "Keep Drawings: on\nDrawings stay on screen until you clear them."
+                                                : "Keep Drawings: off\nEach drawing fades out 3 seconds after you finish it. Turn on to keep them until Clear.",
+                             style: .bar(active: drawing.keep)) {
                     drawing.keep.toggle()
                 }
-                BarButton(symbol: "eraser", help: "Clear\nRemoves every drawing from the screen. Pins stay until the recording ends.") { drawing.clear() }
-                BarButton(symbol: "checkmark", help: "Done  ⌥⌘D or Esc\nLeaves draw mode; clicks go to your apps again.", action: done)
+                SymbolButton(symbol: "eraser", help: "Clear\nRemoves every drawing from the screen. Pins stay until the recording ends.", style: .bar()) { drawing.clear() }
+                SymbolButton(symbol: "checkmark", help: "Done  ⌥⌘D or Esc\nLeaves draw mode; clicks go to your apps again.", style: .bar(), action: done)
             }
             .padding(6)
             .background(VisualEffectBackground().clipShape(Capsule()))

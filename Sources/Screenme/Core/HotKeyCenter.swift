@@ -57,8 +57,9 @@ final class HotKeyCenter: ObservableObject {
         refs.values.forEach { UnregisterEventHotKey($0) }
         refs.removeAll()
         var failed: Set<ShortcutAction> = []
+        let combos = ShortcutStore.allCombos()
         for (id, action) in ids {
-            guard let combo = ShortcutStore.combo(for: action) else { continue }
+            guard let combo = combos[action] ?? nil else { continue }
             var ref: EventHotKeyRef?
             let status = RegisterEventHotKey(combo.keyCode, combo.modifiers, EventHotKeyID(signature: Self.signature, id: id),
                                              GetApplicationEventTarget(), 0, &ref)

@@ -36,17 +36,31 @@ enum Redaction {
         return (redacted, boxes.count)
     }
 
-    /// A temporary file named like `original`, in its format, holding `image`.
+    private static var copiesFolder: URL { FileManager.default.temporaryDirectory.appendingPathComponent("ScreenmeRedacted", isDirectory: true) }
+
+    /// A temporary file named like `original`, in its format, holding `image`. One folder per capture name,
+    /// overwritten each time `original` is shared again.
     static func write(_ image: CGImage, like original: URL) -> URL? {
         let data = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(data, ImageFormat(of: original).type.identifier as CFString, 1, nil) else { return nil }
         CGImageDestinationAddImage(destination, image, nil)
         guard CGImageDestinationFinalize(destination) else { return nil }
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("ScreenmeRedacted/\(UUID().uuidString)", isDirectory: true)
+        let folder = copiesFolder.appendingPathComponent(original.deletingPathExtension().lastPathComponent, isDirectory: true)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let url = folder.appendingPathComponent(original.lastPathComponent)
         guard (try? (data as Data).write(to: url)) != nil else { return nil }
         return url
+    }
+
+    /// Removes the redacted copies not touched for a day. Run at launch.
+    static func removeStaleCopies(olderThan age: TimeInterval = 24 * 3600, in root: URL? = nil) {
+        let root = root ?? copiesFolder
+        let cutoff = Date().addingTimeInterval(-age)
+        let folders = (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+        for folder in folders {
+            let modified = (try? folder.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+            if modified < cutoff { try? FileManager.default.removeItem(at: folder) }
+        }
     }
 
     /// A redacted temporary copy of the image file, for sharing. Nil when there is nothing to hide, or the file is not

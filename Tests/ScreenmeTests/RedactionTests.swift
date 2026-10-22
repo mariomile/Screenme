@@ -65,4 +65,27 @@ final class RedactionTests: XCTestCase {
         let redacted = try XCTUnwrap(Redaction.redacted(original, boxes: [CGRect(x: 0, y: 0, width: 20, height: 10)], unit: 1))
         XCTAssertNotEqual(pixel(try rgba(redacted), 0, 0), pixel(try rgba(original), 0, 0))
     }
+
+    func testSharingTheSameCaptureAgainReusesItsFolder() throws {
+        let image = try noisyImage()
+        let name = "Screenme-test-\(UUID().uuidString).png"
+        let original = URL(fileURLWithPath: "/captures/" + name)
+        let first = try XCTUnwrap(Redaction.write(image, like: original))
+        let second = try XCTUnwrap(Redaction.write(image, like: original))
+        defer { try? FileManager.default.removeItem(at: first.deletingLastPathComponent()) }
+        XCTAssertEqual(first, second)
+        XCTAssertEqual(first.lastPathComponent, name)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: first.deletingLastPathComponent().path), [name])
+    }
+
+    func testStaleCopiesGoAfterADayAndFreshOnesStay() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("RedactionStale-\(UUID().uuidString)")
+        let old = root.appendingPathComponent("old"), fresh = root.appendingPathComponent("fresh")
+        for folder in [old, fresh] { try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true) }
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-2 * 24 * 3600)], ofItemAtPath: old.path)
+        Redaction.removeStaleCopies(in: root)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: old.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fresh.path))
+    }
 }

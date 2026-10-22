@@ -165,7 +165,16 @@ struct KeyCombo: Codable, Hashable {
 /// an explicit `nil` (stored as empty) means "no shortcut".
 enum ShortcutStore {
     static func combo(for action: ShortcutAction) -> KeyCombo? {
+        resolve(action, in: load())
+    }
+
+    /// Every action's combo, with the saved shortcuts decoded once.
+    static func allCombos() -> [ShortcutAction: KeyCombo?] {
         let saved = load()
+        return Dictionary(uniqueKeysWithValues: ShortcutAction.allCases.map { ($0, resolve($0, in: saved)) })
+    }
+
+    private static func resolve(_ action: ShortcutAction, in saved: [String: KeyCombo?]) -> KeyCombo? {
         guard let entry = saved[action.rawValue] else { return action.defaultCombo }
         return entry
     }
@@ -184,7 +193,8 @@ enum ShortcutStore {
 
     /// The action already using `combo`, if any.
     static func action(using combo: KeyCombo) -> ShortcutAction? {
-        ShortcutAction.allCases.first { self.combo(for: $0) == combo }
+        let all = allCombos()
+        return ShortcutAction.allCases.first { all[$0] == .some(combo) }
     }
 
     private static func load() -> [String: KeyCombo?] {

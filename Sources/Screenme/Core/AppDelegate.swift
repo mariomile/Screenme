@@ -36,6 +36,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         hotKeys.registerAll()
 
         CaptureHistory.shared.prune()
+        Redaction.removeStaleCopies()
         Updater.shared.announceIfUpdated()
         if AppState.shared.needsSetup { OnboardingWindow.show() }
     }

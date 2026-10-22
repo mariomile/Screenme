@@ -94,8 +94,32 @@ final class RecordingController {
             if let gif, gif.url != url { CaptureContexts.move(url, to: gif.url) }
             return gif
         }
-        if let events = session.recordedEvents { RecordingEvents.record(events, for: url) }
-        return CaptureItem(url: url, kind: .video)
+        guard var events = session.recordedEvents else { return CaptureItem(url: url, kind: .video) }
+        var file = url
+        if let baked = await bakeCursor(url, size: size, events: events) {
+            (file, events) = baked
+            CaptureContexts.move(url, to: file)
+        }
+        RecordingEvents.record(events, for: file)
+        return CaptureItem(url: file, kind: .video)
+    }
+
+    /// A Smooth cursor recording as a file with the cursor drawn in; the raw file is deleted. Nil when the recording
+    /// has its cursor already, or when drawing it failed (the raw file is delivered then, with the error shown).
+    private func bakeCursor(_ video: URL, size: CGSize, events: RecordingEvents) async -> (url: URL, events: RecordingEvents)? {
+        guard BakedCursor.isNeeded(events: events, style: .saved) else { return nil }
+        let toast = Toast.progress("Adding the cursor")
+        defer { toast.finish() }
+        do {
+            let baked = try await BakedCursor.render(video, size: size, events: events) { value in
+                Task { @MainActor in toast.update(value) }
+            }
+            if baked != nil { try? FileManager.default.removeItem(at: video) }
+            return baked
+        } catch {
+            CaptureCoordinator.shared.report(error)
+            return nil
+        }
     }
 
     /// Moves the running session into a transition, so no other control can act on it meanwhile.

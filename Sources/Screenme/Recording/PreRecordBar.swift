@@ -197,24 +197,27 @@ private struct PreRecordBar: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            BarButton(symbol: "xmark", help: "Cancel (Esc)\nCloses this bar without recording.", action: cancel)
+            SymbolButton(symbol: "xmark", help: "Cancel (Esc)\nCloses this bar without recording.", style: .bar(), action: cancel)
             divider
             FormatSwitch(format: $model.settings.format)
             divider
             HStack(spacing: 0) {
-                BarButton(symbol: settings.microphone ? "mic.fill" : "mic.slash.fill", active: settings.microphone && audioAvailable,
-                          help: "Microphone: \(settings.microphone ? model.microphoneName : "off")\nRecords your voice with the video.") { model.toggleMicrophone() }
+                SymbolButton(symbol: settings.microphone ? "mic.fill" : "mic.slash.fill",
+                             help: "Microphone: \(settings.microphone ? model.microphoneName : "off")\nRecords your voice with the video.",
+                             style: .bar(active: settings.microphone && audioAvailable)) { model.toggleMicrophone() }
                 microphoneMenu
             }
             .opacity(audioAvailable ? 1 : 0.35)
             .disabled(!audioAvailable)
-            BarButton(symbol: settings.systemAudio ? "speaker.wave.2.fill" : "speaker.slash.fill", active: settings.systemAudio && audioAvailable,
-                      help: "System audio: \(settings.systemAudio ? "on" : "off")\nRecords the sound your Mac plays, like a video or a call.") { model.settings.systemAudio.toggle() }
+            SymbolButton(symbol: settings.systemAudio ? "speaker.wave.2.fill" : "speaker.slash.fill",
+                         help: "System audio: \(settings.systemAudio ? "on" : "off")\nRecords the sound your Mac plays, like a video or a call.",
+                         style: .bar(active: settings.systemAudio && audioAvailable)) { model.settings.systemAudio.toggle() }
                 .opacity(audioAvailable ? 1 : 0.35)
                 .disabled(!audioAvailable)
             HStack(spacing: 0) {
-                BarButton(symbol: settings.webcam ? "video.fill" : "video.slash.fill", active: settings.webcam,
-                          help: "Camera: \(settings.webcam ? "on" : "off")\nShows your face in a bubble you can move and resize; it is part of the video.") { model.toggleWebcam() }
+                SymbolButton(symbol: settings.webcam ? "video.fill" : "video.slash.fill",
+                             help: "Camera: \(settings.webcam ? "on" : "off")\nShows your face in a bubble you can move and resize; it is part of the video.",
+                             style: .bar(active: settings.webcam)) { model.toggleWebcam() }
                 cameraMenu
             }
             optionsMenu

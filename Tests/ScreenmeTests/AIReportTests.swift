@@ -450,7 +450,7 @@ final class AIReportTests: XCTestCase {
     }
 
     /// A gray H.264 video with no audio track, 10 frames a second, a little brighter every frame.
-    static func writeSilentVideo(to url: URL, seconds: Int) async throws {
+    nonisolated static func writeSilentVideo(to url: URL, seconds: Int) async throws {
         let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
             AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: 320, AVVideoHeightKey: 240,

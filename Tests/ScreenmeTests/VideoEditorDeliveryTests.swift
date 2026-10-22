@@ -41,7 +41,7 @@ final class VideoEditorDeliveryTests: PrefsSandboxTestCase {
         Prefs[Pref.afterRecordingSave] = true
         Prefs[Pref.afterRecordingQuickAccess] = true
         Prefs[Pref.afterRecordingCopy] = true
-        let video = try TestVideo.make(width: 320, height: 180, seconds: 1)
+        let video = try await TestVideo.makeOffMain(width: 320, height: 180, seconds: 1)
         defer { try? FileManager.default.removeItem(at: video) }
         let saveFolder = FileManager.default.temporaryDirectory.appendingPathComponent("screenme-save-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: saveFolder, withIntermediateDirectories: true)
