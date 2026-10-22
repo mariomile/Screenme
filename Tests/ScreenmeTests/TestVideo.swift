@@ -84,15 +84,26 @@ enum TestVideo {
             CMAudioSampleBufferCreateReadyWithPacketDescriptions(allocator: nil, dataBuffer: block!, formatDescription: format!, sampleCount: chunk,
                                                                  presentationTimeStamp: CMTime(value: CMTimeValue(first), timescale: 48000),
                                                                  packetDescriptions: nil, sampleBufferOut: &sample)
-            while !input.isReadyForMoreMediaData { Thread.sleep(forTimeInterval: 0.001) }
             input.append(sample!)
         }
 
+        // The writer holds back whichever input is ahead until the other catches up, so each gets its next chunk
+        // when it is ready. Waiting on one input alone can wait forever for the other.
         let frames = Int(seconds * Double(fps))
-        for frame in 0..<frames {
-            if let audioInput { appendTone(frame: frame, to: audioInput) }
-            while !input.isReadyForMoreMediaData { Thread.sleep(forTimeInterval: 0.001) }
-            adaptor.append(buffers[frame % variants], withPresentationTime: CMTime(value: CMTimeValue(frame), timescale: CMTimeScale(fps)))
+        var videoFrame = 0, audioFrame = audioInput == nil ? frames : 0
+        while videoFrame < frames || audioFrame < frames {
+            var appended = false
+            if audioFrame < frames, let audioInput, audioInput.isReadyForMoreMediaData {
+                appendTone(frame: audioFrame, to: audioInput)
+                audioFrame += 1
+                appended = true
+            }
+            if videoFrame < frames, input.isReadyForMoreMediaData {
+                adaptor.append(buffers[videoFrame % variants], withPresentationTime: CMTime(value: CMTimeValue(videoFrame), timescale: CMTimeScale(fps)))
+                videoFrame += 1
+                appended = true
+            }
+            if !appended { Thread.sleep(forTimeInterval: 0.001) }
         }
         input.markAsFinished()
         audioInput?.markAsFinished()
