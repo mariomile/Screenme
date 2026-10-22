@@ -197,26 +197,27 @@ private struct PreRecordBar: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            SymbolButton(symbol: "xmark", help: "Cancel (Esc)\nCloses this bar without recording.", style: .bar(), action: cancel)
+            SymbolButton("Cancel (Esc)", symbol: "xmark", help: "Closes this bar without recording.", style: .bar(), action: cancel)
             divider
             FormatSwitch(format: $model.settings.format)
             divider
             HStack(spacing: 0) {
-                SymbolButton(symbol: settings.microphone ? "mic.fill" : "mic.slash.fill",
-                             help: "Microphone: \(settings.microphone ? model.microphoneName : "off")\nRecords your voice with the video.",
+                SymbolButton("Microphone: \(settings.microphone ? model.microphoneName : "off")",
+                             symbol: settings.microphone ? "mic.fill" : "mic.slash.fill", help: "Records your voice with the video.",
                              style: .bar(active: settings.microphone && audioAvailable)) { model.toggleMicrophone() }
                 microphoneMenu
             }
             .opacity(audioAvailable ? 1 : 0.35)
             .disabled(!audioAvailable)
-            SymbolButton(symbol: settings.systemAudio ? "speaker.wave.2.fill" : "speaker.slash.fill",
-                         help: "System audio: \(settings.systemAudio ? "on" : "off")\nRecords the sound your Mac plays, like a video or a call.",
+            SymbolButton("System audio: \(settings.systemAudio ? "on" : "off")",
+                         symbol: settings.systemAudio ? "speaker.wave.2.fill" : "speaker.slash.fill",
+                         help: "Records the sound your Mac plays, like a video or a call.",
                          style: .bar(active: settings.systemAudio && audioAvailable)) { model.settings.systemAudio.toggle() }
                 .opacity(audioAvailable ? 1 : 0.35)
                 .disabled(!audioAvailable)
             HStack(spacing: 0) {
-                SymbolButton(symbol: settings.webcam ? "video.fill" : "video.slash.fill",
-                             help: "Camera: \(settings.webcam ? "on" : "off")\nShows your face in a bubble you can move and resize; it is part of the video.",
+                SymbolButton("Camera: \(settings.webcam ? "on" : "off")", symbol: settings.webcam ? "video.fill" : "video.slash.fill",
+                             help: "Shows your face in a bubble you can move and resize; it is part of the video.",
                              style: .bar(active: settings.webcam)) { model.toggleWebcam() }
                 cameraMenu
             }
@@ -249,7 +250,7 @@ private struct PreRecordBar: View {
         .menuStyle(.button)
         .menuIndicator(.hidden)
         .buttonStyle(.plain)
-        .help("Choose microphone\nPick which microphone records your voice.")
+        .help(title: "Choose microphone", "Pick which microphone records your voice.")
     }
 
     private var cameraMenu: some View {
@@ -272,7 +273,7 @@ private struct PreRecordBar: View {
         .menuStyle(.button)
         .menuIndicator(.hidden)
         .buttonStyle(.plain)
-        .help("Camera\nPick the bubble size and which camera to use.")
+        .help(title: "Camera", "Pick the bubble size and which camera to use.")
     }
 
     private var optionsMenu: some View {
@@ -302,7 +303,7 @@ private struct PreRecordBar: View {
         .menuStyle(.button)
         .menuIndicator(.hidden)
         .buttonStyle(.plain)
-        .help("Options\nCursor, click highlights, keystrokes, hidden icons and notifications, countdown.")
+        .help(title: "Options", "Cursor, click highlights, keystrokes, hidden icons and notifications, countdown.")
     }
 }
 
@@ -359,6 +360,6 @@ private struct RecordButton: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .help("Record (Return)\nStarts recording the selected area, after the countdown if one is set.")
+        .help(title: "Record (Return)", "Starts recording the selected area, after the countdown if one is set.")
     }
 }

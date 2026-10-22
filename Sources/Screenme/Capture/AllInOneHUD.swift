@@ -209,7 +209,7 @@ private struct HUDBarView: View {
                 .padding(.horizontal, 5)
             Button { model.repeatArea.toggle() } label: { HUDRepeatLabel(on: model.repeatArea) }
                 .buttonStyle(HUDButtonStyle(.tile(focused: model.repeatArea)))
-                .help("Repeat Area  R\nKeeps the Area picker open after each shot, to capture the same or an adjusted area again. Return shoots again, Esc closes. Applies to the next Area capture.")
+                .help(title: "Repeat Area  R", "Keeps the Area picker open after each shot, to capture the same or an adjusted area again. Return shoots again, Esc closes. Applies to the next Area capture.")
                 .accessibilityLabel("Repeat Area")
                 .accessibilityValue(model.repeatArea ? "On" : "Off")
         }

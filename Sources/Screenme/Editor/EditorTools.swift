@@ -164,8 +164,6 @@ enum ToolChoice: Hashable, Identifiable {
         case .crop: "crop"
         }
     }
-
-    var tooltip: String { Tooltip.text("\(title) (\(key.uppercased()))", help) }
 }
 
 // MARK: - Style

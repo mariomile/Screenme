@@ -99,8 +99,6 @@ struct SymbolButton: View {
     private let symbol: String
     private let style: HUDButtonStyle.Variant
     private let action: () -> Void
-    /// Only the old initializer below sets this; new code uses `.disabled`.
-    private var enabled = true
 
     init(_ title: String, symbol: String, help: String? = nil, style: HUDButtonStyle.Variant = .toolbar(), action: @escaping () -> Void) {
         self.title = title
@@ -110,22 +108,9 @@ struct SymbolButton: View {
         self.action = action
     }
 
-    /// The old form, still used in Editor and Recording: `tooltip` is the whole "Title\nwhat it does", and VoiceOver
-    /// reads `label` or else its first line. Delete once those callers pass the title and the help apart.
-    init(symbol: String, help tooltip: String, style: HUDButtonStyle.Variant = .toolbar(), enabled: Bool = true,
-         label: String? = nil, action: @escaping () -> Void) {
-        title = label ?? String(tooltip.prefix { $0 != "\n" })
-        self.tooltip = tooltip
-        self.symbol = symbol
-        self.style = style
-        self.enabled = enabled
-        self.action = action
-    }
-
     var body: some View {
         Button(action: action) { Image(systemName: symbol) }
             .buttonStyle(HUDButtonStyle(style))
-            .disabled(!enabled)
             .help(tooltip)
             .accessibilityLabel(title)
     }

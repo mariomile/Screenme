@@ -188,8 +188,8 @@ private struct ZoomBlock: View {
             Button("Delete Zoom") { model.deleteZoom(zoom.id) }
             Button("Remove All Zooms") { model.removeAllZooms() }
         }
-        .help(zoom.isAuto
-              ? "Zoom on a click\nFollows the cursor. Drag to move it, Delete or the x to remove it."
-              : "Zoom\nStays on the region you picked. Drag to move it, Delete or the x to remove it.")
+        .help(title: zoom.isAuto ? "Zoom on a click" : "Zoom",
+              zoom.isAuto ? "Follows the cursor. Drag to move it, Delete or the x to remove it."
+                          : "Stays on the region you picked. Drag to move it, Delete or the x to remove it.")
     }
 }

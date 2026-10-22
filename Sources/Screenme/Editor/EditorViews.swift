@@ -52,8 +52,10 @@ struct ToolbarLeading: View {
 
     var body: some View {
         HStack(spacing: 2) {
-            SymbolButton(symbol: "arrow.uturn.backward", help: "Undo (⌘Z)\nTakes back your last change.", enabled: c.canUndo) { c.undo() }
-            SymbolButton(symbol: "arrow.uturn.forward", help: "Redo (⇧⌘Z)\nBrings back what you undid.", enabled: c.canRedo) { c.redo() }
+            SymbolButton("Undo (⌘Z)", symbol: "arrow.uturn.backward", help: "Takes back your last change.") { c.undo() }
+                .disabled(!c.canUndo)
+            SymbolButton("Redo (⇧⌘Z)", symbol: "arrow.uturn.forward", help: "Brings back what you undid.") { c.redo() }
+                .disabled(!c.canRedo)
             if c.reopened {
                 Text("Editing saved annotations")
                     .font(.caption)
@@ -81,8 +83,8 @@ struct ToolPalette: View {
                 if index > 0 { Divider().frame(height: 18) }
                 HStack(spacing: 1) {
                     ForEach(group) { tool in
-                        SymbolButton(symbol: tool.symbol, help: tool.tooltip, style: .toolbar(width: 30, selected: c.mode.choice == tool),
-                                     label: tool.title) { c.choose(tool) }
+                        SymbolButton("\(tool.title) (\(tool.key.uppercased()))", symbol: tool.symbol, help: tool.help,
+                                     style: .toolbar(width: 30, selected: c.mode.choice == tool)) { c.choose(tool) }
                     }
                 }
             }
@@ -96,8 +98,9 @@ struct ToolbarTrailing: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            SymbolButton(symbol: "eye.slash", help: "Redact Sensitive Info: pixelate emails, phone numbers, cards, IBANs, keys, IPs and faces",
-                       enabled: !c.isRedacting) { c.redactSensitiveInfo() }
+            SymbolButton("Redact Sensitive Info", symbol: "eye.slash",
+                         help: "Pixelates emails, phone numbers, cards, IBANs, keys, IPs and faces.") { c.redactSensitiveInfo() }
+                .disabled(c.isRedacting)
 
             Button {
                 c.toggleBackground()
@@ -114,7 +117,7 @@ struct ToolbarTrailing: View {
                     )
             }
             .buttonStyle(.plain)
-            .help("Background\nWraps the screenshot in padding, a gradient or wallpaper, rounded corners and a shadow, ready to post.")
+            .help(title: "Background", "Wraps the screenshot in padding, a gradient or wallpaper, rounded corners and a shadow, ready to post.")
 
             Menu {
                 Button("Save As…") { c.saveAs() }
@@ -138,19 +141,25 @@ struct ToolbarTrailing: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
-            .help("More\nSave As, resize the image or canvas, reset the crop, zoom.")
+            .help(title: "More", "Save As, resize the image or canvas, reset the crop, zoom.")
 
             DragThumb(controller: c)
                 .frame(width: 44, height: 30)
 
-            SymbolButton(symbol: "doc.on.doc", help: Prefs[Pref.editorCloseAfterCopy] ? "Copy (⌘C)\nPuts the edited image on the clipboard, saves it and closes the editor." : "Copy (⌘C)\nPuts the edited image on the clipboard without closing the editor.", enabled: true) { c.copyImage() }
-            SymbolButton(symbol: "sparkles", help: "Copy for AI (⇧⌘C)\nCopies the edited image with its context for Claude, ChatGPT or Cursor: the app and page it came from, your notes on annotations and the text in it. Hides sensitive info first if Settings > Screenshots says so.", enabled: true) { c.copyForAI() }
-            SymbolButton(symbol: "square.and.arrow.up", help: "Share\nSends the edited image with AirDrop, Messages, Mail and more. Hides sensitive info first if Settings > Screenshots says so.", enabled: true) { if let url = c.shareFile() { Share.show(url) } }
+            SymbolButton("Copy (⌘C)", symbol: "doc.on.doc",
+                         help: Prefs[Pref.editorCloseAfterCopy] ? "Puts the edited image on the clipboard, saves it and closes the editor."
+                                                                : "Puts the edited image on the clipboard without closing the editor.") { c.copyImage() }
+            SymbolButton("Copy for AI (⇧⌘C)", symbol: "sparkles",
+                         help: "Copies the edited image with its context for Claude, ChatGPT or Cursor: the app and page it came from, your notes on annotations and the text in it. Hides sensitive info first if Settings > Screenshots says so.") { c.copyForAI() }
+            SymbolButton("Share", symbol: "square.and.arrow.up",
+                         help: "Sends the edited image with AirDrop, Messages, Mail and more. Hides sensitive info first if Settings > Screenshots says so.") {
+                if let url = c.shareFile() { Share.show(url) }
+            }
 
             Button("Done") { c.save() }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.regular)
-                .help("Done (⌘S or Return)\nSaves your edits into the capture and closes the editor.")
+                .help(title: "Done (⌘S or Return)", "Saves your edits into the capture and closes the editor.")
         }
         .padding(.horizontal, 2)
     }
@@ -208,7 +217,7 @@ struct ZoomControls: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            SymbolButton(symbol: "minus", help: "Zoom out (⌘-)\nShows more of the image. Edits are unaffected.") { c.zoomOut() }
+            SymbolButton("Zoom out (⌘-)", symbol: "minus", help: "Shows more of the image. Edits are unaffected.") { c.zoomOut() }
             Button { c.zoomFit() } label: {
                 Text("\(c.zoomPercent)%")
                     .font(.system(size: 11, weight: .medium).monospacedDigit())
@@ -216,8 +225,8 @@ struct ZoomControls: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help("Fit to window (⌘0)\nShows the whole image. Click to reset the zoom.")
-            SymbolButton(symbol: "plus", help: "Zoom in (⌘+)\nFor precise placement. Edits are unaffected.") { c.zoomIn() }
+            .help(title: "Fit to window (⌘0)", "Shows the whole image. Click to reset the zoom.")
+            SymbolButton("Zoom in (⌘+)", symbol: "plus", help: "For precise placement. Edits are unaffected.") { c.zoomIn() }
         }
         .padding(.horizontal, 4)
         .padding(.vertical, 3)
@@ -247,7 +256,7 @@ final class DragThumbView: NSView, NSDraggingSource {
         self.controller = controller
         thumbnail = controller.source.thumbnail(maxPixels: 160)
         super.init(frame: NSRect(x: 0, y: 0, width: 44, height: 30))
-        toolTip = "Drag out\nDrag the finished image straight into any app, chat or folder."
+        toolTip = Tooltip.text("Drag out", "Drag the finished image straight into any app, chat or folder.")
     }
 
     required init?(coder: NSCoder) { fatalError("not used") }

@@ -95,7 +95,7 @@ struct VideoEditorView: View {
                     .background(Circle().fill(.primary.opacity(0.1)))
             }
             .buttonStyle(.plain)
-            .help("Play / Pause (Space)\nPlays the part between the trim handles.")
+            .help(title: "Play / Pause (Space)", "Plays the part between the trim handles.")
 
             Text("\(Duration.format(model.currentTime, tenths: true))  /  \(Duration.format(model.duration, tenths: true))")
                 .font(.system(size: 12, weight: .medium).monospacedDigit())
@@ -118,7 +118,7 @@ struct VideoEditorView: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .frame(width: 110)
-                .help("Format\nMP4 keeps full quality and sound. GIF loops silently and plays anywhere, even in chats.")
+                .help(title: "Format", "MP4 keeps full quality and sound. GIF loops silently and plays anywhere, even in chats.")
             }
             if model.format == .mp4 {
                 labeled("Codec") {
@@ -128,7 +128,7 @@ struct VideoEditorView: View {
                     .pickerStyle(.segmented)
                     .labelsHidden()
                     .frame(width: 120)
-                    .help("Codec\nH.264 plays everywhere. HEVC makes a file about a third smaller at the same look, for Apple devices and recent browsers.")
+                    .help(title: "Codec", "H.264 plays everywhere. HEVC makes a file about a third smaller at the same look, for Apple devices and recent browsers.")
                 }
                 labeled("Size") {
                     Picker("Size", selection: $model.resolution) {
@@ -136,7 +136,7 @@ struct VideoEditorView: View {
                     }
                     .labelsHidden()
                     .frame(width: 100)
-                    .help("Size\nSmaller sizes make lighter files, good for chats and email.")
+                    .help(title: "Size", "Smaller sizes make lighter files, good for chats and email.")
                 }
             } else {
                 labeled("Max width") {
@@ -146,7 +146,7 @@ struct VideoEditorView: View {
                     }
                     .labelsHidden()
                     .frame(width: 100)
-                    .help("Max width\nThe widest the GIF gets. Narrower GIFs are much lighter.")
+                    .help(title: "Max width", "The widest the GIF gets. Narrower GIFs are much lighter.")
                 }
                 labeled("Frame rate") {
                     Picker("Frame rate", selection: $model.gifFPS) {
@@ -154,7 +154,7 @@ struct VideoEditorView: View {
                     }
                     .labelsHidden()
                     .frame(width: 90)
-                    .help("Frame rate\nMore frames move more smoothly; fewer make a lighter GIF.")
+                    .help(title: "Frame rate", "More frames move more smoothly; fewer make a lighter GIF.")
                 }
             }
             labeled("Quality") {
@@ -163,9 +163,9 @@ struct VideoEditorView: View {
                 }
                 .labelsHidden()
                 .frame(width: 90)
-                .help(model.format == .gif
-                      ? "Quality\nHigh uses 256 colors with dithering; Medium and Low use fewer colors for a lighter GIF."
-                      : "Quality\nHigher looks sharper; lower makes a lighter file.")
+                .help(title: "Quality", model.format == .gif
+                      ? "High uses 256 colors with dithering; Medium and Low use fewer colors for a lighter GIF."
+                      : "Higher looks sharper; lower makes a lighter file.")
             }
             if model.hasAudio && model.format == .mp4 {
                 labeled("Audio") {
@@ -173,7 +173,7 @@ struct VideoEditorView: View {
                         Label(model.mute ? "Muted" : "Sound", systemImage: model.mute ? "speaker.slash.fill" : "speaker.wave.2.fill")
                     }
                     .toggleStyle(.button)
-                    .help("Audio\nKeeps or removes the sound in the exported video.")
+                    .help(title: "Audio", "Keeps or removes the sound in the exported video.")
                 }
             }
             Spacer()
@@ -194,16 +194,17 @@ struct VideoEditorView: View {
                 model.pause()
                 Task { await CaptureAction.reportForAI.perform(model.item) }
             }
-            .help(CaptureAction.reportForAI.tooltip(for: model.item.kind) + " Uses the whole recording, without trim or export settings.")
+            .help(title: CaptureAction.reportForAI.title(for: model.item.kind),
+                  CaptureAction.reportForAI.help(for: model.item.kind) + " Uses the whole recording, without trim or export settings.")
             Spacer()
             Button(CaptureAction.copy.title(for: model.item.kind)) { model.perform(.copy) }
-                .help("Copy\nExports with these settings and puts the file on the clipboard.")
+                .help(title: "Copy", "Exports with these settings and puts the file on the clipboard.")
             Button(CaptureAction.save.title(for: model.item.kind)) { model.perform(.save) }
-                .help("Save\nExports with these settings into your save folder (Settings > General).")
+                .help(title: "Save", "Exports with these settings into your save folder (Settings > General).")
             Button(CaptureAction.saveAs.title(for: model.item.kind)) { model.perform(.saveAs) }
-                .help("Save As\nExports with these settings where you choose.")
+                .help(title: "Save As", "Exports with these settings where you choose.")
             Button("Done") { model.perform(.done) }
-                .help("Done (Return)\nExports your edit as a new capture in History (copied too when Copy file to clipboard is on in Settings > Recording), then closes.")
+                .help(title: "Done (Return)", "Exports your edit as a new capture in History (copied too when Copy file to clipboard is on in Settings > Recording), then closes.")
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
         }
@@ -272,7 +273,7 @@ private struct ZoomRegionPicker: View {
                     Button("Keep the Middle") { model.endPicking() }
                         .controlSize(.small)
                         .keyboardShortcut(.cancelAction)
-                        .help("Keep the Middle (Esc)\nThe zoom stays on the middle of the video.")
+                        .help(title: "Keep the Middle (Esc)", "The zoom stays on the middle of the video.")
                 }
                 .padding(10)
                 .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))

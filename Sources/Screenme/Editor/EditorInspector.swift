@@ -49,7 +49,7 @@ private struct NoteField: View {
             .font(.system(size: 12))
             .frame(width: 200)
             .onSubmit { c.focusCanvas() }
-            .help("Note for AI\nWhat you want changed here. Copy for AI lists every note with what it points at; the note is not drawn on the image.")
+            .help(title: "Note for AI", "What you want changed here. Copy for AI lists every note with what it points at; the note is not drawn on the image.")
     }
 
     /// Typing in one note is one undo step.
@@ -68,10 +68,12 @@ private struct SelectionActions: View {
 
     var body: some View {
         HStack(spacing: 2) {
-            SymbolButton(symbol: "square.3.layers.3d.top.filled", help: "Bring forward (⌘])\nPuts the selected item above the ones it overlaps.") { c.arrange(.forward) }
-            SymbolButton(symbol: "square.3.layers.3d.bottom.filled", help: "Send backward (⌘[)\nPuts the selected item below the ones it overlaps.") { c.arrange(.backward) }
-            SymbolButton(symbol: "plus.square.on.square", help: "Duplicate (⌘D)\nMakes a copy of the selected item.") { c.duplicateSelection() }
-            SymbolButton(symbol: "trash", help: "Delete (⌫)\nRemoves the selected item.") { c.deleteSelection() }
+            SymbolButton("Bring forward (⌘])", symbol: "square.3.layers.3d.top.filled",
+                         help: "Puts the selected item above the ones it overlaps.") { c.arrange(.forward) }
+            SymbolButton("Send backward (⌘[)", symbol: "square.3.layers.3d.bottom.filled",
+                         help: "Puts the selected item below the ones it overlaps.") { c.arrange(.backward) }
+            SymbolButton("Duplicate (⌘D)", symbol: "plus.square.on.square", help: "Makes a copy of the selected item.") { c.duplicateSelection() }
+            SymbolButton("Delete (⌫)", symbol: "trash", help: "Removes the selected item.") { c.deleteSelection() }
         }
     }
 }

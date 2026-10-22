@@ -76,7 +76,7 @@ final class RecordingControlBar {
                     .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
-                .help("Stop\nEnds the recording and opens it in Quick Access.")
+                .help(title: "Stop", "Ends the recording and opens it in Quick Access.")
 
                 TimelineView(.periodic(from: .now, by: 0.1)) { context in
                     Text(Duration.format(clock.elapsed(at: context.date), tenths: true))
@@ -90,13 +90,16 @@ final class RecordingControlBar {
                 PulseDot(paused: clock.isPaused)
                     .padding(.trailing, 6)
 
-                SymbolButton(symbol: clock.isPaused ? "play.fill" : "pause.fill", help: clock.isPaused ? "Resume\nContinues the same recording." : "Pause\nStops recording for a moment; the paused time is left out of the video.", style: .bar(), action: togglePause)
-                SymbolButton(symbol: "pencil.tip.crop.circle",
-                             help: drawing.isOn ? "Stop Drawing  ⌥⌘D or Esc\nClicks go to your apps again."
-                                                : "Draw  ⌥⌘D\nDraw on the screen to point things out: pen, arrow, rectangle or highlighter. The drawings are part of the video.",
+                SymbolButton(clock.isPaused ? "Resume" : "Pause", symbol: clock.isPaused ? "play.fill" : "pause.fill",
+                             help: clock.isPaused ? "Continues the same recording." : "Stops recording for a moment; the paused time is left out of the video.",
+                             style: .bar(), action: togglePause)
+                SymbolButton(drawing.isOn ? "Stop Drawing  ⌥⌘D or Esc" : "Draw  ⌥⌘D", symbol: "pencil.tip.crop.circle",
+                             help: drawing.isOn ? "Clicks go to your apps again."
+                                                : "Draw on the screen to point things out: pen, arrow, rectangle or highlighter. The drawings are part of the video.",
                              style: .bar(active: drawing.isOn), action: toggleDraw)
-                SymbolButton(symbol: "arrow.counterclockwise", help: "Restart\nThrows away what you recorded so far and starts again, without a countdown.", style: .bar(), action: restart)
-                SymbolButton(symbol: "trash", help: "Discard\nStops and deletes the recording.", style: .bar(), action: discard)
+                SymbolButton("Restart", symbol: "arrow.counterclockwise",
+                             help: "Throws away what you recorded so far and starts again, without a countdown.", style: .bar(), action: restart)
+                SymbolButton("Discard", symbol: "trash", help: "Stops and deletes the recording.", style: .bar(), action: discard)
             }
             .padding(6)
             .background(VisualEffectBackground().clipShape(Capsule()))

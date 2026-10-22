@@ -15,13 +15,17 @@ extension LiveDrawTool {
     var title: String { self == .pin ? "Pin" : kind.traits.title }
     var symbol: String { self == .pin ? "mappin" : kind.traits.symbol }
 
+    /// The title on its button, with the shortcut when it has one.
+    var buttonTitle: String { self == .pin ? "Pin  ⇧-click" : title }
+
+    /// What it is for, shown when the pointer rests on it.
     var help: String {
         switch self {
-        case .pen: "Pen\nDraw freehand on the screen."
-        case .arrow: "Arrow\nDrag to point at something."
-        case .rectangle: "Rectangle\nDrag to frame an area."
-        case .highlighter: "Highlighter\nMark text or an area with a translucent marker."
-        case .pin: "Pin  ⇧-click\nClick to drop a numbered red pin. Pins stay until the recording ends and show in the report as pin 1, pin 2… ⇧-click drops one with any tool."
+        case .pen: "Draw freehand on the screen."
+        case .arrow: "Drag to point at something."
+        case .rectangle: "Drag to frame an area."
+        case .highlighter: "Mark text or an area with a translucent marker."
+        case .pin: "Click to drop a numbered red pin. Pins stay until the recording ends and show in the report as pin 1, pin 2… ⇧-click drops one with any tool."
         }
     }
 }
@@ -233,7 +237,7 @@ final class DrawPalette {
         var body: some View {
             HStack(spacing: 2) {
                 ForEach(LiveDrawTool.allCases) { tool in
-                    SymbolButton(symbol: tool.symbol, help: tool.help, style: .bar(active: drawing.tool == tool)) { drawing.tool = tool }
+                    SymbolButton(tool.buttonTitle, symbol: tool.symbol, help: tool.help, style: .bar(active: drawing.tool == tool)) { drawing.tool = tool }
                 }
                 divider
                 ForEach(LiveDrawColor.allCases) { color in
@@ -246,17 +250,18 @@ final class DrawPalette {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .help("\(color.title)\nDraws in \(color.rawValue).")
+                    .help(title: color.title, "Draws in \(color.rawValue).")
                 }
                 divider
-                SymbolButton(symbol: drawing.keep ? "pin.fill" : "pin",
-                             help: drawing.keep ? "Keep Drawings: on\nDrawings stay on screen until you clear them."
-                                                : "Keep Drawings: off\nEach drawing fades out 3 seconds after you finish it. Turn on to keep them until Clear.",
+                SymbolButton("Keep Drawings: \(drawing.keep ? "on" : "off")", symbol: drawing.keep ? "pin.fill" : "pin",
+                             help: drawing.keep ? "Drawings stay on screen until you clear them."
+                                                : "Each drawing fades out 3 seconds after you finish it. Turn on to keep them until Clear.",
                              style: .bar(active: drawing.keep)) {
                     drawing.keep.toggle()
                 }
-                SymbolButton(symbol: "eraser", help: "Clear\nRemoves every drawing from the screen. Pins stay until the recording ends.", style: .bar(), action: clear)
-                SymbolButton(symbol: "checkmark", help: "Done  ⌥⌘D or Esc\nLeaves draw mode; clicks go to your apps again.", style: .bar(), action: done)
+                SymbolButton("Clear", symbol: "eraser", help: "Removes every drawing from the screen. Pins stay until the recording ends.",
+                             style: .bar(), action: clear)
+                SymbolButton("Done  ⌥⌘D or Esc", symbol: "checkmark", help: "Leaves draw mode; clicks go to your apps again.", style: .bar(), action: done)
             }
             .padding(6)
             .background(VisualEffectBackground().clipShape(Capsule()))
