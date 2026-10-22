@@ -30,6 +30,18 @@ enum CaptureRequest: Equatable {
     private static func format(_ value: Double) -> String {
         value == value.rounded() ? String(Int(value)) : String(value)
     }
+
+    /// The request when it can be taken: an area with a size, a window of a named app.
+    func checked() throws -> CaptureRequest {
+        switch self {
+        case .area(_, _, let width, let height) where !(width > 0 && height > 0):
+            throw Command.UsageError("capture area needs a width and height above 0")
+        case .window(let app) where app.isEmpty:
+            throw Command.UsageError("capture window needs one app name or bundle ID")
+        default:
+            return self
+        }
+    }
 }
 
 /// A closer look at a moment of a report: `screenme zoom`.
@@ -39,6 +51,29 @@ struct ZoomRequest: Equatable {
     var span = 2.0
     var columns = 3
     var rows = 3
+}
+
+extension ZoomRequest {
+    /// A zoom from what the command line or a tool call gave: exactly one moment, a span from 0 to 60 seconds,
+    /// a grid of 1 to 8 columns and rows written `3x3`.
+    init(bundle: String, moments: [ReportBundle.Moment], span: Double?, grid: String?) throws {
+        guard moments.count == 1, let moment = moments.first else {
+            throw Command.UsageError("zoom needs one of --at TIME, --phrase TEXT or --mark N")
+        }
+        if case .mark(let number) = moment, number < 1 { throw Command.UsageError("--mark needs a mark number") }
+        self.init(bundle: bundle, moment: moment)
+        if let span {
+            guard span > 0, span <= 60 else { throw Command.UsageError("--span needs seconds from 0 to 60, got \(span)") }
+            self.span = span
+        }
+        if let grid {
+            let parts = grid.lowercased().split(separator: "x").compactMap { Int($0) }
+            guard parts.count == 2, (1...8).contains(parts[0]), (1...8).contains(parts[1]) else {
+                throw Command.UsageError("--grid needs COLUMNSxROWS, each 1 to 8, like 3x3; got \(grid)")
+            }
+            (columns, rows) = (parts[0], parts[1])
+        }
+    }
 }
 
 /// A parsed command line.
@@ -81,6 +116,18 @@ enum Command: Equatable {
     struct UsageError: Error, Equatable, CustomStringConvertible {
         let description: String
         init(_ description: String) { self.description = description }
+    }
+
+    enum Failure: Error, Equatable, CustomStringConvertible {
+        case noCaptures(String)
+        case noSkill
+
+        var description: String {
+            switch self {
+            case .noCaptures(let path): "no captures yet in \(path)"
+            case .noSkill: "the skill is not installed: Screenme.app/Contents/Resources/\(Skill.fileName) is missing. Reinstall Screenme."
+            }
+        }
     }
 
     /// Parses the arguments after the program name.
@@ -132,30 +179,16 @@ enum Command: Equatable {
     private static func parseZoom(_ arguments: [String]) throws -> ZoomRequest {
         let (bundle, options) = try bundleAndOptions(arguments, flags: [])
         try only(options, ["--at", "--phrase", "--mark", "--span", "--grid"], in: "zoom")
-        let moments = ["--at", "--phrase", "--mark"].filter { options[$0] != nil }
-        guard moments.count == 1 else { throw UsageError("zoom needs one of --at TIME, --phrase TEXT or --mark N") }
-        var request: ZoomRequest
-        if let at = options["--at"] {
-            // --at takes a phrase too, like the summary's "zoom --at" examples an agent may adapt.
-            request = ZoomRequest(bundle: bundle, moment: ReportBundle.parseTime(at).map { .at($0) } ?? .phrase(at))
-        } else if let phrase = options["--phrase"] {
-            request = ZoomRequest(bundle: bundle, moment: .phrase(phrase))
-        } else {
-            guard let mark = options["--mark"].flatMap(Int.init), mark > 0 else { throw UsageError("--mark needs a mark number") }
-            request = ZoomRequest(bundle: bundle, moment: .mark(mark))
+        let mark = try options["--mark"].map { value in
+            guard let number = Int(value) else { throw UsageError("--mark needs a mark number") }
+            return ReportBundle.Moment.mark(number)
         }
-        if let span = options["--span"] {
-            guard let value = Double(span), value > 0, value <= 60 else { throw UsageError("--span needs seconds from 0 to 60, got \(span)") }
-            request.span = value
+        let span = try options["--span"].map { value in
+            guard let seconds = Double(value) else { throw UsageError("--span needs seconds from 0 to 60, got \(value)") }
+            return seconds
         }
-        if let grid = options["--grid"] {
-            let parts = grid.lowercased().split(separator: "x").compactMap { Int($0) }
-            guard parts.count == 2, (1...8).contains(parts[0]), (1...8).contains(parts[1]) else {
-                throw UsageError("--grid needs COLUMNSxROWS, each 1 to 8, like 3x3; got \(grid)")
-            }
-            (request.columns, request.rows) = (parts[0], parts[1])
-        }
-        return request
+        let moments: [ReportBundle.Moment?] = [options["--at"].map(ReportBundle.Moment.init(at:)), options["--phrase"].map { .phrase($0) }, mark]
+        return try ZoomRequest(bundle: bundle, moments: moments.compactMap { $0 }, span: span, grid: options["--grid"])
     }
 
     /// The report (the first argument when it is not an option, else `latest`) and the options after it.
@@ -198,13 +231,66 @@ enum Command: Equatable {
             guard values.count == 4, let x = values[0], let y = values[1], let width = values[2], let height = values[3] else {
                 throw UsageError("capture area needs four numbers: X Y W H")
             }
-            guard width > 0, height > 0 else { throw UsageError("capture area needs a width and height above 0") }
-            return .area(x: x, y: y, width: width, height: height)
+            return try CaptureRequest.area(x: x, y: y, width: width, height: height).checked()
         case "window":
-            guard arguments.count == 2, !arguments[1].isEmpty else { throw UsageError("capture window needs one app name or bundle ID") }
-            return .window(app: arguments[1])
+            guard arguments.count == 2 else { throw UsageError("capture window needs one app name or bundle ID") }
+            return try CaptureRequest.window(app: arguments[1]).checked()
         default:
             throw UsageError("capture needs fullscreen, area X Y W H or window APP")
+        }
+    }
+}
+
+// MARK: Running
+
+extension Command {
+    /// Where commands find captures and reports, and how they take a capture: the app's folders and the running
+    /// app in the tool, a temporary folder and a stub in tests.
+    struct Context {
+        var folder: CaptureFolder
+        var reports: URL
+        var capture: (CaptureRequest) async throws -> URL
+
+        static var standard: Context {
+            Context(folder: .standard, reports: ScreenmePaths.saveFolder) { try await CaptureFolder.standard.take($0) }
+        }
+    }
+
+    /// What a command gives back: the text the tool prints, and the images it is about (a capture, a report's
+    /// contact sheet, a zoom grid), which the MCP server returns as pictures.
+    struct Output: Equatable {
+        var text: String
+        var images: [URL] = []
+    }
+
+    /// Runs the command. `mcp` is the server itself, which `main` runs on stdin; it is not run here.
+    func run(_ context: Context) async throws -> Output {
+        switch self {
+        case .help:
+            return Output(text: Self.usage)
+        case .capture(let request):
+            let file = try await context.capture(request)
+            return Output(text: file.path, images: [file])
+        case .latest:
+            guard let latest = context.folder.latest else { throw Failure.noCaptures(context.folder.url.path) }
+            return Output(text: latest.url.path, images: [latest.url])
+        case .list(let limit):
+            return Output(text: context.folder.captures().prefix(limit).map(\.url.path).joined(separator: "\n"))
+        case .zoom(let request):
+            let zoom = try await ReportBundle.open(request.bundle, reports: context.reports)
+                .zoom(request.moment, span: request.span, columns: request.columns, rows: request.rows)
+            return Output(text: zoom.text, images: [zoom.image])
+        case .frames(let bundle, let from, let to, let fps):
+            let files = try await ReportBundle.open(bundle, reports: context.reports).frames(from: from, to: to, fps: fps)
+            return Output(text: files.map(\.path).joined(separator: "\n"))
+        case .inspect(let bundle, let json):
+            let report = try ReportBundle.open(bundle, reports: context.reports)
+            return json ? Output(text: try report.manifestText) : Output(text: try report.summary, images: [report.contactSheet])
+        case .skill:
+            guard let url = Skill.url(), let text = try? String(contentsOf: url, encoding: .utf8) else { throw Failure.noSkill }
+            return Output(text: text)
+        case .mcp:
+            throw UsageError("mcp is the MCP server: it reads requests on stdin and has no output of its own")
         }
     }
 }

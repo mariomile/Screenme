@@ -121,13 +121,15 @@ final class MCPServerTests: XCTestCase {
         try? FileManager.default.removeItem(at: folder.url)
     }
 
-    /// A server whose captures write a 3000 x 1000 PNG instead of asking the app, with its reports in the same folder.
-    var server: MCPServer {
-        MCPServer(folder: folder, reports: folder.url) { request in
+    /// Captures write a 3000 x 1000 PNG instead of asking the app; reports are in the same folder.
+    var context: Command.Context {
+        Command.Context(folder: folder, reports: folder.url) { request in
             self.captured.append(request)
             return try self.writeImage(width: 3000, height: 1000)
         }
     }
+
+    var server: MCPServer { MCPServer(context: context) }
 
     func writeImage(width: Int, height: Int) throws -> URL {
         let url = folder.url.appendingPathComponent("\(UUID().uuidString).png")
@@ -219,14 +221,55 @@ final class MCPServerTests: XCTestCase {
         let list = try await send(#"{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"list_captures","arguments":{"limit":1}}}"#)
         let text = try XCTUnwrap(((list?["result"] as? [String: Any])?["content"] as? [[String: Any]])?.first?["text"] as? String)
         XCTAssertEqual(text.split(separator: "\n").count, 1)
-        XCTAssertTrue(text.contains("\t"))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: text), "a path per line")
     }
 
-    func testRequestFromArguments() throws {
-        XCTAssertEqual(try MCPServer.request(from: ["mode": "fullscreen"]), .fullscreen)
-        XCTAssertEqual(try MCPServer.request(from: ["mode": "window", "app": "Safari"]), .window(app: "Safari"))
-        XCTAssertThrowsError(try MCPServer.request(from: ["mode": "area", "x": 1, "y": 2, "width": 0, "height": 4]))
-        XCTAssertThrowsError(try MCPServer.request(from: [:]))
+    func testToolsBecomeCommands() throws {
+        func command(_ tool: Tool, _ arguments: [String: Any]) throws -> Command { try tool.command(Tool.Arguments(arguments)) }
+        XCTAssertEqual(try command(.takeScreenshot, ["mode": "fullscreen"]), .capture(.fullscreen))
+        XCTAssertEqual(try command(.takeScreenshot, ["mode": "window", "app": "Safari"]), .capture(.window(app: "Safari")))
+        XCTAssertEqual(try command(.takeScreenshot, ["mode": "area", "x": 1, "y": 2.5, "width": 30, "height": 4]),
+                       .capture(.area(x: 1, y: 2.5, width: 30, height: 4)))
+        XCTAssertThrowsError(try command(.takeScreenshot, ["mode": "area", "x": 1, "y": 2, "width": 0, "height": 4]))
+        XCTAssertThrowsError(try command(.takeScreenshot, ["mode": "area", "x": "1", "y": 2, "width": 3, "height": 4]), "a number as text")
+        XCTAssertThrowsError(try command(.takeScreenshot, [:]))
+        XCTAssertEqual(try command(.getLatestReport, [:]), .inspect(bundle: "latest", json: false))
+        XCTAssertEqual(try command(.inspectReport, ["report": "/tmp/R", "json": true]), .inspect(bundle: "/tmp/R", json: true))
+        XCTAssertThrowsError(try command(.inspectReport, ["json": 1]), "a number is not a boolean")
+        XCTAssertEqual(try command(.listCaptures, ["limit": 3.0]), .list(limit: 3))
+        XCTAssertThrowsError(try command(.listCaptures, ["limit": 0]))
+
+        XCTAssertEqual(try command(.zoomReport, ["at": 12.5, "span": 4]), .zoom(ZoomRequest(moment: .at(12.5), span: 4)))
+        XCTAssertEqual(try command(.zoomReport, ["at": "0:12"]), .zoom(ZoomRequest(moment: .at(12))))
+        XCTAssertEqual(try command(.zoomReport, ["at": "the total"]), .zoom(ZoomRequest(moment: .phrase("the total"))))
+        XCTAssertEqual(try command(.zoomReport, ["mark": 2.0, "grid": "2x1", "report": "R"]),
+                       .zoom(ZoomRequest(bundle: "R", moment: .mark(2), columns: 2, rows: 1)), "a whole number written 2.0")
+        XCTAssertThrowsError(try command(.zoomReport, ["mark": 2.5]))
+        XCTAssertThrowsError(try command(.zoomReport, ["mark": 0]))
+        XCTAssertThrowsError(try command(.zoomReport, ["at": 1, "phrase": "here"]))
+        XCTAssertThrowsError(try command(.zoomReport, [:]))
+        XCTAssertEqual(Tool.allCases.map(\.rawValue), ["take_screenshot", "get_latest_capture", "get_latest_report", "zoom_report",
+                                                       "inspect_report", "list_captures"])
+    }
+
+    func testCommandsRunToTextAndImages() async throws {
+        do {
+            _ = try await Command.latest.run(context)
+            XCTFail("no captures yet")
+        } catch {
+            XCTAssertEqual(error as? Command.Failure, .noCaptures(folder.url.path))
+        }
+        let empty = try await Command.list(limit: 5).run(context)
+        XCTAssertEqual(empty, Command.Output(text: ""))
+
+        let shot = try await Command.capture(.fullscreen).run(context)
+        XCTAssertEqual(captured, [.fullscreen])
+        XCTAssertEqual(shot.images.count, 1)
+        XCTAssertEqual(shot.text, shot.images.first?.path)
+        let latest = try await Command.latest.run(context)
+        XCTAssertEqual(latest.images.map(\.lastPathComponent), shot.images.map(\.lastPathComponent))
+        let help = try await Command.help.run(context)
+        XCTAssertEqual(help.text, Command.usage)
     }
 
     func testLatestReportReturnsTheSummaryAndTheContactSheet() async throws {
@@ -245,11 +288,9 @@ final class MCPServerTests: XCTestCase {
         let result = try XCTUnwrap(response?["result"] as? [String: Any])
         XCTAssertNil(result["isError"])
         let content = try XCTUnwrap(result["content"] as? [[String: Any]])
-        XCTAssertEqual(content.map { $0["type"] as? String }, ["text", "image", "text", "text"])
-        XCTAssertEqual(content[0]["text"] as? String, "# Report 2026-10-21 at 11.00.00\n")
-        XCTAssertEqual(content[1]["mimeType"] as? String, "image/png")
-        XCTAssertEqual((content[2]["text"] as? String).map { URL(fileURLWithPath: $0).lastPathComponent }, "contact-sheet.png")
-        XCTAssertTrue((content.last?["text"] as? String)?.hasSuffix("Report 2026-10-21 at 11.00.00") == true)
+        XCTAssertEqual(content.map { $0["type"] as? String }, ["image", "text"])
+        XCTAssertEqual(content[0]["mimeType"] as? String, "image/png")
+        XCTAssertEqual(content[1]["text"] as? String, "# Report 2026-10-21 at 11.00.00\n")
     }
 
     func testZoomAndInspectReport() async throws {
@@ -268,8 +309,9 @@ final class MCPServerTests: XCTestCase {
         let inspect = try await send(#"{"jsonrpc":"2.0","id":14,"method":"tools/call","params":{"name":"inspect_report","arguments":{"json":true}}}"#)
         let json = try XCTUnwrap((((inspect?["result"] as? [String: Any])?["content"] as? [[String: Any]])?.first?["text"] as? String))
         XCTAssertTrue(json.contains("\"keyframes\""))
-        XCTAssertEqual(try MCPServer.zoomRequest(from: ["at": 12.5, "span": 4]), ZoomRequest(moment: .at(12.5), span: 4))
-        XCTAssertThrowsError(try MCPServer.zoomRequest(from: [:]))
+
+        let byMark = try await send(#"{"jsonrpc":"2.0","id":15,"method":"tools/call","params":{"name":"zoom_report","arguments":{"mark":1.0,"grid":"1x1"}}}"#)
+        XCTAssertNil((byMark?["result"] as? [String: Any])?["isError"], "mark 1.0 is mark 1")
     }
 }
 

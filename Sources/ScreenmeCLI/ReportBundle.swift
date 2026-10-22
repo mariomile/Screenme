@@ -11,6 +11,11 @@ struct ReportBundle {
         case at(Double)
         case phrase(String)
         case mark(Int)
+
+        /// What `--at` takes: a time, or words the user said, like the summary's `zoom --at` examples an agent may adapt.
+        init(at text: String) {
+            self = ReportBundle.parseTime(text).map { .at($0) } ?? .phrase(text)
+        }
     }
 
     enum Failure: Error, CustomStringConvertible, Equatable {

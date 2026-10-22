@@ -8,7 +8,6 @@ func fail(_ message: String, code: Int32 = 1) -> Never {
     exit(code)
 }
 
-let folder = CaptureFolder.standard
 let command: Command
 do {
     command = try Command.parse(Array(CommandLine.arguments.dropFirst()))
@@ -16,57 +15,20 @@ do {
     fail("\(error)\n\n\(Command.usage)", code: 2)
 }
 
-switch command {
-case .help:
-    print(Command.usage)
-case .capture(let request):
-    do {
-        print(try await folder.take(request).path)
-    } catch {
-        fail("\(error)")
-    }
-case .latest:
-    guard let latest = folder.latest else { fail("no captures yet in \(folder.url.path)") }
-    print(latest.url.path)
-case .list(let limit):
-    for capture in folder.captures().prefix(limit) { print(capture.url.path) }
-case .zoom(let request):
-    do {
-        let report = try ReportBundle.open(request.bundle, reports: ScreenmePaths.saveFolder)
-        print(try await report.zoom(request.moment, span: request.span, columns: request.columns, rows: request.rows).text)
-    } catch {
-        fail("\(error)")
-    }
-case .frames(let bundle, let from, let to, let fps):
-    do {
-        let report = try ReportBundle.open(bundle, reports: ScreenmePaths.saveFolder)
-        for file in try await report.frames(from: from, to: to, fps: fps) { print(file.path) }
-    } catch {
-        fail("\(error)")
-    }
-case .inspect(let bundle, let json):
-    do {
-        let report = try ReportBundle.open(bundle, reports: ScreenmePaths.saveFolder)
-        if json {
-            print(try report.manifestText)
-        } else {
-            print(try report.summary, terminator: "")
-        }
-    } catch {
-        fail("\(error)")
-    }
-case .skill:
-    guard let url = Skill.url(), let text = try? String(contentsOf: url, encoding: .utf8) else {
-        fail("the skill is not installed: Screenme.app/Contents/Resources/\(Skill.fileName) is missing. Reinstall Screenme.")
-    }
-    print(text, terminator: "")
-case .mcp:
-    let server = MCPServer(folder: folder, capture: { try await folder.take($0) })
+if command == .mcp {
+    let server = MCPServer(context: .standard)
     while let line = readLine() {
         guard !line.trimmingCharacters(in: .whitespaces).isEmpty else { continue }
         if let response = await server.handle(line) {
             print(response)
             fflush(stdout)
         }
+    }
+} else {
+    do {
+        let output = try await command.run(.standard)
+        if !output.text.isEmpty { print(output.text, terminator: output.text.hasSuffix("\n") ? "" : "\n") }
+    } catch {
+        fail("\(error)")
     }
 }
