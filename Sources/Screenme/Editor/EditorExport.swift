@@ -52,7 +52,7 @@ extension EditorController {
     func copyForAI() {
         canvas?.finishTextEditing()
         guard let image = EditorRenderer.flatten(state: state, source: source, opaque: false),
-              let png = encode(image, as: .png), let file = aiFile() else { return }
+              let png = encode(image, as: .png), let file = shareFile() else { return }
         CaptureContexts.setNotes(notes, for: item.url)
         Task {
             guard let hidden = await AIClipboard.copy(image: image, png: png, path: file, captureURL: item.url,
@@ -141,31 +141,12 @@ extension EditorController {
         }
     }
 
-    /// A file holding the flattened image, for sharing. Every share overwrites the one file in this editor's
-    /// temporary folder, which goes when the editor closes.
+    /// A temporary copy of the flattened image named like the capture (`TemporaryCopies`), for Share and for the
+    /// file Copy for AI names in its text. Each one overwrites the last.
     func shareFile() -> URL? {
-        writeFlattened(in: exportFolder)
-    }
-
-    /// The file Copy for AI names in the copied text. That text is pasted after the editor may have closed,
-    /// so the file outlives the editor: one per capture, overwritten by the next Copy for AI.
-    private func aiFile() -> URL? {
-        writeFlattened(in: FileManager.default.temporaryDirectory
-            .appendingPathComponent("ScreenmeCopyForAI/\(item.id.uuidString)", isDirectory: true))
-    }
-
-    private func writeFlattened(in folder: URL) -> URL? {
         canvas?.finishTextEditing()
         guard let (image, type) = flatten(for: item.url), let data = encode(image, as: type) else { return nil }
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let url = folder.appendingPathComponent(item.url.lastPathComponent)
-        guard (try? data.write(to: url, options: .atomic)) != nil else { return nil }
-        return url
-    }
-
-    /// Called when the editor closes.
-    func removeExportFolder() {
-        try? FileManager.default.removeItem(at: exportFolder)
+        return TemporaryCopies.write(data, named: item.url.lastPathComponent)
     }
 
     // MARK: Closing

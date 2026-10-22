@@ -39,10 +39,6 @@ final class EditorController: ObservableObject {
 
     weak var canvas: CanvasView?
     weak var window: NSWindow?
-    /// This editor's temporary files (Share), removed when it closes.
-    let exportFolder = FileManager.default.temporaryDirectory
-        .appendingPathComponent("ScreenmeEditorDrag/\(UUID().uuidString)", isDirectory: true)
-
     /// The document came back from the capture's edit sidecar: the annotations saved with Done are live again.
     let reopened: Bool
 
