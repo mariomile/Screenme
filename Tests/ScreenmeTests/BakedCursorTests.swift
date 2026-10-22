@@ -2,7 +2,8 @@ import AVFoundation
 import XCTest
 @testable import Screenme
 
-/// A Smooth cursor recording gets its cursor drawn into the file when it stops, so Copy, Save and drag are right.
+/// A Smooth cursor recording gets its cursor drawn into the file when it stops, so Copy, Save and drag are right,
+/// and keeps the cursorless recording as a hidden source so the video editor can restyle the cursor.
 final class BakedCursorTests: XCTestCase {
     private var cleanup: [URL] = []
 
@@ -33,18 +34,24 @@ final class BakedCursorTests: XCTestCase {
     }
 
     @MainActor
-    func testRenderingDrawsTheCursorAndMarksTheEventsAsBaked() async throws {
+    func testStoppingRendersTheCaptureAndKeepsTheCursorlessSource() async throws {
         let video = try await TestVideo.makeOffMain(width: 400, height: 200, seconds: 2)
         cleanup.append(video)
         let size = CGSize(width: 400, height: 200)
 
         let none = try await BakedCursor.render(video, size: size, events: events(hidden: false))
         XCTAssertNil(none, "nothing to draw")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: video.path), "a recording with its cursor stays the capture")
 
         let baked = try await BakedCursor.render(video, size: size, events: events(hidden: true))
         let result = try XCTUnwrap(baked)
         cleanup.append(result.url)
+        cleanup.append(BakedCursor.sourceURL(for: result.url))
         XCTAssertNotEqual(result.url, video)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: video.path), "the raw recording moved")
+        let source = try XCTUnwrap(BakedCursor.source(for: result.url), "the raw recording is kept as the source")
+        XCTAssertEqual(source.lastPathComponent, ".\(result.url.lastPathComponent).screenme-source.mp4", "hidden, next to the capture")
+        XCTAssertEqual(source.deletingLastPathComponent(), result.url.deletingLastPathComponent())
         XCTAssertEqual(result.events.cursor?.hidden, false)
         XCTAssertNotNil(result.events.cursor, "the track stays for auto zoom")
         let rendered = try await TestVideo.size(of: result.url)
@@ -54,5 +61,7 @@ final class BakedCursorTests: XCTestCase {
         XCTAssertLessThan(body.g, 100, "the arrow, not the green video")
         let far = try await TestVideo.pixel(of: result.url, at: 1, x: 380, y: 20)
         XCTAssertGreaterThan(far.g, 120, "the rest is the recording")
+        let sourceBody = try await TestVideo.pixel(of: source, at: 1, x: 100 + 6, y: 120 + 14)
+        XCTAssertGreaterThan(sourceBody.g, 120, "the source has no cursor")
     }
 }
