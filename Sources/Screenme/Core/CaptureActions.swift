@@ -129,9 +129,6 @@ enum CaptureAction: CaseIterable {
             PinWindow.pin(item)
         case .trash:
             withAnimation(.snappy) { CaptureHistory.shared.trash(item) }
-            CaptureContexts.forget(item.url)
-            RecordingEvents.forget(item.url)
-            CaptureCoordinator.shared.forget(item)
             confirm()
         }
         return true

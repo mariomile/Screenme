@@ -38,9 +38,7 @@ private final class MeasureSession {
     private var box: CGRect?
 
     private var previousApp: NSRunningApplication?
-    private var eventMonitor: Any?
-    private var globalMonitor: Any?
-    private var screenObserver: NSObjectProtocol?
+    private var events: OverlayEventTap?
     private var finished = false
     private var continuation: CheckedContinuation<String?, Never>?
 
@@ -68,38 +66,25 @@ private final class MeasureSession {
     }
 
     private func install() {
-        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [
+        events = OverlayEventTap([
             .mouseMoved, .leftMouseDown, .leftMouseDragged, .leftMouseUp, .rightMouseDown, .otherMouseDown, .keyDown,
-        ]) { [weak self] event in
-            guard let self else { return event }
-            let box = EventBox(event: event)
-            let consumed = MainActor.assumeIsolated { self.handle(box.event) }
-            return consumed ? nil : event
-        }
-        // As in the picker: mouse-moved events do not always reach the panel of an inactive app,
-        // so the moves other apps get are followed too.
-        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged]) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self, !self.finished else { return }
-                let location = NSEvent.mouseLocation
-                if location != self.pointer { self.pointerMoved(to: location) }
-            }
-        }
-        screenObserver = NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
-                                                                object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.finish(nil) }
-        }
+        ], handle: { [weak self] in self?.handle($0) ?? false },
+           pointerMoved: { [weak self] in self?.followPointer() },
+           screensChanged: { [weak self] in self?.finish(nil) })
+    }
+
+    /// The pointer as it is now, when it moved: for moves seen outside the app.
+    private func followPointer() {
+        guard !finished else { return }
+        let location = NSEvent.mouseLocation
+        if location != pointer { pointerMoved(to: location) }
     }
 
     private func finish(_ result: String?) {
         guard !finished else { return }
         finished = true
-        if let eventMonitor { NSEvent.removeMonitor(eventMonitor) }
-        eventMonitor = nil
-        if let globalMonitor { NSEvent.removeMonitor(globalMonitor) }
-        globalMonitor = nil
-        if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) }
-        screenObserver = nil
+        events?.stop()
+        events = nil
         panel.orderOut(nil)
         continuation?.resume(returning: result)
         continuation = nil

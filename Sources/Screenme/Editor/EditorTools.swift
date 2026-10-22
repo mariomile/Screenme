@@ -193,3 +193,24 @@ struct ToolStyle: Codable, Equatable {
     // Spotlight
     var ellipseSpot = false
 }
+
+extension ToolStyle {
+    /// Saved in edit sidecars: fields added later decode with their defaults, so an older file still opens.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(color: try c.decode(RGBA.self, forKey: .color))
+        try c.decodeIfPresent(.sizeIndex, into: &sizeIndex)
+        try c.decodeIfPresent(.filled, into: &filled)
+        try c.decodeIfPresent(.rounded, into: &rounded)
+        try c.decodeIfPresent(.dashed, into: &dashed)
+        try c.decodeIfPresent(.shadow, into: &shadow)
+        try c.decodeIfPresent(.opacity, into: &opacity)
+        try c.decodeIfPresent(.curved, into: &curved)
+        try c.decodeIfPresent(.outline, into: &outline)
+        try c.decodeIfPresent(.fontSize, into: &fontSize)
+        try c.decodeIfPresent(.weight, into: &weight)
+        try c.decodeIfPresent(.backdrop, into: &backdrop)
+        try c.decodeIfPresent(.intensity, into: &intensity)
+        try c.decodeIfPresent(.ellipseSpot, into: &ellipseSpot)
+    }
+}

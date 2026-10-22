@@ -46,7 +46,7 @@ final class BakedCursorTests: XCTestCase {
         let baked = try await BakedCursor.render(video, size: size, events: events(hidden: true))
         let result = try XCTUnwrap(baked)
         cleanup.append(result.url)
-        cleanup.append(BakedCursor.sourceURL(for: result.url))
+        cleanup.append(Sidecar.source.url(for: result.url))
         XCTAssertNotEqual(result.url, video)
         XCTAssertFalse(FileManager.default.fileExists(atPath: video.path), "the raw recording moved")
         let source = try XCTUnwrap(BakedCursor.source(for: result.url), "the raw recording is kept as the source")

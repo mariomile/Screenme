@@ -335,7 +335,7 @@ final class AIReportTests: XCTestCase {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let video = directory.appendingPathComponent("Screenme 2026-10-21 at 10.22.33.mp4")
-        let sidecar = RecordingEvents.sidecarURL(for: video)
+        let sidecar = Sidecar.events.url(for: video)
         XCTAssertEqual(sidecar.deletingLastPathComponent().path, directory.path)
         XCTAssertEqual(sidecar.lastPathComponent, ".Screenme 2026-10-21 at 10.22.33.mp4.events.json")
 
@@ -346,12 +346,10 @@ final class AIReportTests: XCTestCase {
 
         // A recording from an earlier launch: only the sidecar knows its events.
         let older = directory.appendingPathComponent("older.mp4")
-        try sampleEvents.json().write(to: RecordingEvents.sidecarURL(for: older))
+        try sampleEvents.json().write(to: Sidecar.events.url(for: older))
         XCTAssertEqual(RecordingEvents.events(for: older), sampleEvents)
         XCTAssertNil(RecordingEvents.events(for: directory.appendingPathComponent("none.mp4")))
 
-        RecordingEvents.forget(video)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: sidecar.path))
     }
 
     // MARK: Folder

@@ -4,11 +4,11 @@
   "title": "Capture core: hotkey, area/window capture, Quick Access",
   "mode": "full",
   "track": "product",
-  "status": "open",
+  "status": "paused",
   "current_phase": 2,
   "cycle": 1,
   "created_at": "2026-10-20T12:01:07.474Z",
-  "updated_at": "2026-10-21T22:18:26.974Z",
+  "updated_at": "2026-10-22T16:12:16.183397Z",
   "review_due": null,
   "phases": {
     "0": {
@@ -56,7 +56,7 @@
           "1.5"
         ],
         "overridden": true,
-        "override_reason": "Built before it was researched. The capture diary was replaced on 2026-10-20 by Mario's choice to build and use for 10 working days; no log was kept, so disconfirming evidence was never sought. The only result is Mario's statement that the product is in daily use (user-2026-10-22-in-daily-use). Whether he stopped opening the other tools is unknown."
+        "override_reason": "Built before it was researched. The capture diary was replaced on 2026-10-20 by Mario's choice to build and use for 10 working days; no log was kept, so disconfirming evidence was never sought. The only result is Mario's statement that the product is in daily use (user-2026-10-22-in-daily-use). On 2026-10-22 Mario confirmed he stopped opening Shottr, Xnapper and iScreen Shoter (user-2026-10-22-stopped-other-tools)."
       },
       "verdict": "validated"
     },
@@ -113,6 +113,11 @@
         "1.5"
       ],
       "reason": "Built before it was researched. The capture diary was replaced on 2026-10-20 by Mario's choice to build and use for 10 working days; no log was kept, so disconfirming evidence was never sought. The only result is Mario's statement that the product is in daily use (user-2026-10-22-in-daily-use). Whether he stopped opening the other tools is unknown."
+    },
+    {
+      "at": "2026-10-22T16:12:16.183397Z",
+      "event": "paused",
+      "reason": "Mario, 2026-10-22: the product is already built and in daily use; work continues as code changes and refactors without running phases 2 to 7 of this initiative. New product bets get their own initiative."
     }
   ]
 }
