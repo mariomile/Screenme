@@ -56,12 +56,12 @@ private final class EditorWindow: NSObject, NSWindowDelegate, NSToolbarDelegate 
         window = WindowPresenter.shared.show(AnnotationEditor.windowID(for: controller.item),
                                              title: controller.item.url.lastPathComponent,
                                              size: size,
-                                             style: [.titled, .closable, .miniaturizable, .resizable]) {
+                                             style: [.titled, .closable, .miniaturizable, .resizable],
+                                             sizingOptions: []) {
             EditorRootView(c: controller)
         }
         super.init()
 
-        (window.contentView as? NSHostingView<EditorRootView>)?.sizingOptions = []
         window.setContentSize(size)
         window.contentMinSize = CGSize(width: 980, height: 600)
         window.titleVisibility = .hidden

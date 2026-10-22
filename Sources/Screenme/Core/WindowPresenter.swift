@@ -12,9 +12,11 @@ final class WindowPresenter {
 
     /// Shows the window with `id`, creating it on first use. Returns the window.
     /// A style with `.fullSizeContentView` gets a transparent titlebar with the title hidden.
+    /// `sizingOptions` is how the content sizes the window; `[]` leaves the window's size to AppKit.
     @discardableResult
     func show<Content: View>(_ id: String, title: String, size: CGSize,
                              style: NSWindow.StyleMask = [.titled, .closable, .fullSizeContentView],
+                             sizingOptions: NSHostingSizingOptions = .standardBounds,
                              @ViewBuilder content: () -> Content) -> NSWindow {
         if let window = windows[id] {
             bringToFront(window)
@@ -28,7 +30,9 @@ final class WindowPresenter {
         }
         window.isReleasedWhenClosed = false
         // `@AppStorage` reads the same store as `Prefs`.
-        window.contentView = NSHostingView(rootView: content().defaultAppStorage(Prefs.store))
+        let host = NSHostingView(rootView: content().defaultAppStorage(Prefs.store))
+        host.sizingOptions = sizingOptions
+        window.contentView = host
         Self.center(window)
         windows[id] = window
         observers[id] = NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { _ in
