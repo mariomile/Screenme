@@ -2,20 +2,22 @@
 
 A lightweight, native macOS capture tool. Capture, drop it where it goes, move on.
 
-- **Capture area or window** (`⌘⇧1`): drag to select an area, or click to grab the highlighted window. The capture is copied to the clipboard right away.
+- **Capture area or window** (`⇧⌘4`): drag to select an area, or click to grab the highlighted window. The capture is copied to the clipboard right away.
 - **Quick Access overlay**: every capture shows up bottom-left. Drag it into any app, or hover for Copy and Save.
 - **Annotations stay editable**: reopen a capture from History or Quick Access and everything is still there.
 - **Before & After**: select two screenshots in History, or right-click a Quick Access card and choose Before & After (it pairs the card with the previous screenshot), to get one image labelled Before and After for PRs, bug reports and feedback.
 - **Nudge the selection with the arrow keys**: while you drag an area, hold the button and press the arrows to move it by 1 pt (`⇧` for 10 pt), `⌥` with an arrow to resize it from the bottom and right edges, and `Return` to capture; the size pill updates as you go. Before you start dragging, the arrows still move the pointer.
 - **Repeat capture**: in the All-in-One bar (`R` or the Repeat tile), turn on Repeat and pick Area. The picker stays open after each shot and keeps the selection: `Return` shoots the same area again, the arrows adjust it, a new drag picks another, `Esc` closes. Each shot goes through the normal after-capture actions. Repeat is for the next Area capture only, and the screen is not frozen.
 - **Search History by the text in a screenshot**: type a word in the History search box and cards whose image contains it show up, next to the date, kind and file name matches (case and accents ignored). A Text badge marks them; hover it for the matching line. Screenshots are read on this Mac with Vision, in the background, when they are captured, when the editor saves over them, and a few at a time for older ones.
-- **Record area or window** (`⌘⇧2`, press again or click the red menu bar icon to stop): MP4 at 30 fps, with a native trim bar and GIF export from Quick Access.
+- **Record area or window** (`⇧⌘5`, press again or click the red menu bar icon to stop): MP4 at 30 fps, with a native trim bar and GIF export from Quick Access.
 - **Video editor polish**: put a recording on a gradient, color, wallpaper or image background with padding, rounded corners, shadow and an aspect ratio (16:9, 9:16, 1:1, 4:3); Auto zoom in on your clicks, following the cursor, or add zooms by hand on the timeline; speed the clip up to 3x; export H.264 or HEVC, or a GIF with its own width and frame rate. With Settings > Recording > Smooth cursor, videos are filmed without the cursor and the editor draws a smooth one with click highlights, resizable, and hidden when idle if you like. One GPU pass: a 30 s 1080p export takes about 4 seconds on an Apple Silicon Mac, and the preview is the export.
-- **Capture screen**: from the menu bar.
+- **Capture screen** (`⇧⌘3`, or from the menu bar): the whole screen the pointer is on.
 - **Hide sensitive info when sharing** (Settings > Screenshots, off by default): Copy for AI and Share send a copy with emails, phone numbers, cards, IBANs, keys, IP addresses and faces pixelated, and `[redacted]` in the copied text. The capture file is never changed. The editor's Redact Sensitive Info covers faces too.
 - **Copy for AI** (Quick Access, History, pins, editor `⇧⌘C`): copies the image plus a text block for Claude, ChatGPT or Cursor: the app, window and browser page it came from, the text in it, and the notes you wrote on annotations in the editor (select an annotation, type in Note for AI). Paste into a chat for the image, or into a terminal for the text with the file path.
 - **Draw while recording** (`⌥⌘D` or the pencil in the recording controls): pen, arrow, rectangle or highlighter in red, yellow, green or blue, drawn on the screen and filmed into the video. Each drawing fades out 3 seconds after you finish it; turn on Keep in the palette to keep them until Clear. **Pins**: the Pin tool, or `⇧`-click with any tool, drops a numbered red pin that stays until the recording ends (Clear leaves pins). Esc or the pencil goes back to clicking your apps. The palette is never in the video.
 - **Report for AI** (recordings, from Quick Access, History or the video editor, or on its own after every recording with Settings > Recording > Create report for AI): record the screen, talk, click and draw, then pick Report for AI. Screenme transcribes what you said on this Mac, picks the keyframes and writes a `Report` folder in your save folder. The summary and the contact sheet are copied together: paste into a chat for the sheet, into Claude Code, Cursor, GitHub or Linear for the text with absolute paths. See [Report for AI](#report-for-ai) below.
+
+Default shortcuts: `⇧⌘1` All-in-One, `⇧⌘2` Capture Text (OCR), `⇧⌘3` Capture Fullscreen, `⇧⌘4` Capture Area, `⇧⌘5` Record Screen. Every other action starts without a shortcut. macOS uses `⇧⌘3`, `⇧⌘4` and `⇧⌘5` for its own screenshots until you choose Use Screenme for ⇧⌘3, ⇧⌘4, ⇧⌘5 in Settings > Shortcuts (Restore macOS shortcuts gives them back), where you can also change any shortcut.
 
 ## Report for AI
 
@@ -49,11 +51,11 @@ Settings > Upload takes Endpoint URL, Region (`auto` for R2), Bucket, Access Key
 3. Endpoint is the bucket's S3 endpoint (e.g. `https://s3.us-west-004.backblazeb2.com`), Region the part after `s3.` (e.g. `us-west-004`).
 4. Public URL `https://f00X.backblazeb2.com/file/<bucket>`, or the bucket's friendly URL.
 
-About 0.5 MB on disk, no dependencies, system frameworks only (ScreenCaptureKit, AVFoundation, AVKit, SwiftUI).
+About 20 MB on disk (one app for Apple silicon and Intel Macs), no dependencies, system frameworks only (ScreenCaptureKit, AVFoundation, AVKit, SwiftUI).
 
 ## Build
 
-Requires macOS 15+, Xcode 16+ and [XcodeGen](https://github.com/yonaskolb/XcodeGen).
+Requires macOS 15+, Xcode 16+, [XcodeGen](https://github.com/yonaskolb/XcodeGen) and, for the first install, OpenSSL 3 or later (`brew install openssl@3`; the `openssl` in macOS is LibreSSL, which cannot make the signing certificate).
 
 ```bash
 ./scripts/install.sh

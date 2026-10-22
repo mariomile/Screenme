@@ -12,15 +12,32 @@ IDENTITY="Screenme Local Signing"
 KEYCHAIN="$HOME/Library/Keychains/screenme-signing.keychain-db"
 KEYCHAIN_PASSWORD="screenme-local-signing" # protects only this self-signed key
 
+# The signing identity needs OpenSSL 3 or later (-addext, -legacy); the openssl in macOS is LibreSSL, which has neither.
+# Homebrew's openssl@3 first (Apple silicon, then Intel), then any OpenSSL 3 or later on PATH.
+find_openssl() {
+  local candidate
+  for candidate in /opt/homebrew/opt/openssl@3/bin/openssl /usr/local/opt/openssl@3/bin/openssl ${(f)"$(whence -ap openssl || true)"}; do
+    if [[ -x "$candidate" && "$("$candidate" version 2>/dev/null)" == OpenSSL\ <3->.* ]]; then
+      print -r -- "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
 if [[ ! -f "$KEYCHAIN" ]]; then
-  echo "Creating the signing identity \"$IDENTITY\"…"
+  OPENSSL=$(find_openssl) || {
+    echo "Creating the signing identity needs OpenSSL 3 or later, and the openssl in macOS is LibreSSL. Install it with: brew install openssl@3" >&2
+    exit 1
+  }
+  echo "Creating the signing identity \"$IDENTITY\" with $OPENSSL…"
   tmp=$(mktemp -d)
   trap 'rm -rf "$tmp"' EXIT
-  /opt/homebrew/bin/openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj "/CN=$IDENTITY" \
+  "$OPENSSL" req -x509 -newkey rsa:2048 -nodes -days 3650 -subj "/CN=$IDENTITY" \
     -keyout "$tmp/key.pem" -out "$tmp/cert.pem" \
     -addext "keyUsage=critical,digitalSignature" -addext "extendedKeyUsage=critical,codeSigning" \
     -addext "basicConstraints=critical,CA:false" 2>/dev/null
-  /opt/homebrew/bin/openssl pkcs12 -export -legacy -inkey "$tmp/key.pem" -in "$tmp/cert.pem" \
+  "$OPENSSL" pkcs12 -export -legacy -inkey "$tmp/key.pem" -in "$tmp/cert.pem" \
     -out "$tmp/identity.p12" -passout pass:screenme
   security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
   security set-keychain-settings "$KEYCHAIN" # never auto-lock
