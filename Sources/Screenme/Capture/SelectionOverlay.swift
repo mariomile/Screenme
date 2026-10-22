@@ -217,11 +217,9 @@ final class SelectionSession {
     // Lifecycle
     private var previousApp: NSRunningApplication?
     private var cursorHidden = false
-    private var eventMonitor: Any?
-    private var globalMonitor: Any?
+    private var events: OverlayEventTap?
     /// Runs only while a drag is in progress.
     private var dragTimer: Timer?
-    private var screenObserver: NSObjectProtocol?
     private var finished = false
     private var outcome: SelectionResult??
     private var continuation: CheckedContinuation<SelectionResult?, Never>?
@@ -306,34 +304,19 @@ final class SelectionSession {
         NSCursor.hide()
         cursorHidden = true
 
-        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [
+        // Across displays with a button held no event arrives at all, so a drag also polls (`startDragPolling`).
+        events = OverlayEventTap([
             .mouseMoved, .leftMouseDown, .leftMouseDragged, .leftMouseUp, .rightMouseDown, .otherMouseDown,
             .keyDown, .keyUp, .flagsChanged,
-        ]) { [weak self] event in
-            guard let self else { return event }
-            let box = EventBox(event: event)
-            let consumed = MainActor.assumeIsolated { self.handle(box.event) }
-            return consumed ? nil : event
-        }
-        // Mouse-moved events are not delivered reliably to panels of an inactive app: the moves other apps get
-        // are followed too. Across displays with a button held no event arrives at all, so a drag polls (`startDragPolling`).
-        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged]) { [weak self] _ in
-            MainActor.assumeIsolated { self?.followPointer() }
-        }
-        screenObserver = NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
-                                                                object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.finish(nil) }
-        }
+        ], handle: { [weak self] in self?.handle($0) ?? false },
+           pointerMoved: { [weak self] in self?.followPointer() },
+           screensChanged: { [weak self] in self?.finish(nil) })
     }
 
     private func teardown() {
-        if let eventMonitor { NSEvent.removeMonitor(eventMonitor) }
-        eventMonitor = nil
-        if let globalMonitor { NSEvent.removeMonitor(globalMonitor) }
-        globalMonitor = nil
+        events?.stop()
+        events = nil
         stopDragPolling()
-        if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) }
-        screenObserver = nil
         if cursorHidden {
             NSCursor.unhide()
             cursorHidden = false
