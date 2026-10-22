@@ -97,7 +97,32 @@ enum CaptureAction: CaseIterable {
         case .share:
             Share.show(item.url)
         case .uploadLink:
-            return await UploadLink.run(item)
+            let settings: UploadSettings
+            do {
+                settings = try UploadSettings.load()
+            } catch {
+                Feedback.failure(error.localizedDescription, duration: 2.4)
+                SettingsWindow.show(tab: .upload)
+                return false
+            }
+            guard let shared = try? await Redaction.shareableCopy(of: item.url) else {
+                Feedback.failure("Could not read the text")
+                return false
+            }
+            let progress = Toast.progress("Uploading")
+            do {
+                let link = try await S3Upload.put(shared.url, key: S3Upload.randomKey(extension: shared.url.pathExtension),
+                                                  settings: settings) { value in
+                    Task { @MainActor in progress.update(value) }
+                }
+                progress.finish()
+                Clipboard.copyText(link)
+                confirm(hidden: shared.hidden)
+            } catch {
+                progress.finish()
+                Feedback.failure(error.localizedDescription, duration: 3.2)
+                return false
+            }
         case .edit:
             item.kind == .image ? AnnotationEditor.open(item) : VideoEditor.open(item)
         case .pin:
@@ -128,9 +153,14 @@ enum CaptureAction: CaseIterable {
             Toast.show("Path copied", symbol: "link")
         case .save, .saveAs:
             Toast.show("Saved to \(url?.deletingLastPathComponent().lastPathComponent ?? "folder")", symbol: "square.and.arrow.down.fill")
+        case .share:
+            // The share menu itself confirms; only a redacted copy needs saying.
+            if hidden > 0 { Toast.show("Sharing a copy, \(Self.hiddenItems(hidden)) hidden", symbol: "eye.slash.fill") }
+        case .uploadLink:
+            Toast.show(hidden > 0 ? "Link copied, \(Self.hiddenItems(hidden)) hidden" : "Link copied", symbol: "link.icloud.fill")
         case .trash:
             Toast.show("Moved to Trash", symbol: "trash.fill")
-        case .reveal, .share, .uploadLink, .edit, .pin:
+        case .reveal, .edit, .pin:
             break
         }
     }

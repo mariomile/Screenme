@@ -6,25 +6,14 @@ import AppKit
 enum Share {
     /// Opens the share menu at the click that triggered it, e.g. from a SwiftUI button.
     static func show(_ url: URL) {
+        // Where the pointer is now: the redacted copy may take a moment.
         guard let (view, point) = anchor() else { return }
-        guard Prefs[Pref.hideSensitiveWhenSharing] else { return present([url], in: view, at: point) }
         Task {
-            do {
-                if let copy = try await Redaction.redactedCopy(of: url) {
-                    Toast.show("Sharing a copy, \(CaptureAction.hiddenItems(copy.count)) hidden", symbol: "eye.slash.fill")
-                    present([copy.url], in: view, at: point)
-                } else {
-                    present([url], in: view, at: point)
-                }
-            } catch {
-                Feedback.failure("Could not read the text")
-            }
+            guard let shared = try? await Redaction.shareableCopy(of: url) else { return Feedback.failure("Could not read the text") }
+            CaptureAction.share.confirm(hidden: shared.hidden)
+            NSSharingServicePicker(items: [shared.url])
+                .show(relativeTo: CGRect(x: point.x, y: point.y, width: 1, height: 1), of: view, preferredEdge: .minY)
         }
-    }
-
-    private static func present(_ items: [URL], in view: NSView, at point: CGPoint) {
-        NSSharingServicePicker(items: items)
-            .show(relativeTo: CGRect(x: point.x, y: point.y, width: 1, height: 1), of: view, preferredEdge: .minY)
     }
 
     /// Where the menu opens: the pointer, in the window under it. A click and a chosen menu item both leave it there.
