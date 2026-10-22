@@ -145,7 +145,7 @@ private struct HistoryGridView: View {
     private var beforeAfterButton: some View {
         let images = selectedImages.sorted { $0.date < $1.date }
         if images.count == 2 {
-            Button("Before & After") { ImageCombiner.beforeAfterAndEdit(before: images[0], after: images[1]) }
+            Button(BeforeAfter.title) { ImageCombiner.beforeAfterAndEdit(before: images[0], after: images[1]) }
                 .help("Before & After\nPuts the two selected screenshots in one image labelled Before (the older) and After, and opens it in the editor. Good for a fix, a bug report or feedback.")
         }
     }
@@ -341,12 +341,8 @@ private struct HistoryGridCell: View {
     private var menu: some View {
         ForEach(CaptureAction.allCases.filter { $0.isAvailable(for: item.kind) }, id: \.self) { action in
             if action == .edit || action == .trash { Divider() }
-            if action == .share, !Prefs[Pref.hideSensitiveWhenSharing] {
-                ShareLink(item: item.url)
-            } else {
-                Button(action.title(for: item.kind), systemImage: action.symbol(for: item.kind),
-                       role: action == .trash ? .destructive : nil) { perform(action) }
-            }
+            Button(action.title(for: item.kind), systemImage: action.symbol(for: item.kind),
+                   role: action == .trash ? .destructive : nil) { perform(action) }
         }
     }
 

@@ -123,41 +123,27 @@ final class CardInputView: NSView, NSDraggingSource {
     // MARK: Context menu
 
     override func menu(for event: NSEvent) -> NSMenu? {
-        let kind = model.item.kind
-        let menu = NSMenu()
-        for action in CaptureAction.allCases where action.isAvailable(for: kind) {
-            if action == .edit || action == .trash { menu.addItem(.separator()) }
-            // The share menu lists the services as a submenu.
-            if action == .share {
-                menu.addItem(Share.menuItem(for: model.item.url))
-                continue
-            }
-            let item = NSMenuItem(title: action.title(for: kind), action: #selector(menuAction(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = CaptureAction.allCases.firstIndex(of: action)
-            item.image = NSImage(systemSymbolName: action.symbol(for: kind), accessibilityDescription: nil)
-            item.toolTip = action.help(for: kind)
-            menu.addItem(item)
+        let item = model.item
+        let perform: (CaptureAction) -> Void = { [weak card] in card?.perform($0) }
+        var editing = CaptureAction.menuItems([.edit, .pin], for: item, perform: perform)
+        if item.kind == .image, let before = CaptureHistory.shared.previousImage(before: item) {
+            editing.append(NSMenuItem(title: BeforeAfter.title, symbol: BeforeAfter.symbol,
+                                      toolTip: "Puts the previous screenshot (Before) and this one (After) in one image and opens it in the editor. Good for a fix, a bug report or feedback.") {
+                ImageCombiner.beforeAfterAndEdit(before: before, after: item)
+            })
         }
-        if kind == .image, CaptureHistory.shared.previousImage(before: model.item) != nil {
-            let compare = NSMenuItem(title: "Compare with Previous", action: #selector(compareWithPrevious), keyEquivalent: "")
-            compare.target = self
-            compare.image = NSImage(systemSymbolName: "rectangle.split.2x1", accessibilityDescription: nil)
-            compare.toolTip = "Puts the previous screenshot (Before) and this one (After) in one image and opens it in the editor. Good for a fix, a bug report or feedback."
-            // Before the separator that sets Trash apart.
-            menu.insertItem(compare, at: menu.items.count - 2)
+        let sections = [
+            CaptureAction.menuItems([.copy, .copyForAI, .reportForAI, .copyMarkdown, .copyPath, .save, .saveAs, .reveal, .share, .uploadLink],
+                                    for: item, perform: perform),
+            editing,
+            CaptureAction.menuItems([.trash], for: item, perform: perform),
+        ]
+        let menu = NSMenu()
+        for section in sections where !section.isEmpty {
+            if !menu.items.isEmpty { menu.addItem(.separator()) }
+            section.forEach(menu.addItem)
         }
         return menu
-    }
-
-    @objc private func compareWithPrevious() {
-        guard let before = CaptureHistory.shared.previousImage(before: model.item) else { return }
-        ImageCombiner.beforeAfterAndEdit(before: before, after: model.item)
-    }
-
-    @objc private func menuAction(_ sender: NSMenuItem) {
-        guard let index = sender.representedObject as? Int else { return }
-        card?.perform(CaptureAction.allCases[index])
     }
 
     // MARK: File drag

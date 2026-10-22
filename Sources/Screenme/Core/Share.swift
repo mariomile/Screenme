@@ -22,18 +22,6 @@ enum Share {
         }
     }
 
-    /// A "Share" item with the services as a submenu, for AppKit context menus. With the redaction setting on it is a
-    /// plain item that opens the share menu once the copy is ready.
-    static func menuItem(for url: URL) -> NSMenuItem {
-        guard Prefs[Pref.hideSensitiveWhenSharing] else { return NSSharingServicePicker(items: [url]).standardShareMenuItem }
-        let target = MenuTarget(url: url)
-        let item = NSMenuItem(title: CaptureAction.share.title(for: .image), action: #selector(MenuTarget.share), keyEquivalent: "")
-        item.target = target
-        item.representedObject = target // the item only holds its target weakly
-        item.image = NSImage(systemSymbolName: CaptureAction.share.symbol(for: .image), accessibilityDescription: nil)
-        return item
-    }
-
     private static func present(_ items: [URL], in view: NSView, at point: CGPoint) {
         NSSharingServicePicker(items: items)
             .show(relativeTo: CGRect(x: point.x, y: point.y, width: 1, height: 1), of: view, preferredEdge: .minY)
@@ -44,11 +32,5 @@ enum Share {
         let mouse = NSEvent.mouseLocation
         guard let window = NSApp.orderedWindows.first(where: { $0.isVisible && $0.frame.contains(mouse) }), let view = window.contentView else { return nil }
         return (view, view.convert(window.convertPoint(fromScreen: mouse), from: nil))
-    }
-
-    private final class MenuTarget: NSObject {
-        let url: URL
-        init(url: URL) { self.url = url }
-        @MainActor @objc func share() { Share.show(url) }
     }
 }

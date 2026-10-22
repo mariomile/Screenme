@@ -154,4 +154,51 @@ enum CaptureAction: CaseIterable {
         Feedback.failure("Could not save")
         return false
     }
+
+    // MARK: Menus
+
+    /// AppKit menu items for the `actions` available for `item`, with their symbols and tooltips, in that order.
+    /// Share lists the services as a submenu, unless what is shared must be redacted first: then it is a plain item and
+    /// `perform(.share)` opens the share menu once the copy is ready. `keys`: ⌘ key equivalents.
+    @MainActor
+    static func menuItems(_ actions: [CaptureAction], for item: CaptureItem, keys: [CaptureAction: String] = [:],
+                          perform: @escaping (CaptureAction) -> Void) -> [NSMenuItem] {
+        actions.filter { $0.isAvailable(for: item.kind) }.map { action in
+            if action == .share, !Prefs[Pref.hideSensitiveWhenSharing] {
+                return NSSharingServicePicker(items: [item.url]).standardShareMenuItem
+            }
+            let entry = NSMenuItem(title: action.title(for: item.kind), symbol: action.symbol(for: item.kind),
+                                   toolTip: action.help(for: item.kind)) { perform(action) }
+            if let key = keys[action] {
+                entry.keyEquivalent = key
+                entry.keyEquivalentModifierMask = .command
+            }
+            return entry
+        }
+    }
+}
+
+/// Before & After: two screenshots in one image labelled Before and After, from a Quick Access card (with the
+/// previous screenshot) or from two selected in History.
+enum BeforeAfter {
+    static let title = "Before & After"
+    static let symbol = "rectangle.split.2x1"
+}
+
+extension NSMenuItem {
+    /// An item that runs `handler`. The item holds its target, which `target` alone would not keep alive.
+    convenience init(title: String, symbol: String, toolTip: String, handler: @escaping () -> Void) {
+        let target = MenuHandler(handler)
+        self.init(title: title, action: #selector(MenuHandler.run), keyEquivalent: "")
+        self.target = target
+        representedObject = target
+        image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+        self.toolTip = toolTip
+    }
+}
+
+private final class MenuHandler: NSObject {
+    private let handler: () -> Void
+    init(_ handler: @escaping () -> Void) { self.handler = handler }
+    @objc func run() { handler() }
 }
