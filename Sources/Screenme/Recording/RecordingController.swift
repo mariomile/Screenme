@@ -266,8 +266,7 @@ private final class Session {
                                             time: Self.clock(of: recorder))
         events.start()
         self.events = events
-        drawing.onDrawing = { [weak events] tool, color, box, tip in events?.addDrawing(tool, color: color, box: box, tip: tip) }
-        drawing.onPin = { [weak events] number, point in events?.addPin(number, at: point) }
+        effects?.record(to: events)
 
         let insideFrame = if case .display = target { true } else { false }
         let outline = RecordingOutline(frame: frame, insideFrame: insideFrame)
@@ -305,7 +304,9 @@ private final class Session {
         effects?.setDrawing(on)
         if on && !filmsEffects { Task { await filmEffects() } }
         if on {
-            let palette = DrawPalette(drawing: drawing, near: bar?.frame ?? target.cocoaFrame) { [weak self] in self?.setDrawing(false) }
+            let palette = DrawPalette(drawing: drawing, near: bar?.frame ?? target.cocoaFrame,
+                                      clear: { [weak self] in self?.effects?.clearDrawings() },
+                                      done: { [weak self] in self?.setDrawing(false) })
             palette.show()
             self.palette = palette
             escapeKey = HotKeyCenter.shared.registerTemporary(keyCode: UInt32(kVK_Escape)) { [weak self] in self?.setDrawing(false) }
@@ -367,7 +368,7 @@ private final class Session {
         clock.reset()
         outline?.setPaused(false)
         events?.restart(time: Self.clock(of: recorder))
-        effects?.clearDrawings()
+        effects?.restart()
     }
 
     /// Releases everything, newest first. The controls go at once; the filmed overlays stay until the recorder

@@ -64,8 +64,14 @@ final class RecordingEffects {
         if !on { NSCursor.arrow.set() }
     }
 
-    /// A restart: the drawings and the pins of the thrown-away take go.
-    func clearDrawings() { canvas.clear(pins: true) }
+    /// Finished drawings and pins are recorded in `events`.
+    func record(to events: RecordingEventRecorder) { canvas.events = events }
+
+    /// Clear in the palette: every drawing goes, the pins stay.
+    func clearDrawings() { canvas.clear() }
+
+    /// A restart: the drawings and the pins of the thrown-away take go, and pins count from 1 again.
+    func restart() { canvas.clear(pins: true) }
 
     /// Moves the overlay onto `frame` (global Cocoa coordinates), for a window that moved since the recording started.
     func move(to frame: CGRect) {

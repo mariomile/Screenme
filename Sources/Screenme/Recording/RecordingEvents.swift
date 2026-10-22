@@ -104,13 +104,9 @@ final class RecordingEventRecorder {
             let keys = RecordingEvents.shortcut(keyCode: event.keyCode, flags: event.modifierFlags, characters: event.charactersIgnoringModifiers)
             MainActor.assumeIsolated { if let keys { self?.add { .shortcut(keys, time: $0) } } }
         }) { monitors.append(monitor) }
-        checkFrontApp()
-        checkWindows()
+        look()
         poll = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.checkFrontApp()
-                self?.checkWindows()
-            }
+            MainActor.assumeIsolated { self?.look() }
         }
     }
 
@@ -133,8 +129,7 @@ final class RecordingEventRecorder {
         pressed = nil
         lastApp = nil
         take += 1
-        checkFrontApp()
-        checkWindows()
+        look()
     }
 
     func addDrawing(_ tool: LiveDrawTool, color: LiveDrawColor, box: CGRect, tip: CGPoint?) {
@@ -245,50 +240,46 @@ final class RecordingEventRecorder {
         return parts.isEmpty ? nil : parts.joined(separator: " ")
     }
 
-    // MARK: Apps
+    // MARK: Apps and windows
+
+    /// At the start and once a second: the front app and the windows over the area, from one copy of the window list.
+    private func look() {
+        let windows = OnScreenWindow.others()
+        checkFrontApp(windows)
+        checkWindows(windows)
+    }
 
     /// Adds an event when the frontmost app or its front window changed. Screenme itself is not an app switch.
-    private func checkFrontApp() {
+    private func checkFrontApp(_ windows: [OnScreenWindow]) {
         guard let app = NSWorkspace.shared.frontmostApplication,
               app.processIdentifier != ProcessInfo.processInfo.processIdentifier,
               let name = app.localizedName else { return }
-        let window = Self.frontWindowTitle(of: app.processIdentifier)
+        let title = windows.first { $0.pid == app.processIdentifier }?.title
+        let window = title?.isEmpty == false ? title : nil
         if let lastApp, lastApp.app == name, lastApp.window == window { return }
         guard let now = time() else { return }
         lastApp = (name, window)
         events.append(.app(name, window: window, time: now))
     }
 
-    // MARK: Windows
-
     /// Stores the windows over the area when they changed since the last look.
-    private func checkWindows() {
+    private func checkWindows(_ list: [OnScreenWindow]) {
         guard recordsWindows, let now = time() else { return }
-        let found = Self.windows(over: area)
+        let found = Self.windows(list, over: area)
         if found == windows.last?.windows { return }
         windows.append(WindowSnapshot(time: now, windows: found))
     }
 
-    /// The normal windows of other apps that overlap `area`, front to back, in points from its top-left corner.
-    private static func windows(over area: CGRect) -> [WindowSnapshot.Window] {
-        let own = ProcessInfo.processInfo.processIdentifier
+    /// The windows in `list` that overlap `area` (global Cocoa coordinates), front to back, in points from its
+    /// top-left corner.
+    private static func windows(_ list: [OnScreenWindow], over area: CGRect) -> [WindowSnapshot.Window] {
         let top = area.cocoaFlipped
-        let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[CFString: Any]] ?? []
-        return list.compactMap { info in
-            guard info[kCGWindowLayer] as? Int == 0, info[kCGWindowOwnerPID] as? pid_t != own,
-                  let boundsInfo = info[kCGWindowBounds] as? NSDictionary,
-                  let bounds = CGRect(dictionaryRepresentation: boundsInfo),
-                  bounds.width >= 50, bounds.height >= 50, bounds.intersects(top) else { return nil }
-            let title = info[kCGWindowName] as? String
-            return WindowSnapshot.Window(app: info[kCGWindowOwnerName] as? String ?? "an app", title: title?.isEmpty == false ? title : nil,
+        return list.compactMap { window in
+            let bounds = window.bounds
+            guard bounds.width >= 50, bounds.height >= 50, bounds.intersects(top) else { return nil }
+            return WindowSnapshot.Window(app: window.app ?? "an app", title: window.title?.isEmpty == false ? window.title : nil,
                                          x: (bounds.minX - top.minX).rounded(), y: (bounds.minY - top.minY).rounded(),
                                          width: bounds.width.rounded(), height: bounds.height.rounded())
         }
-    }
-
-    private static func frontWindowTitle(of pid: pid_t) -> String? {
-        let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[CFString: Any]] ?? []
-        let title = list.first { $0[kCGWindowLayer] as? Int == 0 && $0[kCGWindowOwnerPID] as? pid_t == pid }?[kCGWindowName] as? String
-        return title?.isEmpty == false ? title : nil
     }
 }

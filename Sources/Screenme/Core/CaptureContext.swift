@@ -82,18 +82,9 @@ enum CaptureContexts {
 
     /// The frontmost normal window of another app, of `pid` when given, whose bounds pass `matches`.
     private static func frontWindow(of pid: pid_t? = nil, where matches: (CGRect) -> Bool) -> CaptureContext? {
-        let own = ProcessInfo.processInfo.processIdentifier
-        let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[CFString: Any]] ?? []
-        for info in list {
-            guard info[kCGWindowLayer] as? Int == 0,
-                  let owner = info[kCGWindowOwnerPID] as? pid_t, owner != own, pid == nil || owner == pid,
-                  let boundsInfo = info[kCGWindowBounds] as? NSDictionary,
-                  let bounds = CGRect(dictionaryRepresentation: boundsInfo), matches(bounds) else { continue }
-            let app = NSRunningApplication(processIdentifier: owner)
-            return CaptureContext(app: app?.localizedName ?? info[kCGWindowOwnerName] as? String,
-                                  bundleID: app?.bundleIdentifier, window: info[kCGWindowName] as? String)
-        }
-        return nil
+        guard let window = OnScreenWindow.others().first(where: { (pid == nil || $0.pid == pid) && matches($0.bounds) }) else { return nil }
+        let app = NSRunningApplication(processIdentifier: window.pid)
+        return CaptureContext(app: app?.localizedName ?? window.app, bundleID: app?.bundleIdentifier, window: window.title)
     }
 }
 
