@@ -23,10 +23,7 @@ final class DeliverTests: PrefsSandboxTestCase {
     }
 
     func testWriteToURLUsesTheFormatOfItsExtension() throws {
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: folder) }
-
+        let folder = try temporaryFolder()
         for (name, type) in [("shot.png", "public.png"), ("shot.jpg", "public.jpeg")] {
             let url = folder.appendingPathComponent(name)
             try Storage.write(image(width: 8, height: 8), to: url)

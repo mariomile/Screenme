@@ -27,7 +27,8 @@ final class WindowPresenter {
             window.titleVisibility = .hidden
         }
         window.isReleasedWhenClosed = false
-        window.contentView = NSHostingView(rootView: content())
+        // `@AppStorage` reads the same store as `Prefs`.
+        window.contentView = NSHostingView(rootView: content().defaultAppStorage(Prefs.store))
         Self.center(window)
         windows[id] = window
         observers[id] = NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { _ in
