@@ -1,3 +1,5 @@
+import AppKit
+import CoreText
 import XCTest
 @testable import Screenme
 
@@ -88,5 +90,79 @@ final class RedactionTests: XCTestCase {
         TemporaryCopies.removeStale(in: root)
         XCTAssertFalse(FileManager.default.fileExists(atPath: old.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: fresh.path), "a copy from today stays: Copy for AI's text still names it")
+    }
+}
+
+/// What Share and Upload & Copy Link send. With Hide sensitive info when sharing on, never the capture unchecked:
+/// when it cannot be read, checked or its redacted copy written, nothing is shared.
+@MainActor
+final class ShareableCopyTests: PrefsSandboxTestCase {
+    /// A white picture with `text` in large black letters, written as a PNG named `name`.
+    private func capture(_ text: String, named name: String = "shot.png") throws -> URL {
+        let width = 900, height = 120
+        let context = try XCTUnwrap(CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                                              space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                              bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        let line = CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: [
+            .font: NSFont.systemFont(ofSize: 44), .foregroundColor: NSColor.black,
+        ]))
+        context.textPosition = CGPoint(x: 24, y: 40)
+        CTLineDraw(line, context)
+        let url = try temporaryFolder().appendingPathComponent(name)
+        try XCTUnwrap(context.makeImage()).writePNG(to: url)
+        return url
+    }
+
+    private func unreadableCapture() throws -> URL {
+        let url = try temporaryFolder().appendingPathComponent("broken.png")
+        try Data("not an image".utf8).write(to: url)
+        return url
+    }
+
+    func testWithTheSettingOffTheCaptureGoesAsItIs() async throws {
+        let url = try unreadableCapture()
+        let shared = try await Redaction.shareableCopy(of: url)
+        XCTAssertEqual(shared.url, url)
+        XCTAssertEqual(shared.hidden, 0)
+    }
+
+    func testAnImageThatCannotBeReadIsNotShared() async throws {
+        Prefs[Pref.hideSensitiveWhenSharing] = true
+        do {
+            _ = try await Redaction.shareableCopy(of: try unreadableCapture())
+            XCTFail("an image that cannot be checked is not shared")
+        } catch {
+            XCTAssertEqual(error as? Redaction.Failure, .unchecked)
+            XCTAssertEqual(error.localizedDescription, "Could not check the image for sensitive info, so nothing was shared")
+        }
+    }
+
+    func testWithNothingToHideTheCaptureItselfIsShared() async throws {
+        Prefs[Pref.hideSensitiveWhenSharing] = true
+        let url = try capture("Quarterly plan")
+        let shared = try await Redaction.shareableCopy(of: url)
+        XCTAssertEqual(shared.url, url)
+        XCTAssertEqual(shared.hidden, 0)
+    }
+
+    func testARedactedCopyThatCannotBeWrittenIsNotShared() async throws {
+        Prefs[Pref.hideSensitiveWhenSharing] = true
+        let url = try capture("mario.rossi@example.com", named: "Screenme-test-\(UUID().uuidString).png")
+        let redacted = try await Redaction.shareableCopy(of: url)
+        XCTAssertEqual(redacted.hidden, 1, "the email is found")
+        XCTAssertNotEqual(redacted.url, url)
+
+        // A folder where the copy goes: it cannot be written.
+        try FileManager.default.removeItem(at: redacted.url)
+        try FileManager.default.createDirectory(at: redacted.url, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: redacted.url) }
+        do {
+            _ = try await Redaction.shareableCopy(of: url)
+            XCTFail("the capture is not shared when its redacted copy cannot be written")
+        } catch {
+            XCTAssertEqual(error as? Redaction.Failure, .notWritten)
+        }
     }
 }

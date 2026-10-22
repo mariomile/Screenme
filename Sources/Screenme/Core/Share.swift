@@ -9,7 +9,12 @@ enum Share {
         // Where the pointer is now: the redacted copy may take a moment.
         guard let (view, point) = anchor() else { return }
         Task {
-            guard let shared = try? await Redaction.shareableCopy(of: url) else { return Feedback.failure("Could not read the text") }
+            let shared: (url: URL, hidden: Int)
+            do {
+                shared = try await Redaction.shareableCopy(of: url)
+            } catch {
+                return Feedback.failure(error.localizedDescription, duration: 3.2)
+            }
             CaptureAction.share.confirm(hidden: shared.hidden)
             NSSharingServicePicker(items: [shared.url])
                 .show(relativeTo: CGRect(x: point.x, y: point.y, width: 1, height: 1), of: view, preferredEdge: .minY)

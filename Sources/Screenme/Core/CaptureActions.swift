@@ -135,8 +135,11 @@ enum CaptureAction: CaseIterable {
                 SettingsWindow.show(tab: .upload)
                 return false
             }
-            guard let shared = try? await Redaction.shareableCopy(of: item.url) else {
-                Feedback.failure("Could not read the text")
+            let shared: (url: URL, hidden: Int)
+            do {
+                shared = try await Redaction.shareableCopy(of: item.url)
+            } catch {
+                Feedback.failure(error.localizedDescription, duration: 3.2)
                 return false
             }
             let progress = Toast.progress("Uploading")
