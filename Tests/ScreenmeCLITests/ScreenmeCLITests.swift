@@ -67,6 +67,8 @@ final class CaptureFolderTests: XCTestCase {
         FileManager.default.createFile(atPath: folder.url.appendingPathComponent(".DS_Store").path, contents: Data([1]))
         // The events of a recording, kept next to it by the app.
         FileManager.default.createFile(atPath: folder.url.appendingPathComponent(".b.mp4.events.json").path, contents: Data("{}".utf8))
+        // The cursorless recording a Smooth cursor capture keeps next to it.
+        FileManager.default.createFile(atPath: folder.url.appendingPathComponent(".b.mp4.screenme-source.mp4").path, contents: Data([1]))
         // A capture's saved annotations, a hidden folder the app keeps next to it.
         let edits = folder.url.appendingPathComponent(".b.png.screenme-edit", isDirectory: true)
         try FileManager.default.createDirectory(at: edits, withIntermediateDirectories: true)

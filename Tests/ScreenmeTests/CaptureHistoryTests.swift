@@ -100,4 +100,29 @@ final class CaptureHistoryTests: PrefsSandboxTestCase {
         }
         XCTAssertTrue(history.items.isEmpty)
     }
+
+    @MainActor func testTrashAndPruneRemoveARecordingsCursorlessSource() throws {
+        Prefs[Pref.historyDays] = 30
+        let now = Date()
+        let trashed = try file("trashed.mp4", in: captures)
+        let expired = try file("expired.mp4", in: captures)
+        let kept = try file("kept.mp4", in: captures)
+        for url in [trashed, expired, kept] {
+            try Data("raw".utf8).write(to: BakedCursor.sourceURL(for: url))
+            XCTAssertNotNil(BakedCursor.source(for: url))
+        }
+        let history = history()
+        let item = CaptureItem(url: trashed, kind: .video, date: now)
+        history.add(item)
+        history.add(CaptureItem(url: expired, kind: .video, date: now.addingTimeInterval(-31 * 86_400)))
+        history.add(CaptureItem(url: kept, kind: .video, date: now))
+
+        history.trash(item)
+        history.prune(now: now)
+
+        XCTAssertNil(BakedCursor.source(for: trashed))
+        XCTAssertNil(BakedCursor.source(for: expired))
+        XCTAssertNotNil(BakedCursor.source(for: kept), "a capture still in History keeps its source")
+        XCTAssertEqual(history.items.map(\.url), [kept])
+    }
 }

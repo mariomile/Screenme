@@ -76,10 +76,12 @@ final class CaptureHistory: ObservableObject {
         save()
     }
 
-    /// Moves the file to the Trash and removes the entry. Its saved annotations (`EditSidecar`) go with it.
+    /// Moves the file to the Trash and removes the entry. Its saved annotations (`EditSidecar`) and a recording's
+    /// cursorless source (`BakedCursor`) go with it.
     func trash(_ item: CaptureItem) {
         try? FileManager.default.trashItem(at: item.url, resultingItemURL: nil)
         EditSidecar.remove(for: item.url)
+        if item.kind == .video { BakedCursor.removeSource(for: item.url) }
         remove(item)
     }
 
@@ -95,8 +97,11 @@ final class CaptureHistory: ObservableObject {
                 if isOwnCapture(item.url) {
                     try? FileManager.default.trashItem(at: item.url, resultingItemURL: nil)
                     EditSidecar.remove(for: item.url)
-                    // A recording's hidden events file goes with it.
-                    if item.kind == .video { try? FileManager.default.trashItem(at: RecordingEvents.sidecarURL(for: item.url), resultingItemURL: nil) }
+                    // A recording's hidden events file and cursorless source go with it.
+                    if item.kind == .video {
+                        try? FileManager.default.trashItem(at: RecordingEvents.sidecarURL(for: item.url), resultingItemURL: nil)
+                        BakedCursor.removeSource(for: item.url)
+                    }
                 }
                 continue
             }
