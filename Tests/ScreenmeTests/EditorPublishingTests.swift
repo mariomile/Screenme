@@ -41,4 +41,32 @@ final class EditorPublishingTests: PrefsSandboxTestCase {
         controller.commit(since: before)
         XCTAssertEqual(EditorStore.style(for: .arrow).opacity, 0.5, accuracy: 0.0001)
     }
+
+    /// The Dim slider and the background sliders follow the same rule as the styles: nothing is published or saved
+    /// per tick, both happen at commit.
+    @MainActor
+    func testDimAndBackgroundSlidersPublishAndSaveAtCommit() throws {
+        let image = try XCTUnwrap(CGImage.drawn(width: 40, height: 30, colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!) { _ in })
+        let controller = EditorController(item: CaptureItem(url: URL(fileURLWithPath: "/tmp/editor-test.png"), kind: .image),
+                                          source: ImageSource(image: image, unit: 1))
+        let savedDim = Prefs[Pref.editorSpotlightDim]
+        let savedPadding = EditorStore.background().padding
+        var published = 0
+        let sink = controller.objectWillChange.sink { published += 1 }
+        defer { sink.cancel() }
+
+        let before = controller.checkpoint()
+        for step in 1...10 {
+            controller.applySpotlightDim(0.2 + Double(step) / 100)
+            controller.applyBackground { $0.padding = Double(step) }
+        }
+        XCTAssertEqual(published, 0)
+        XCTAssertEqual(Prefs[Pref.editorSpotlightDim], savedDim)
+        XCTAssertEqual(EditorStore.background().padding, savedPadding)
+
+        controller.commit(since: before)
+        XCTAssertEqual(published, 1)
+        XCTAssertEqual(Prefs[Pref.editorSpotlightDim], 0.3, accuracy: 0.0001)
+        XCTAssertEqual(EditorStore.background().padding, 10)
+    }
 }
