@@ -105,11 +105,11 @@ final class QuickAccessCard: NSObject {
         }
     }
 
-    /// Runs `work` once the capture's file is written. When writing failed it never runs: the card goes, with a toast.
+    /// Runs `work` once the capture's file is written. When writing failed it never runs and the card goes without a
+    /// word: `CaptureCoordinator` reports the error, once.
     private func whenWritten(_ work: @escaping @MainActor () async -> Void) {
         Task {
-            guard let error = await model.whenWritten(work) else { return }
-            Feedback.failure(error.localizedDescription, duration: 3.2)
+            guard await model.whenWritten(work) != nil else { return }
             owner.dismiss(self)
         }
     }
