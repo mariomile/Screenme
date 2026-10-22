@@ -103,17 +103,18 @@ enum TestVideo {
             if audioFrame < frames, let audioInput, audioInput.isReadyForMoreMediaData {
                 appendTone(frame: audioFrame, to: audioInput)
                 audioFrame += 1
+                // A finished input must say so at once: the writer holds the other input back while it waits for more.
+                if audioFrame == frames { audioInput.markAsFinished() }
                 appended = true
             }
             if videoFrame < frames, input.isReadyForMoreMediaData {
                 adaptor.append(buffers[videoFrame % variants], withPresentationTime: CMTime(value: CMTimeValue(videoFrame), timescale: CMTimeScale(fps)))
                 videoFrame += 1
+                if videoFrame == frames { input.markAsFinished() }
                 appended = true
             }
             if appended { idleSince = Date() } else { Thread.sleep(forTimeInterval: 0.001) }
         }
-        input.markAsFinished()
-        audioInput?.markAsFinished()
         let done = XCTestExpectation()
         writer.finishWriting { done.fulfill() }
         _ = XCTWaiter.wait(for: [done], timeout: 120)
