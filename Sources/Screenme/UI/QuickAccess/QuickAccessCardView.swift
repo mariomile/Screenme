@@ -107,8 +107,9 @@ struct QuickAccessCardView: View {
 
             VStack {
                 HStack {
-                    SymbolButton(symbol: "xmark", help: "Close\nHides this card. The capture stays in History.", style: .circle,
-                                 label: "Close") { card?.dismiss() }
+                    SymbolButton("Close", symbol: "xmark", help: "Hides this card. The capture stays in History.", style: .circle) {
+                        card?.dismiss()
+                    }
                     Spacer()
                     circle(.copyForAI)
                     circle(.reportForAI)
@@ -138,8 +139,8 @@ struct QuickAccessCardView: View {
     @ViewBuilder
     private func circle(_ action: CaptureAction) -> some View {
         if action.isAvailable(for: model.item.kind) {
-            SymbolButton(symbol: action.symbol(for: model.item.kind), help: action.tooltip(for: model.item.kind), style: .circle,
-                         label: action.title(for: model.item.kind)) { card?.perform(action) }
+            SymbolButton(action.title(for: model.item.kind), symbol: action.symbol(for: model.item.kind),
+                         help: action.help(for: model.item.kind), style: .circle) { card?.perform(action) }
         }
     }
 }

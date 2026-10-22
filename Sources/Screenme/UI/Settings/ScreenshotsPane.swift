@@ -48,7 +48,7 @@ struct ScreenshotsPane: View {
 
             Section("Sharing") {
                 PrefToggle("Hide sensitive info when sharing", Pref.hideSensitiveWhenSharing,
-                           detail: "Pixelates emails, phone numbers, cards, IBANs, keys, IP addresses and faces in Copy for AI and Share, and replaces them with [redacted] in the copied text. The file itself is not changed.")
+                           detail: "Pixelates emails, phone numbers, cards, IBANs, keys, IP addresses and faces in Copy for AI, Share and Upload & Copy Link, and replaces them with [redacted] in the copied text. The file itself is not changed.")
             }
 
             Section {

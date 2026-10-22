@@ -41,6 +41,33 @@ enum ShortcutAction: String, CaseIterable, Codable, Identifiable {
         }
     }
 
+    /// What it is for, shown when the pointer rests on it. One line: what it does, then why you would.
+    var help: String {
+        switch self {
+        case .allInOne: "Opens a bar with every capture mode, so you can pick one without remembering its shortcut."
+        case .captureArea: "Drag to capture part of the screen. Press Space to switch to window capture. While you hold the button, the arrow keys move the selection by 1 pt (Shift: 10 pt), Option with an arrow resizes it from the bottom and right edges, and Return captures it. To take several shots of the same or an adjusted area, turn on Repeat in the All-in-One bar first: the picker stays open until Esc."
+        case .captureWindow: "Click a window to capture just that window, with its shadow if turned on."
+        case .captureFullscreen: "Captures the whole screen the pointer is on, right away."
+        case .capturePreviousArea: "Captures the same area as your last area capture, without selecting again."
+        case .captureText: "Select an area and its text is copied to the clipboard. Reads QR codes too."
+        case .translateText: "Select an area: its text is recognized, translated on this Mac and copied."
+        case .pickColor: "Click any pixel on screen to copy its color, as HEX or the format chosen in Settings."
+        case .measure: "Shows the distance between edges under the pointer; drag to measure a box. Click or ⌘C copies it."
+        case .scrollingCapture: "Select an area, then scroll: the pages are stitched into one tall image."
+        case .selfTimer: "Select an area; the capture happens after a countdown, so you can open a menu or hover something first."
+        case .recordScreen: "Record an area, a window or the screen as a video or a GIF. Press again to stop."
+        case .pinLastCapture: "Keeps your last screenshot floating above all windows, as a reference while you work."
+        case .openHistory: "Browse, reopen, share or combine everything you captured recently."
+        case .toggleDesktopIcons: "Hides the icons on your desktop for clean screenshots. Run it again to show them."
+        }
+    }
+
+    /// Title, shortcut and what it does, for a tooltip.
+    @MainActor var tooltip: String {
+        let shortcut = ShortcutsModel.shared.combo(for: self).map { "  \($0.display)" } ?? ""
+        return Tooltip.text(title + shortcut, help)
+    }
+
     var symbol: String {
         switch self {
         case .allInOne: "square.grid.2x2"

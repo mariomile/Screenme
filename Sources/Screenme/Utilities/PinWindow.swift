@@ -292,7 +292,7 @@ private final class PinContentView: NSView {
         closeButton.frame = CGRect(x: 8, y: frame.height - 30, width: 22, height: 22)
         closeButton.autoresizingMask = [.maxXMargin, .minYMargin]
         closeButton.alphaValue = 0
-        closeButton.toolTip = "Close\nRemoves this pin from the screen. The capture stays in History."
+        closeButton.toolTip = Tooltip.text("Close", "Removes this pin from the screen. The capture stays in History.")
         addSubview(closeButton)
 
         labelBackground.wantsLayer = true

@@ -66,6 +66,23 @@ enum ToolKind: String, Codable, CaseIterable, Identifiable {
         }
     }
 
+    /// What the tool is for, next to its title in `traits`; shown when the pointer rests on it.
+    var help: String {
+        switch self {
+        case .arrow: "Point at something. Drag to draw; bend it from the middle handle."
+        case .line: "A straight line, solid or dashed."
+        case .rectangle: "Frame an area with an outline or a fill."
+        case .ellipse: "Circle something with an outline or a fill."
+        case .text: "Click to type a note on the image."
+        case .pen: "Draw freehand."
+        case .highlighter: "Mark text or an area with a translucent marker."
+        case .counter: "Number steps 1, 2, 3 with each click."
+        case .pixelate: "Hide private information behind large pixels."
+        case .blur: "Hide private information behind a blur."
+        case .spotlight: "Dim everything except the area you drag, to draw the eye."
+        }
+    }
+
     private static func segment(_ p: CGPoint) -> Annotation.Shape { .segment(p0: p, p1: p, bend: 0.3) }
     private static func box(_ p: CGPoint) -> Annotation.Shape { .box(CGRect(origin: p, size: .zero)) }
     private static func stroke(_ p: CGPoint) -> Annotation.Shape { .stroke([p]) }
@@ -123,6 +140,15 @@ enum ToolChoice: Hashable, Identifiable {
         }
     }
 
+    /// What it is for, shown when the pointer rests on it.
+    var help: String {
+        switch self {
+        case .select: "Select, move, resize and restyle what you drew."
+        case .draw(let kind): kind.help
+        case .crop: "Trim the image to the part that matters."
+        }
+    }
+
     var key: String {
         switch self {
         case .select: "v"
@@ -139,7 +165,7 @@ enum ToolChoice: Hashable, Identifiable {
         }
     }
 
-    var tooltip: String { "\(title) (\(key.uppercased()))\n\(help)" }
+    var tooltip: String { Tooltip.text("\(title) (\(key.uppercased()))", help) }
 }
 
 // MARK: - Style

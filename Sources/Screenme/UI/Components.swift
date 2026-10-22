@@ -90,22 +90,58 @@ private struct HUDButtonBody: View {
     }
 }
 
-/// An SF Symbol button in `HUDButtonStyle`, with its tooltip.
+/// An SF Symbol button in `HUDButtonStyle`. Its tooltip is the title and what it does; VoiceOver reads the title.
+/// Disable it with `.disabled`.
 struct SymbolButton: View {
-    let symbol: String
-    let help: String
-    var style: HUDButtonStyle.Variant = .toolbar()
-    var enabled = true
-    /// The name VoiceOver reads.
-    var label: String?
-    let action: () -> Void
+    /// What VoiceOver reads.
+    private let title: String
+    private let tooltip: String
+    private let symbol: String
+    private let style: HUDButtonStyle.Variant
+    private let action: () -> Void
+    /// Only the old initializer below sets this; new code uses `.disabled`.
+    private var enabled = true
+
+    init(_ title: String, symbol: String, help: String? = nil, style: HUDButtonStyle.Variant = .toolbar(), action: @escaping () -> Void) {
+        self.title = title
+        tooltip = Tooltip.text(title, help)
+        self.symbol = symbol
+        self.style = style
+        self.action = action
+    }
+
+    /// The old form, still used in Editor and Recording: `tooltip` is the whole "Title\nwhat it does", and VoiceOver
+    /// reads `label` or else its first line. Delete once those callers pass the title and the help apart.
+    init(symbol: String, help tooltip: String, style: HUDButtonStyle.Variant = .toolbar(), enabled: Bool = true,
+         label: String? = nil, action: @escaping () -> Void) {
+        title = label ?? String(tooltip.prefix { $0 != "\n" })
+        self.tooltip = tooltip
+        self.symbol = symbol
+        self.style = style
+        self.enabled = enabled
+        self.action = action
+    }
 
     var body: some View {
-        let button = Button(action: action) { Image(systemName: symbol) }
+        Button(action: action) { Image(systemName: symbol) }
             .buttonStyle(HUDButtonStyle(style))
             .disabled(!enabled)
-            .help(help)
-        if let label { button.accessibilityLabel(label) } else { button }
+            .help(tooltip)
+            .accessibilityLabel(title)
+    }
+}
+
+/// The one tooltip format: the title on the first line, then what it does.
+enum Tooltip {
+    static func text(_ title: String, _ help: String?) -> String {
+        help.map { "\(title)\n\($0)" } ?? title
+    }
+}
+
+extension View {
+    /// A tooltip in the one format: `title`, then `help` on the next line.
+    func help(title: String, _ help: String) -> some View {
+        self.help(Tooltip.text(title, help))
     }
 }
 
@@ -242,25 +278,28 @@ struct PermissionRow: View {
 
 // MARK: - Bound controls
 
-/// A switch bound to a Bool preference.
+/// A switch bound to a Bool preference. `detail` shows under the title; `help` is the longer explanation in its tooltip.
 struct PrefToggle: View {
     let title: String
     var detail: String?
+    var help: String?
     @AppStorage private var value: Bool
 
-    init(_ title: String, _ key: PrefKey<Bool>, detail: String? = nil) {
+    init(_ title: String, _ key: PrefKey<Bool>, detail: String? = nil, help: String? = nil) {
         self.title = title
         self.detail = detail
+        self.help = help
         _value = AppStorage(wrappedValue: key.defaultValue, key.name)
     }
 
     var body: some View {
-        Toggle(isOn: $value) {
+        let toggle = Toggle(isOn: $value) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                 if let detail { Text(detail).font(.caption).foregroundStyle(.secondary) }
             }
         }
+        if let help { toggle.help(title: title, help) } else { toggle }
     }
 }
 

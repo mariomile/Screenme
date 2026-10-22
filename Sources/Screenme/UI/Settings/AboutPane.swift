@@ -54,7 +54,7 @@ private struct UpdateSection: View {
             } else {
                 Button("Check for Updates") { Task { await updater.check() } }
                     .disabled(updater.isBusy)
-                    .help("Fetches the latest changes from GitHub and lists what is new since this copy was installed.")
+                    .help(title: "Check for Updates", Updater.checkHelp)
                 status
             }
         }

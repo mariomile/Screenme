@@ -137,7 +137,7 @@ private struct HistoryGridView: View {
                 Button("Stacked") { ImageCombiner.combineAndEdit(images, layout: .stacked) }
             }
             .fixedSize()
-            .help("Combine\nJoins the selected screenshots into one image, side by side or stacked, and opens it in the editor. ⌘-click to select more than one.")
+            .help(title: "Combine", "Joins the selected screenshots into one image, side by side or stacked, and opens it in the editor. ⌘-click to select more than one.")
         }
     }
 
@@ -146,7 +146,7 @@ private struct HistoryGridView: View {
         let images = selectedImages.sorted { $0.date < $1.date }
         if images.count == 2 {
             Button(BeforeAfter.title) { ImageCombiner.beforeAfterAndEdit(before: images[0], after: images[1]) }
-                .help("Before & After\nPuts the two selected screenshots in one image labelled Before (the older) and After, and opens it in the editor. Good for a fix, a bug report or feedback.")
+                .help(title: BeforeAfter.title, "Puts the two selected screenshots in one image labelled Before (the older) and After, and opens it in the editor. Good for a fix, a bug report or feedback.")
         }
     }
 
@@ -312,7 +312,7 @@ private struct HistoryGridCell: View {
                     Label("Text", systemImage: "text.viewfinder")
                         .labelStyle(HistoryBadgeStyle())
                         .padding(6)
-                        .help("Matches text in this image\n\(textMatch)")
+                        .help(title: "Matches text in this image", textMatch)
                 }
             }
             .overlay { if hovering { hoverActions } }
@@ -329,7 +329,8 @@ private struct HistoryGridCell: View {
             LinearGradient(colors: [.clear, .black.opacity(0.55)], startPoint: .center, endPoint: .bottom)
             HStack(spacing: 7) {
                 ForEach([CaptureAction.copy, .save, .pin, .edit, .trash, .share].filter { $0.isAvailable(for: item.kind) }, id: \.self) { action in
-                    HistoryActionButton(symbol: action.symbol(for: item.kind), help: action.tooltip(for: item.kind)) { perform(action) }
+                    SymbolButton(action.title(for: item.kind), symbol: action.symbol(for: item.kind), help: action.help(for: item.kind),
+                                 style: .circle) { perform(action) }
                 }
             }
             .padding(.bottom, 9)
@@ -352,29 +353,6 @@ private struct HistoryGridCell: View {
 
     /// Longest side in pixels: enough for a retina grid cell.
     private static let thumbnailSize = 640
-}
-
-private struct HistoryActionButton: View {
-    let symbol: String
-    let help: String
-    let action: () -> Void
-    @State private var hovering = false
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 28, height: 28)
-                .background(.black.opacity(hovering ? 0.8 : 0.58), in: Circle())
-                .overlay(Circle().strokeBorder(.white.opacity(0.18), lineWidth: 0.5))
-                .scaleEffect(hovering ? 1.08 : 1)
-        }
-        .buttonStyle(.plain)
-        .help(help)
-        .onHover { hovering = $0 }
-        .animation(.easeOut(duration: 0.1), value: hovering)
-    }
 }
 
 private struct HistoryBadgeStyle: LabelStyle {

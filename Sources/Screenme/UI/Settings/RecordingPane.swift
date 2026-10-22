@@ -19,11 +19,11 @@ struct RecordingPane: View {
                 PrefToggle("Save to folder", Pref.afterRecordingSave)
                 PrefToggle("Open in video editor", Pref.afterRecordingOpenEditor)
                 PrefToggle("Create report for AI", Pref.afterRecordingAIReport,
-                           detail: "Transcribes what you said and writes the report folder, as Report for AI does.")
-                    .help("Create report for AI\nWhen a video recording stops, Screenme makes its Report for AI on its own: the keyframes, the contact sheet and a prompt, saved to your save folder and copied.")
+                           detail: "Transcribes what you said and writes the report folder, as Report for AI does.",
+                           help: "When a video recording stops, Screenme makes its Report for AI on its own: the keyframes, the contact sheet and a prompt, saved to your save folder and copied.")
                 PrefToggle("Auto-crop frames", Pref.reportAutoCrop,
-                           detail: "Reports of a screen or area recording cut each keyframe down to the window you were working in.")
-                    .help("Auto-crop frames\nIn a Report for AI of a screen or area recording, each keyframe is cropped to the window where you clicked, drew or rested the pointer, so an agent reads it without searching the whole screen. The uncropped frames stay in frames-full.")
+                           detail: "Reports of a screen or area recording cut each keyframe down to the window you were working in.",
+                           help: "In a Report for AI of a screen or area recording, each keyframe is cropped to the window where you clicked, drew or rested the pointer, so an agent reads it without searching the whole screen. The uncropped frames stay in frames-full.")
             } header: {
                 Text("After recording")
             } footer: {
@@ -42,8 +42,8 @@ struct RecordingPane: View {
                 }
                 PrefToggle("Show cursor", Pref.recordingShowCursor)
                 PrefToggle("Smooth cursor (render after recording)", Pref.recordingSmoothCursor,
-                           detail: "Films the video without the cursor and draws a smooth one with click highlights when the recording stops.")
-                    .help("Smooth cursor (render after recording)\nVideos are filmed without the cursor and Screenme records where it went. When you stop, it draws a smooth cursor with click highlights into the video, in the style last used in the video editor. A copy without the cursor stays with the recording, so the video editor can still change its size, smoothing, click highlight and hide when idle. GIF recordings keep the filmed cursor.")
+                           detail: "Films the video without the cursor and draws a smooth one with click highlights when the recording stops.",
+                           help: "Videos are filmed without the cursor and Screenme records where it went. When you stop, it draws a smooth cursor with click highlights into the video, in the style last used in the video editor. A copy without the cursor stays with the recording, so the video editor can still change its size, smoothing, click highlight and hide when idle. GIF recordings keep the filmed cursor.")
                 PrefToggle("Highlight clicks", Pref.recordingHighlightClicks)
                 Toggle("Show keystrokes", isOn: $keystrokes)
                 if keystrokes && !permissions.isGranted(.accessibility) {

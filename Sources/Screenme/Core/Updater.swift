@@ -46,6 +46,9 @@ final class Updater: ObservableObject {
     typealias Runner = @Sendable (_ executable: String, _ arguments: [String], _ directory: URL, _ log: FileHandle?) async throws
         -> (status: Int32, output: Data)
 
+    /// What Check for Updates does, for its button in Settings and its menu item.
+    static let checkHelp = "Fetches the latest changes from GitHub and lists what is new since this copy was installed."
+
     @Published private(set) var state: State = .idle
 
     /// Checking or updating: the buttons that start either are off.

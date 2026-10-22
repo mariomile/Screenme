@@ -121,7 +121,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: ",").target = self
         let updates = menu.addItem(withTitle: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
         updates.target = self
-        updates.toolTip = "Looks for new Screenme changes on GitHub and offers to install them."
+        updates.toolTip = Updater.checkHelp
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit Screenme", action: #selector(quit), keyEquivalent: "q").target = self
     }
