@@ -32,20 +32,29 @@ final class CaptureHistory: ObservableObject {
     var moveToTrash: (URL) throws -> Void = Sidecar.moveToTrash
     /// Reads the text of an image file. Tests replace it.
     var textReader: @Sendable (URL) async -> String = CaptureHistory.recognizeFile
-    private var reading = Set<URL>()
-    private var backlogTask: Task<Void, Never>?
+    /// Images whose text is still to be read, next first, and the one worker that reads them.
+    private var unread: [URL] = []
+    private var reader: Task<Void, Never>?
+    /// True while reading should wait (a recording runs).
+    private let isPaused: @MainActor () -> Bool
 
     private convenience init() {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Screenme", isDirectory: true)
         try? FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
-        self.init(indexURL: support.appendingPathComponent("history.json"), capturesDirectory: Storage.directory)
-        startBacklog()
+        self.init(indexURL: support.appendingPathComponent("history.json"), capturesDirectory: Storage.directory,
+                  isPaused: { RecordingController.shared.isRecording })
+        // Images from before text search existed, or whose read was cut short, once launch has settled.
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(8))
+            self?.enqueueUnread()
+        }
     }
 
     /// Tests pass their own index file and captures folder.
-    init(indexURL: URL, capturesDirectory: URL) {
+    init(indexURL: URL, capturesDirectory: URL, isPaused: @escaping @MainActor () -> Bool = { false }) {
         self.indexURL = indexURL
+        self.isPaused = isPaused
         self.capturesDirectory = capturesDirectory.standardizedFileURL
         let loaded = Self.load(from: indexURL)
         items = loaded.items
@@ -64,7 +73,7 @@ final class CaptureHistory: ObservableObject {
         items.removeAll { $0.id == item.id || $0.url == item.url }
         items.insert(item, at: 0)
         save()
-        readText(of: item)
+        read(item, first: true)
     }
 
     /// The newest image capture older than `item`, for "Compare with Previous".
@@ -115,7 +124,7 @@ final class CaptureHistory: ObservableObject {
         // The image changed (the editor saved over it): what it says may have too.
         guard let item = items.first(where: { $0.url == url }) else { return }
         recognizedText[url] = nil
-        readText(of: item)
+        read(item, first: true)
     }
 
     // MARK: Persistence
@@ -150,43 +159,35 @@ final class CaptureHistory: ObservableObject {
 
     // MARK: Text in images
 
-    /// Reads the text of an image capture in the background and stores it. Never blocks the UI.
-    private func readText(of item: CaptureItem) {
-        guard item.kind == .image, reading.insert(item.url).inserted else { return }
-        let reader = textReader
-        Task { [weak self] in
-            let text = await reader(item.url)
-            guard let self else { return }
-            reading.remove(item.url)
-            // Dropped from History while reading: nothing to store.
-            guard items.contains(where: { $0.url == item.url }) else { return }
-            recognizedText[item.url] = text
-            save()
-        }
+    /// Queues an image capture for its text: first for a new or changed file, last for the backlog.
+    private func read(_ item: CaptureItem, first: Bool) {
+        guard item.kind == .image else { return }
+        unread.removeAll { $0 == item.url }
+        if first { unread.insert(item.url, at: 0) } else { unread.append(item.url) }
+        guard reader == nil else { return }
+        reader = Task { [weak self] in await self?.readUnread() }
     }
 
-    /// Images from before text search existed (or whose read was cut short) get read a few at a time, at background priority.
-    /// Pauses while a recording runs.
-    func startBacklog(batch: Int = 3, pause: Duration = .seconds(4)) {
-        guard backlogTask == nil else { return }
-        backlogTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(8)) // Let launch settle.
-            while !Task.isCancelled {
-                guard let self else { return }
-                if RecordingController.shared.isRecording {
-                    try? await Task.sleep(for: pause)
-                    continue
-                }
-                let pending = items.filter { $0.kind == .image && recognizedText[$0.url] == nil && !reading.contains($0.url) }
-                if pending.isEmpty { backlogTask = nil; return }
-                for item in pending.prefix(batch) {
-                    let text = await textReader(item.url)
-                    guard items.contains(where: { $0.url == item.url }) else { continue }
-                    recognizedText[item.url] = text
-                }
-                save()
+    /// Every image whose text was never read.
+    func enqueueUnread() {
+        for item in items where recognizedText[item.url] == nil { read(item, first: false) }
+    }
+
+    /// The one worker: reads the queue one image at a time in the background, waiting while `isPaused`, and stores
+    /// each text with its entry. An image dropped from History while queued or read is skipped.
+    private func readUnread(pause: Duration = .seconds(4), spacing: Duration = .seconds(1)) async {
+        defer { reader = nil }
+        while let url = unread.first {
+            if isPaused() {
                 try? await Task.sleep(for: pause)
+                continue
             }
+            unread.removeFirst()
+            let text = await textReader(url)
+            guard items.contains(where: { $0.url == url }) else { continue }
+            recognizedText[url] = text
+            save()
+            if !unread.isEmpty { try? await Task.sleep(for: spacing) }
         }
     }
 

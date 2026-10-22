@@ -129,8 +129,30 @@ final class CaptureHistoryTextTests: PrefsSandboxTestCase {
         try await waitUntil { history.recognizedText[file] == "version 2" }
     }
 
-    @MainActor private func waitUntil(_ condition: @MainActor () -> Bool) async throws {
-        for _ in 0..<200 {
+    /// A recording pauses reading; it resumes when the recording ends, and the backlog is read too.
+    @MainActor func testReadingWaitsWhileRecordingAndReadsTheBacklog() async throws {
+        let index = folder.appendingPathComponent("history.json")
+        let old = folder.appendingPathComponent("old.png"), new = folder.appendingPathComponent("new.png")
+        for file in [old, new] { try Data("x".utf8).write(to: file) }
+        let seed = CaptureHistory(indexURL: index, capturesDirectory: folder, isPaused: { true })
+        seed.add(CaptureItem(url: old, kind: .image))
+        try await waitUntil { (try? String(contentsOf: index, encoding: .utf8))?.contains("old.png") == true }
+
+        var recording = true
+        let history = CaptureHistory(indexURL: index, capturesDirectory: folder, isPaused: { recording })
+        history.textReader = { "text of \($0.lastPathComponent)" }
+        history.enqueueUnread()
+        history.add(CaptureItem(url: new, kind: .image))
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertNil(history.recognizedText[old])
+        XCTAssertNil(history.recognizedText[new])
+
+        recording = false
+        try await waitUntil(attempts: 400) { history.recognizedText[old] == "text of old.png" && history.recognizedText[new] == "text of new.png" }
+    }
+
+    @MainActor private func waitUntil(attempts: Int = 200, _ condition: @MainActor () -> Bool) async throws {
+        for _ in 0..<attempts {
             if condition() { return }
             try await Task.sleep(for: .milliseconds(25))
         }
