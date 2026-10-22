@@ -23,20 +23,179 @@ enum SelectionOverlay {
     /// Repeat capture: the picker stays open after each area or window pick, which `shoot` turns into a capture,
     /// and the selection stays so it can be shot again (Return) or adjusted. Returns when the user closes it with Esc.
     static func selectRepeatedly(shoot: @escaping (SelectionResult) async -> Void) async {
-        _ = await SelectionSession(mode: .screenshot, shoot: shoot).run()
+        _ = await SelectionSession(mode: .screenshot, delivery: .repeating(shoot)).run()
+    }
+}
+
+/// The area the user is picking, in global Cocoa coordinates.
+enum Selection {
+    case none
+    /// The button is down: the selection follows the pointer until it is released or Return confirms it.
+    case dragging(Drag)
+    /// A repeat capture's selection after a shot: Return shoots it again, the arrows adjust it, a new drag replaces it.
+    case held(rect: CGRect, screen: NSScreen)
+
+    struct Drag {
+        let screen: NSScreen
+        var anchor: CGPoint
+        var corner: CGPoint
+        /// Where the moving corner sits relative to the pointer (changes while Space moves the selection).
+        var cornerOffset = CGSize.zero
+        /// The selection after an arrow key moved or resized it: shown as is, whatever modifiers are held,
+        /// until the pointer moves again.
+        var nudged: CGRect?
+
+        init(at point: CGPoint, on screen: NSScreen) {
+            self.screen = screen
+            anchor = Selection.clamp(point, to: screen.frame)
+            corner = anchor
+        }
+
+        /// The selection as the user sees it: `flags` applied unless an arrow key set it, kept on the display, whole points.
+        func rect(modifiers flags: NSEvent.ModifierFlags) -> CGRect {
+            nudged ?? dragRect(modifiers: flags)
+        }
+
+        /// The pointer moved by `delta` to `pointer`. With Space held the whole selection follows it instead of
+        /// being resized.
+        mutating func follow(_ pointer: CGPoint, delta: CGPoint, spaceHeld: Bool, modifiers flags: NSEvent.ModifierFlags) {
+            if delta != .zero { nudged = nil }
+            if spaceHeld {
+                let bounds = screen.frame
+                let rect = rect(modifiers: flags)
+                let dx = max(bounds.minX - rect.minX, min(delta.x, bounds.maxX - rect.maxX))
+                let dy = max(bounds.minY - rect.minY, min(delta.y, bounds.maxY - rect.maxY))
+                anchor.x += dx; anchor.y += dy
+                corner.x += dx; corner.y += dy
+                cornerOffset = CGSize(width: corner.x - pointer.x, height: corner.y - pointer.y)
+            } else {
+                corner = Selection.clamp(CGPoint(x: pointer.x + cornerOffset.width, y: pointer.y + cornerOffset.height), to: screen.frame)
+            }
+        }
+
+        /// An arrow key set the selection to `rect`; the corner keeps following the pointer from where it is now.
+        mutating func nudge(to rect: CGRect, pointer: CGPoint) {
+            anchor = CGPoint(x: rect.minX, y: rect.minY)
+            corner = CGPoint(x: rect.maxX, y: rect.maxY)
+            cornerOffset = CGSize(width: corner.x - pointer.x, height: corner.y - pointer.y)
+            nudged = rect
+        }
+
+        /// The drag's rectangle with `flags` applied: Shift makes it square, Option draws it from the center.
+        private func dragRect(modifiers flags: NSEvent.ModifierFlags) -> CGRect {
+            let bounds = screen.frame
+            let dx = corner.x - anchor.x, dy = corner.y - anchor.y
+            let signX: CGFloat = dx < 0 ? -1 : 1, signY: CGFloat = dy < 0 ? -1 : 1
+            let fromCenter = flags.contains(.option)
+
+            var width = abs(dx), height = abs(dy)
+            if flags.contains(.shift) {
+                let side = max(width, height)
+                width = side
+                height = side
+            }
+            let roomX = fromCenter ? min(anchor.x - bounds.minX, bounds.maxX - anchor.x) : (signX > 0 ? bounds.maxX - anchor.x : anchor.x - bounds.minX)
+            let roomY = fromCenter ? min(anchor.y - bounds.minY, bounds.maxY - anchor.y) : (signY > 0 ? bounds.maxY - anchor.y : anchor.y - bounds.minY)
+            width = min(width, roomX)
+            height = min(height, roomY)
+            if flags.contains(.shift) {
+                let side = min(width, height)
+                width = side
+                height = side
+            }
+
+            let raw: CGRect
+            if fromCenter {
+                raw = CGRect(x: anchor.x - width, y: anchor.y - height, width: width * 2, height: height * 2)
+            } else {
+                raw = CGRect(x: signX > 0 ? anchor.x : anchor.x - width, y: signY > 0 ? anchor.y : anchor.y - height,
+                             width: width, height: height)
+            }
+            let snapped = CGRect(x: raw.minX.rounded(), y: raw.minY.rounded(),
+                                 width: raw.maxX.rounded() - raw.minX.rounded(), height: raw.maxY.rounded() - raw.minY.rounded())
+            return snapped.intersection(bounds)
+        }
+    }
+
+    /// The display the selection is on.
+    var screen: NSScreen? {
+        switch self {
+        case .none: nil
+        case .dragging(let drag): drag.screen
+        case .held(_, let screen): screen
+        }
+    }
+
+    /// What the user sees selected, nil when nothing is.
+    func rect(modifiers flags: NSEvent.ModifierFlags) -> CGRect? {
+        switch self {
+        case .none: nil
+        case .dragging(let drag): drag.rect(modifiers: flags)
+        case .held(let rect, _): rect
+        }
+    }
+
+    var isDragging: Bool {
+        if case .dragging = self { true } else { false }
+    }
+
+    static func clamp(_ point: CGPoint, to rect: CGRect) -> CGPoint {
+        CGPoint(x: min(max(point.x, rect.minX), rect.maxX), y: min(max(point.y, rect.minY), rect.maxY))
     }
 }
 
 /// One run of the picker: owns the panels, the pointer, the drag and the way out.
 @MainActor
 final class SelectionSession {
+    /// Where a pick goes.
+    enum Delivery {
+        /// The pick ends the picker.
+        case once
+        /// Repeat capture: each pick goes to `shoot` and the picker stays open.
+        case repeating(_ shoot: (SelectionResult) async -> Void)
+    }
+
+    /// How the picker looks and behaves, which follows from its mode and delivery.
+    struct Behavior {
+        /// Freezing only makes sense when the result is a still taken from the snapshot; every shot of a repeat is fresh.
+        let freeze: Bool
+        /// Off while repeating: the picker is not frozen, so the pixels it loaded at the start go stale after the first shot.
+        let magnifier: Bool
+        /// A repeat capture sits below the Quick Access cards and toasts of its own shots.
+        let level: NSWindow.Level
+        /// The hint's parts while picking an area and while picking a window.
+        let areaHint: [String]
+        let windowHint: [String]
+
+        init(mode: SelectionMode, delivery: Delivery) {
+            let repeating = if case .repeating = delivery { true } else { false }
+            freeze = Prefs[Pref.freezeScreen] && (mode == .screenshot || mode == .window || mode == .text) && !repeating
+            magnifier = Prefs[Pref.showMagnifier] && !repeating
+            level = repeating ? .statusBar : .screenSaver
+            switch mode {
+            case _ where repeating:
+                areaHint = ["Drag to capture an area", "Enter to capture again", "Space for window", "Esc to close"]
+                windowHint = ["Click a window to capture it", "Space for area", "Esc to close"]
+            case .recording:
+                areaHint = ["Drag to record an area", "Space for window", "Enter for full screen", "Esc to cancel"]
+                windowHint = ["Click a window to record it", "Space for area", "Enter for full screen", "Esc to cancel"]
+            case .scrolling:
+                areaHint = ["Drag over the area to scroll", "Space for window", "Esc to cancel"]
+                windowHint = ["Click the window to scroll", "Space for area", "Esc to cancel"]
+            case .text:
+                areaHint = ["Drag to capture text", "Space for window", "Esc to cancel"]
+                windowHint = ["Click a window to capture its text", "Space for area", "Esc to cancel"]
+            case .screenshot, .window:
+                areaHint = ["Drag to capture an area", "Space for window", "Esc to cancel"]
+                windowHint = ["Click a window to capture it", "Space for area", "Esc to cancel"]
+            }
+        }
+    }
+
     private let mode: SelectionMode
-    private let freeze: Bool
+    private let delivery: Delivery
+    private let behavior: Behavior
     private let showCrosshair = Prefs[Pref.showCrosshair]
-    /// Off while repeating: the picker is not frozen, so the pixels it loaded at the start go stale after the first shot.
-    private let showMagnifier: Bool
-    /// Set for a repeat capture: each pick goes here instead of ending the picker.
-    private let shoot: ((SelectionResult) async -> Void)?
     private var shooting = false
     private var shotTask: Task<Void, Never>?
     private let retina = Prefs[Pref.retinaResolution]
@@ -50,18 +209,10 @@ final class SelectionSession {
     private var panels: [OverlayPanel] = []
     private var views: [OverlayView] = []
 
-    // Pointer and drag, all in global Cocoa coordinates.
+    // Pointer and selection, all in global Cocoa coordinates.
     private var pointer = NSEvent.mouseLocation
-    private var dragging = false
-    private var dragScreen: NSScreen?
-    private var anchor = CGPoint.zero
-    private var corner = CGPoint.zero
-    /// Where the moving corner sits relative to the pointer (changes while Space moves the selection).
-    private var cornerOffset = CGSize.zero
+    private var selection = Selection.none
     private var spaceHeld = false
-    /// The selection after an arrow key moved or resized it: shown as is, whatever modifiers are held,
-    /// until the pointer moves again.
-    private var fixedRect: CGRect?
 
     // Lifecycle
     private var previousApp: NSRunningApplication?
@@ -75,16 +226,12 @@ final class SelectionSession {
     private var outcome: SelectionResult??
     private var continuation: CheckedContinuation<SelectionResult?, Never>?
 
-    init(mode: SelectionMode, shoot: ((SelectionResult) async -> Void)? = nil) {
+    init(mode: SelectionMode, delivery: Delivery = .once) {
         self.mode = mode
-        self.shoot = shoot
+        self.delivery = delivery
+        behavior = Behavior(mode: mode, delivery: delivery)
         windowMode = mode == .window
-        // Freezing only makes sense when the result is a still taken from the snapshot; every shot of a repeat is fresh.
-        freeze = Prefs[Pref.freezeScreen] && (mode == .screenshot || mode == .window || mode == .text) && shoot == nil
-        showMagnifier = Prefs[Pref.showMagnifier] && shoot == nil
     }
-
-    private var repeating: Bool { shoot != nil }
 
     func run() async -> SelectionResult? {
         previousApp = FocusKeeper.frontmostExternal()
@@ -92,12 +239,12 @@ final class SelectionSession {
         guard !screens.isEmpty else { return nil }
 
         // A frozen picker needs the picture before it can show. Otherwise show at once and fill in later.
-        if freeze {
+        if behavior.freeze {
             snapshot = await SnapshotLoader.load(screens: screens, images: true, showsCursor: Prefs[Pref.showCursorInShots])
             windowsLoaded = true
         }
         present(screens)
-        if !freeze {
+        if !behavior.freeze {
             Task { await loadLate(screens) }
         }
 
@@ -122,7 +269,7 @@ final class SelectionSession {
 
     /// Window list and magnifier pixels, loaded while the picker is already on screen.
     private func loadLate(_ screens: [NSScreen]) async {
-        let loaded = await SnapshotLoader.load(screens: screens, images: showMagnifier, showsCursor: false)
+        let loaded = await SnapshotLoader.load(screens: screens, images: behavior.magnifier, showsCursor: false)
         guard !finished else { return }
         snapshot = loaded
         windowsLoaded = true
@@ -141,8 +288,8 @@ final class SelectionSession {
         FocusKeeper.allowBackgroundCursor()
         let hint = hintText()
         for screen in screens {
-            let panel = OverlayPanel(screen: screen, level: repeating ? .statusBar : .screenSaver)
-            let view = OverlayView(screen: screen, backdrop: freeze ? snapshot.images[screen.displayID] : nil)
+            let panel = OverlayPanel(screen: screen, level: behavior.level)
+            let view = OverlayView(screen: screen, backdrop: behavior.freeze ? snapshot.images[screen.displayID] : nil)
             view.source = snapshot.images[screen.displayID]
             view.setHint(hint)
             panel.contentView = view
@@ -242,13 +389,9 @@ final class SelectionSession {
     private func pointerMoved(to location: CGPoint) {
         let delta = CGPoint(x: location.x - pointer.x, y: location.y - pointer.y)
         pointer = location
-        if dragging, let screen = dragScreen {
-            if delta != .zero { fixedRect = nil }
-            if spaceHeld {
-                translateSelection(by: delta, within: screen.frame)
-            } else {
-                corner = Self.clamp(CGPoint(x: location.x + cornerOffset.width, y: location.y + cornerOffset.height), to: screen.frame)
-            }
+        if case .dragging(var drag) = selection {
+            drag.follow(location, delta: delta, spaceHeld: spaceHeld, modifiers: NSEvent.modifierFlags)
+            selection = .dragging(drag)
         }
         refresh()
     }
@@ -276,13 +419,7 @@ final class SelectionSession {
 
     private func mouseDown() {
         if windowMode { return }
-        let screen = NSScreen.at(pointer)
-        dragScreen = screen
-        anchor = Self.clamp(pointer, to: screen.frame)
-        corner = anchor
-        cornerOffset = .zero
-        fixedRect = nil
-        dragging = true
+        selection = .dragging(Selection.Drag(at: pointer, on: NSScreen.at(pointer)))
         startDragPolling()
         refresh()
     }
@@ -292,26 +429,27 @@ final class SelectionSession {
             if windowsLoaded { pickWindow(at: pointer) } else { pendingWindowClick = pointer }
             return
         }
-        guard dragging else { return }
         confirmDrag()
     }
 
     /// Ends the drag with the selection as it is now: a capture when it is big enough, otherwise back to picking.
     /// The button release and Return both come here.
     private func confirmDrag() {
-        guard dragging, let screen = dragScreen else { return }
-        let rect = selectionRect()
+        guard case .dragging(let drag) = selection else { return }
+        let screen = drag.screen
+        let rect = drag.rect(modifiers: NSEvent.modifierFlags)
         stopDragPolling()
-        dragging = false
         spaceHeld = false
         if rect.width >= 3, rect.height >= 3 {
             // A repeat capture keeps the selection on screen for the next shot.
-            if repeating { fixedRect = rect } else { dragScreen = nil; fixedRect = nil }
+            switch delivery {
+            case .once: selection = .none
+            case .repeating: selection = .held(rect: rect, screen: screen)
+            }
             deliver(SelectionResult(target: .area(rect, screen), frozenImage: frozenImage(forArea: rect, on: screen)))
             return
         }
-        dragScreen = nil
-        fixedRect = nil
+        selection = .none
         if mode == .recording {
             finish(SelectionResult(target: .display(screen), frozenImage: nil))
         } else {
@@ -322,7 +460,7 @@ final class SelectionSession {
     /// Ends the picker with `result`, or in a repeat capture takes the shot and stays open.
     /// A second pick while a shot is still being taken is ignored.
     private func deliver(_ result: SelectionResult) {
-        guard let shoot else {
+        guard case .repeating(let shoot) = delivery else {
             finish(result)
             return
         }
@@ -341,23 +479,23 @@ final class SelectionSession {
             finish(nil)
         case kVK_Space:
             guard !event.isARepeat else { return }
-            if dragging {
+            if selection.isDragging {
                 spaceHeld = true
             } else {
                 windowMode.toggle()
                 // A held selection of a repeat capture gives way to picking a window.
-                fixedRect = nil
-                dragScreen = nil
+                selection = .none
                 for view in views { view.setHint(hintText()) }
                 refresh()
             }
         case kVK_Return, kVK_ANSI_KeypadEnter:
-            if dragging {
+            switch selection {
+            case .dragging:
                 confirmDrag()
-            } else if repeating, let rect = fixedRect, let screen = dragScreen {
+            case .held(let rect, let screen):
                 deliver(SelectionResult(target: .area(rect, screen), frozenImage: nil))
-            } else if mode == .recording {
-                finish(SelectionResult(target: .display(NSScreen.at(pointer)), frozenImage: nil))
+            case .none:
+                if mode == .recording { finish(SelectionResult(target: .display(NSScreen.at(pointer)), frozenImage: nil)) }
             }
         case kVK_LeftArrow: arrowPressed(.left, dx: -1, dy: 0)
         case kVK_RightArrow: arrowPressed(.right, dx: 1, dy: 0)
@@ -370,27 +508,29 @@ final class SelectionSession {
     /// With a selection (the button is held) an arrow moves it by one point, ten with Shift; with Option it resizes
     /// from the bottom and right edges. Without one it moves the pointer.
     private func arrowPressed(_ arrow: SelectionNudge.Arrow, dx: CGFloat, dy: CGFloat) {
-        guard dragging || fixedRect != nil, !windowMode, let screen = dragScreen else {
+        let flags = NSEvent.modifierFlags
+        // Shift and Option mean step size and resize here, not square and from the center.
+        func nudged(_ rect: CGRect, on screen: NSScreen) -> CGRect {
+            SelectionNudge.apply(arrow, to: rect, step: SelectionNudge.step(shift: flags.contains(.shift)),
+                                 resize: flags.contains(.option), within: screen.frame)
+        }
+        switch selection {
+        case .dragging(var drag) where !windowMode:
+            drag.nudge(to: nudged(drag.rect(modifiers: []), on: drag.screen), pointer: pointer)
+            selection = .dragging(drag)
+        case .held(let rect, let screen) where !windowMode:
+            selection = .held(rect: nudged(rect, on: screen), screen: screen)
+        default:
             nudge(dx: dx, dy: dy)
             return
         }
-        let flags = NSEvent.modifierFlags
-        // Shift and Option mean step size and resize here, not square and from the center.
-        let current = fixedRect ?? dragRect(modifiers: [])
-        let rect = SelectionNudge.apply(arrow, to: current, step: SelectionNudge.step(shift: flags.contains(.shift)),
-                                        resize: flags.contains(.option), within: screen.frame)
-        // The corner keeps following the pointer from where it is now.
-        anchor = CGPoint(x: rect.minX, y: rect.minY)
-        corner = CGPoint(x: rect.maxX, y: rect.maxY)
-        cornerOffset = CGSize(width: corner.x - pointer.x, height: corner.y - pointer.y)
-        fixedRect = rect
         refresh()
     }
 
     /// Moves the real mouse by one point (ten with Shift) for pixel precision.
     private func nudge(dx: CGFloat, dy: CGFloat) {
         let step: CGFloat = NSEvent.modifierFlags.contains(.shift) ? 10 : 1
-        let frame = (dragScreen ?? NSScreen.at(pointer)).frame
+        let frame = (selection.screen ?? NSScreen.at(pointer)).frame
         let target = CGPoint(x: min(max(pointer.x + dx * step, frame.minX), frame.maxX - 1),
                              y: min(max(pointer.y + dy * step, frame.minY + 1), frame.maxY))
         CGEventSource(stateID: .combinedSessionState)?.localEventsSuppressionInterval = 0
@@ -400,69 +540,14 @@ final class SelectionSession {
 
     // MARK: Geometry
 
-    private static func clamp(_ point: CGPoint, to rect: CGRect) -> CGPoint {
-        CGPoint(x: min(max(point.x, rect.minX), rect.maxX), y: min(max(point.y, rect.minY), rect.maxY))
-    }
-
     private func window(at point: CGPoint) -> WindowEntry? {
         snapshot.windows.first { $0.frame.contains(point) }
-    }
-
-    /// The selection as the user sees it: modifiers applied, kept on the display, whole points.
-    private func selectionRect() -> CGRect {
-        fixedRect ?? dragRect(modifiers: NSEvent.modifierFlags)
-    }
-
-    /// The drag's rectangle with `flags` applied: Shift makes it square, Option draws it from the center.
-    private func dragRect(modifiers flags: NSEvent.ModifierFlags) -> CGRect {
-        guard let screen = dragScreen else { return .zero }
-        let bounds = screen.frame
-        let dx = corner.x - anchor.x, dy = corner.y - anchor.y
-        let signX: CGFloat = dx < 0 ? -1 : 1, signY: CGFloat = dy < 0 ? -1 : 1
-        let fromCenter = flags.contains(.option)
-
-        var width = abs(dx), height = abs(dy)
-        if flags.contains(.shift) {
-            let side = max(width, height)
-            width = side
-            height = side
-        }
-        let roomX = fromCenter ? min(anchor.x - bounds.minX, bounds.maxX - anchor.x) : (signX > 0 ? bounds.maxX - anchor.x : anchor.x - bounds.minX)
-        let roomY = fromCenter ? min(anchor.y - bounds.minY, bounds.maxY - anchor.y) : (signY > 0 ? bounds.maxY - anchor.y : anchor.y - bounds.minY)
-        width = min(width, roomX)
-        height = min(height, roomY)
-        if flags.contains(.shift) {
-            let side = min(width, height)
-            width = side
-            height = side
-        }
-
-        let raw: CGRect
-        if fromCenter {
-            raw = CGRect(x: anchor.x - width, y: anchor.y - height, width: width * 2, height: height * 2)
-        } else {
-            raw = CGRect(x: signX > 0 ? anchor.x : anchor.x - width, y: signY > 0 ? anchor.y : anchor.y - height,
-                         width: width, height: height)
-        }
-        let snapped = CGRect(x: raw.minX.rounded(), y: raw.minY.rounded(),
-                             width: raw.maxX.rounded() - raw.minX.rounded(), height: raw.maxY.rounded() - raw.minY.rounded())
-        return snapped.intersection(bounds)
-    }
-
-    /// Space held: the whole selection follows the pointer instead of being resized.
-    private func translateSelection(by delta: CGPoint, within bounds: CGRect) {
-        let rect = selectionRect()
-        let dx = max(bounds.minX - rect.minX, min(delta.x, bounds.maxX - rect.maxX))
-        let dy = max(bounds.minY - rect.minY, min(delta.y, bounds.maxY - rect.maxY))
-        anchor.x += dx; anchor.y += dy
-        corner.x += dx; corner.y += dy
-        cornerOffset = CGSize(width: corner.x - pointer.x, height: corner.y - pointer.y)
     }
 
     // MARK: Frozen result
 
     private func frozenImage(forArea rect: CGRect, on screen: NSScreen) -> CGImage? {
-        guard freeze, let image = snapshot.images[screen.displayID] else { return nil }
+        guard behavior.freeze, let image = snapshot.images[screen.displayID] else { return nil }
         return image.cropped(to: rect, on: screen, retina: retina)
     }
 
@@ -477,9 +562,11 @@ final class SelectionSession {
 
     private func refresh() {
         guard !finished else { return }
-        let activeScreen = dragScreen ?? NSScreen.at(pointer)
-        let pointerPoint = dragScreen.map { Self.clamp(pointer, to: $0.frame) } ?? pointer
-        let selection: CGRect? = dragging || fixedRect != nil ? selectionRect() : nil
+        let selectedScreen = self.selection.screen
+        let activeScreen = selectedScreen ?? NSScreen.at(pointer)
+        let pointerPoint = selectedScreen.map { Selection.clamp(pointer, to: $0.frame) } ?? pointer
+        let dragging = self.selection.isDragging
+        let selection = self.selection.rect(modifiers: NSEvent.modifierFlags)
         let hovered = windowMode && !dragging ? window(at: pointer) : nil
         let style: PointerStyle = windowMode ? .glyph(pointerSymbol) : (showCrosshair ? .full : .small)
 
@@ -490,7 +577,7 @@ final class SelectionSession {
             state.hintVisible = isActive && !dragging
             if isActive {
                 state.pointer = pointerPoint
-                if showMagnifier, !windowMode, view.source != nil {
+                if behavior.magnifier, !windowMode, view.source != nil {
                     let frame = view.screen.frame
                     let coordinates = "\(Int(pointerPoint.x - frame.minX)), \(Int(frame.maxY - pointerPoint.y))"
                     var size: String?
@@ -498,7 +585,7 @@ final class SelectionSession {
                     state.loupe = LoupeInfo(coordinates: coordinates, size: size)
                 }
             }
-            if view.screen === dragScreen, let selection, selection.width >= 1 || selection.height >= 1 {
+            if view.screen === selectedScreen, let selection, selection.width >= 1 || selection.height >= 1 {
                 state.selection = selection
             }
             if let hovered {
@@ -523,19 +610,7 @@ final class SelectionSession {
     // MARK: Hint
 
     private func hintText() -> NSAttributedString {
-        let parts: [String]
-        switch (mode, windowMode) {
-        case (_, false) where repeating: parts = ["Drag to capture an area", "Enter to capture again", "Space for window", "Esc to close"]
-        case (_, true) where repeating: parts = ["Click a window to capture it", "Space for area", "Esc to close"]
-        case (.recording, false): parts = ["Drag to record an area", "Space for window", "Enter for full screen", "Esc to cancel"]
-        case (.recording, true): parts = ["Click a window to record it", "Space for area", "Enter for full screen", "Esc to cancel"]
-        case (.scrolling, false): parts = ["Drag over the area to scroll", "Space for window", "Esc to cancel"]
-        case (.scrolling, true): parts = ["Click the window to scroll", "Space for area", "Esc to cancel"]
-        case (.text, false): parts = ["Drag to capture text", "Space for window", "Esc to cancel"]
-        case (.text, true): parts = ["Click a window to capture its text", "Space for area", "Esc to cancel"]
-        case (_, false): parts = ["Drag to capture an area", "Space for window", "Esc to cancel"]
-        case (_, true): parts = ["Click a window to capture it", "Space for area", "Esc to cancel"]
-        }
+        let parts = windowMode ? behavior.windowHint : behavior.areaHint
         let regular = NSFont.systemFont(ofSize: 13, weight: .regular)
         let strong = NSFont.systemFont(ofSize: 13, weight: .semibold)
         let result = NSMutableAttributedString()
