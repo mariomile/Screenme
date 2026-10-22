@@ -54,14 +54,15 @@ enum EditSidecar {
         return nil
     }
 
-    /// Renames the sidecar to `.<capture>.screenme-edit.unreadable-<date>`, kept for a person to look at.
+    /// Renames the sidecar to `.<capture>.screenme-edit.unreadable-<date>`, kept for a person to look at until the
+    /// capture leaves (`Sidecar.all(for:)` finds it).
     private static func setAside(for capture: URL, now: Date = Date()) {
         let folder = Sidecar.edit.url(for: capture)
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd'T'HHmmss"
         let aside = folder.deletingLastPathComponent()
-            .appendingPathComponent("\(folder.lastPathComponent).unreadable-\(formatter.string(from: now))", isDirectory: true)
+            .appendingPathComponent("\(folder.lastPathComponent)\(Sidecar.unreadableMark)\(formatter.string(from: now))", isDirectory: true)
         try? FileManager.default.moveItem(at: folder, to: aside)
     }
 }

@@ -118,11 +118,47 @@ final class CaptureHistoryTests: PrefsSandboxTestCase {
         }
     }
 
-    /// Trash is never a hard delete: Put Back must find the capture and every sidecar it had.
+    /// Writes an edit sidecar that cannot be read and opens it, so it is set aside, then a good one in its place.
+    private func setAsideUnreadableEdit(for capture: URL) throws -> URL {
+        try write(.edit, for: capture)
+        try Data("{ not json".utf8).write(to: EditSidecar.documentURL(for: capture))
+        XCTAssertNil(EditSidecar.load(for: capture), "set aside")
+        try write(.edit, for: capture)
+        let prefix = ".\(capture.lastPathComponent).screenme-edit.unreadable-"
+        let aside = try FileManager.default.contentsOfDirectory(atPath: captures.path).filter { $0.hasPrefix(prefix) }
+        XCTAssertEqual(aside.count, 1)
+        return captures.appendingPathComponent(try XCTUnwrap(aside.first), isDirectory: true)
+    }
+
+    /// An edit sidecar set aside as unreadable belongs to its capture: trash and prune take it too.
+    @MainActor func testTrashAndPruneTakeUnreadableEditSidecarsWithTheCapture() throws {
+        Prefs[Pref.historyDays] = 30
+        let now = Date()
+        let trashed = try file("trashed.png", in: captures)
+        let expired = try file("expired.png", in: captures)
+        let kept = try file("kept.png", in: captures)
+        for url in [trashed, expired, kept] { _ = try setAsideUnreadableEdit(for: url) }
+        let history = history()
+        history.moveToTrash = { try FileManager.default.removeItem(at: $0) }
+        let item = CaptureItem(url: trashed, kind: .image, date: now)
+        history.add(item)
+        history.add(CaptureItem(url: expired, kind: .image, date: now.addingTimeInterval(-31 * 86_400)))
+        history.add(CaptureItem(url: kept, kind: .image, date: now))
+
+        history.trash(item)
+        history.prune(now: now)
+
+        let left = try FileManager.default.contentsOfDirectory(atPath: captures.path).sorted()
+        XCTAssertEqual(Sidecar.all(for: kept).count, 2, "a capture still in History keeps both")
+        XCTAssertEqual(left, ([kept] + Sidecar.all(for: kept)).map(\.lastPathComponent).sorted())
+    }
+
+    /// Trash is never a hard delete: the capture and every sidecar it had go to the Trash.
     @MainActor func testTrashMovesTheCaptureAndItsSidecarsToTheTrash() throws {
         let trash = folder.appendingPathComponent("Trash", isDirectory: true)
         try FileManager.default.createDirectory(at: trash, withIntermediateDirectories: true)
         let capture = try file("both.mp4", in: captures)
+        let aside = try setAsideUnreadableEdit(for: capture)
         for sidecar in Sidecar.allCases { try write(sidecar, for: capture) }
         let history = history()
         history.moveToTrash = { try FileManager.default.moveItem(at: $0, to: trash.appendingPathComponent($0.lastPathComponent)) }
@@ -135,7 +171,7 @@ final class CaptureHistoryTests: PrefsSandboxTestCase {
         history.trash(item)
 
         let inTrash = try FileManager.default.contentsOfDirectory(atPath: trash.path).sorted()
-        XCTAssertEqual(inTrash, ([capture] + Sidecar.allCases.map { $0.url(for: capture) }).map(\.lastPathComponent).sorted())
+        XCTAssertEqual(inTrash, ([capture, aside] + Sidecar.allCases.map { $0.url(for: capture) }).map(\.lastPathComponent).sorted())
         XCTAssertTrue(FileManager.default.fileExists(atPath: trash.appendingPathComponent(".both.mp4.screenme-edit/edit.json").path))
         XCTAssertEqual(forgotten, [capture], "one notification tells memory to forget the capture")
     }

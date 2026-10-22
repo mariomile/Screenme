@@ -27,13 +27,22 @@ enum Sidecar: CaseIterable {
         }
     }
 
-    /// The sidecars `capture` has on disk.
+    /// Marks an edit sidecar that could not be read and was moved aside whole, `.<capture>.screenme-edit.unreadable-<date>/`
+    /// (`EditSidecar`). It still belongs to the capture.
+    static let unreadableMark = ".unreadable-"
+
+    /// The sidecars `capture` has on disk, then every edit sidecar set aside as unreadable.
     static func all(for capture: URL) -> [URL] {
-        allCases.map { $0.url(for: capture) }.filter { FileManager.default.fileExists(atPath: $0.path) }
+        let present = allCases.map { $0.url(for: capture) }.filter { FileManager.default.fileExists(atPath: $0.path) }
+        let folder = capture.deletingLastPathComponent()
+        let setAside = edit.url(for: capture).lastPathComponent + unreadableMark
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
+        return present + names.filter { $0.hasPrefix(setAside) }.sorted().map { folder.appendingPathComponent($0, isDirectory: true) }
     }
 
-    /// The one way a capture leaves: the file and every sidecar it has go to the Trash, so Put Back restores all of
-    /// them, and `.captureTrashed` tells whatever remembers the file to forget it. Tests pass their own `moveToTrash`.
+    /// The one way a capture leaves: the file and everything `all(for:)` finds go to the Trash, so nothing is
+    /// hard-deleted, and `.captureTrashed` tells whatever remembers the file to forget it. Each goes as its own
+    /// Trash item: Finder's Put Back restores only the capture, not its sidecars. Tests pass their own `moveToTrash`.
     @MainActor
     static func trash(with capture: URL, moveToTrash: (URL) throws -> Void = Sidecar.moveToTrash) {
         for url in [capture] + all(for: capture) { try? moveToTrash(url) }

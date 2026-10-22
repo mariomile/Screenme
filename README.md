@@ -8,7 +8,7 @@ A lightweight, native macOS capture tool. Capture, drop it where it goes, move o
 - **Before & After**: select two screenshots in History, or right-click a Quick Access card and choose Before & After (it pairs the card with the previous screenshot), to get one image labelled Before and After for PRs, bug reports and feedback.
 - **Nudge the selection with the arrow keys**: while you drag an area, hold the button and press the arrows to move it by 1 pt (`⇧` for 10 pt), `⌥` with an arrow to resize it from the bottom and right edges, and `Return` to capture; the size pill updates as you go. Before you start dragging, the arrows still move the pointer.
 - **Repeat capture**: in the All-in-One bar (`R` or the Repeat tile), turn on Repeat and pick Area. The picker stays open after each shot and keeps the selection: `Return` shoots the same area again, the arrows adjust it, a new drag picks another, `Esc` closes. Each shot goes through the normal after-capture actions. Repeat is for the next Area capture only, and the screen is not frozen.
-- **Search History by the text in a screenshot**: type a word in the History search box and cards whose image contains it show up, next to the date, kind and file name matches (case and accents ignored). A Text badge marks them; hover it for the matching line. Screenshots are read on this Mac with Vision, in the background, when they are captured, when the editor saves over them, and a few at a time for older ones.
+- **Search History by the text in a screenshot**: type a word in the History search box and cards whose image contains it show up, next to the date, kind and file name matches (case and accents ignored). A Text badge marks them; hover it for the matching line. Screenshots are read on this Mac with Vision, in the background, when they are captured, when the editor saves over them, and one at a time, about a second apart, for older ones.
 - **Record area or window** (`⇧⌘5`, press again or click the red menu bar icon to stop): MP4 at 30 fps, with a native trim bar and GIF export from Quick Access.
 - **Video editor polish**: put a recording on a gradient, color, wallpaper or image background with padding, rounded corners, shadow and an aspect ratio (16:9, 9:16, 1:1, 4:3); Auto zoom in on your clicks, following the cursor, or add zooms by hand on the timeline; speed the clip up to 3x; export H.264 or HEVC, or a GIF with its own width and frame rate. With Settings > Recording > Smooth cursor, videos are filmed without the cursor and the editor draws a smooth one with click highlights, resizable, and hidden when idle if you like. One GPU pass: a 30 s 1080p export takes about 4 seconds on an Apple Silicon Mac, and the preview is the export.
 - **Capture screen** (`⇧⌘3`, or from the menu bar): the whole screen the pointer is on.
@@ -52,6 +52,13 @@ Settings > Upload takes Endpoint URL, Region (`auto` for R2), Bucket, Access Key
 4. Public URL `https://f00X.backblazeb2.com/file/<bucket>`, or the bucket's friendly URL.
 
 About 20 MB on disk (one app for Apple silicon and Intel Macs), no dependencies, system frameworks only (ScreenCaptureKit, AVFoundation, AVKit, SwiftUI).
+
+## Changes in this version
+
+- The video editor's remembered choices (background, auto zoom, cursor, codec, GIF settings) reset to the defaults once.
+- A GIF recording, when it stops, uses the video editor's GIF settings: its max width and frame rate.
+- `Report` folders made before this version must be made again (Report for AI on the recording) before `screenme` can read them.
+- Smooth cursor recordings made before this version keep the cursor they were saved with: the video editor cannot restyle it.
 
 ## Build
 
