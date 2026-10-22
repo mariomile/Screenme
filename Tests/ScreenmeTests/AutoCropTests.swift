@@ -94,7 +94,7 @@ final class AutoCropTests: XCTestCase {
         let cut = AIReporter.cropped(image, to: CGRect(x: 100, y: 50, width: 480, height: 300), area: CGSize(width: 1440, height: 900))
         XCTAssertEqual(cut?.width, 960)
         XCTAssertEqual(cut?.height, 600)
-        XCTAssertEqual(AIReporter.fitted(image, maxSide: 1920).width, 1920)
-        XCTAssertEqual(AIReporter.fitted(image, maxSide: 1920).height, 1200)
+        XCTAssertEqual(image.scaledDown(maxWidth: 1920, maxHeight: 1920).width, 1920)
+        XCTAssertEqual(image.scaledDown(maxWidth: 1920, maxHeight: 1920).height, 1200)
     }
 }

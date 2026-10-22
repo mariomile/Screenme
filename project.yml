@@ -13,6 +13,8 @@ targets:
     platform: macOS
     sources:
       - Sources/Screenme
+      # The report format and drawing shared with the command line tool.
+      - Sources/ReportFormat
       # The agent skill, printed by `screenme skill` from Contents/Resources.
       - path: skills/screenme/SKILL.md
         buildPhase: resources
@@ -53,7 +55,7 @@ targets:
   screenme-cli:
     type: tool
     platform: macOS
-    sources: [Sources/ScreenmeCLI]
+    sources: [Sources/ScreenmeCLI, Sources/ReportFormat]
     settings:
       base:
         PRODUCT_NAME: screenme
@@ -80,6 +82,7 @@ targets:
     # The tool's sources compiled into the test bundle; main.swift runs the tool, so it stays out.
     sources:
       - Tests/ScreenmeCLITests
+      - Sources/ReportFormat
       - path: Sources/ScreenmeCLI
         excludes: [main.swift]
     settings:

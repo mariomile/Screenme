@@ -1,4 +1,6 @@
 import CoreGraphics
+import ImageIO
+import UniformTypeIdentifiers
 
 /// The one way to draw a new bitmap: 8-bit RGBA, premultiplied, bottom-left origin.
 extension CGImage {
@@ -18,5 +20,25 @@ extension CGImage {
             context.draw(self, in: bounds)
             draw(context, bounds)
         } ?? self
+    }
+
+    /// This image scaled down to fit inside `maxWidth` by `maxHeight` pixels, keeping its shape, or as it is when it fits.
+    func scaledDown(maxWidth: Int, maxHeight: Int = .max) -> CGImage {
+        let scale = min(Double(maxWidth) / Double(width), Double(maxHeight) / Double(height))
+        guard scale < 1 else { return self }
+        let newWidth = max(Int((Double(width) * scale).rounded()), 1), newHeight = max(Int((Double(height) * scale).rounded()), 1)
+        return Self.drawn(width: newWidth, height: newHeight, colorSpace: colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!) { context in
+            context.interpolationQuality = .high
+            context.draw(self, in: CGRect(x: 0, y: 0, width: newWidth, height: newHeight))
+        } ?? self
+    }
+
+    /// Writes the image to `url` as a PNG.
+    func writePNG(to url: URL) throws {
+        guard let destination = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil) else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+        CGImageDestinationAddImage(destination, self, nil)
+        guard CGImageDestinationFinalize(destination) else { throw CocoaError(.fileWriteUnknown) }
     }
 }

@@ -26,9 +26,8 @@ struct CaptureFolder {
         }
     }
 
-    /// `~/Library/Application Support/Screenme/Captures`, as `Storage.directory` in the app.
-    static let standard = CaptureFolder(url: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        .appendingPathComponent("Screenme/Captures", isDirectory: true))
+    /// Where the app writes captures.
+    static let standard = CaptureFolder(url: ScreenmePaths.captures)
 
     let url: URL
 

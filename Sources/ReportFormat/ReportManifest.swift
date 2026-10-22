@@ -4,6 +4,17 @@ import Foundation
 /// seconds of the video; positions and crops are points from the top-left corner of the recorded area; files
 /// are relative to the report folder.
 struct ReportManifest: Codable, Equatable {
+    /// What the recording shows and where it was made.
+    struct Environment: Codable, Equatable {
+        var app: String?
+        var window: String?
+        var page: String?
+        var system: String
+        var screen: String?
+        var video: String
+        var date: String
+    }
+
     struct Size: Codable, Equatable {
         var width: Double
         var height: Double
@@ -34,7 +45,7 @@ struct ReportManifest: Codable, Equatable {
         var number: Int
         var time: Double
         var moment: Double
-        var reason: Keyframe.Reason
+        var reason: KeyframeReason
         var file: String
         var fullFile: String?
         var crop: Crop?
@@ -73,7 +84,7 @@ struct ReportManifest: Codable, Equatable {
 
     var version = 1
     var title: String
-    var environment: AIReport.Environment
+    var environment: Environment
     var duration: Double
     /// The recorded area in points, when the recording has events.
     var area: Size?
@@ -96,41 +107,7 @@ struct ReportManifest: Codable, Equatable {
     }
 }
 
-extension AIReport {
-    var manifest: ReportManifest {
-        let recorded = events?.events ?? []
-        let texts = eventTexts
-        func owner(_ event: Int) -> Int {
-            (keyframes.firstIndex { $0.events.contains(event) } ?? 0) + 1
-        }
-        let entries = keyframes.enumerated().map { index, keyframe in
-            ReportManifest.KeyframeEntry(
-                number: index + 1, time: keyframe.time, moment: keyframe.moment, reason: keyframe.reason,
-                file: Self.frameName(index), fullFile: isCropped ? Self.fullFrameName(index) : nil,
-                crop: crops.indices.contains(index) ? crops[index].map {
-                    ReportManifest.Crop(rect: ReportManifest.Rect(x: $0.rect.minX, y: $0.rect.minY, width: $0.rect.width, height: $0.rect.height),
-                                        apps: $0.apps)
-                } : nil,
-                text: keyframe.text,
-                events: keyframe.events.map { ReportManifest.KeyframeEvent(index: $0, time: recorded[$0].time, kind: recorded[$0].kind, text: texts[$0]) })
-        }
-        let marks = marks.map { mark in
-            let event = recorded[mark.event]
-            return ReportManifest.Mark(number: mark.number, time: event.time, kind: event.kind, tool: event.tool, color: event.color,
-                                       box: event.box, x: event.x, y: event.y, keyframe: owner(mark.event))
-        }
-        func segments(_ list: [TranscriptSegment]) -> [ReportManifest.Segment] {
-            list.map { ReportManifest.Segment(start: $0.start, end: $0.end, text: $0.text) }
-        }
-        return ReportManifest(
-            title: title, environment: environment, duration: duration,
-            area: events.map { ReportManifest.Size(width: $0.width, height: $0.height) },
-            video: Self.videoName, summary: Self.summaryName, contactSheet: Self.contactSheetName,
-            contactSheetFull: isCropped ? Self.fullContactSheetName : nil,
-            croppedTo: isCropped ? AutoCrop.appNames(crops) : nil,
-            keyframes: entries,
-            transcript: ReportManifest.Transcript(segments: segments(transcript.segments), words: segments(transcript.words),
-                                                  noNarration: transcript.segments.isEmpty ? noNarration : nil),
-            marks: marks, events: recorded, windows: events?.windows)
-    }
+/// Why a keyframe was cut.
+enum KeyframeReason: String, Codable {
+    case start, drawing, pin, click, drag, scroll, app, change, cue
 }

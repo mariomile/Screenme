@@ -12,7 +12,7 @@ struct MCPServer {
 
     let folder: CaptureFolder
     /// Where Report for AI writes its folders: the app's save folder.
-    var reports: URL = MCPServer.saveFolder
+    var reports: URL = ScreenmePaths.saveFolder
     /// Takes a capture and returns its file. `CaptureFolder.take` in the tool, a stub in tests.
     let capture: (CaptureRequest) async throws -> URL
 
@@ -137,10 +137,7 @@ struct MCPServer {
                 guard let latest = folder.latest else { return failure("There are no captures yet in \(folder.url.path)") }
                 return imageResult(latest.url)
             case "get_latest_report":
-                guard let report = Self.latestReport(in: reports) else {
-                    return failure("There are no reports yet in \(reports.path). Make one with Report for AI on a recording.")
-                }
-                return try reportResult(report)
+                return try reportResult(ReportBundle.open("latest", reports: reports))
             case "zoom_report":
                 let request = try Self.zoomRequest(from: arguments)
                 let zoom = try await ReportBundle.open(request.bundle, reports: reports)
@@ -150,7 +147,7 @@ struct MCPServer {
             case "inspect_report":
                 let report = try ReportBundle.open(arguments["report"] as? String ?? "latest", reports: reports)
                 if arguments["json"] as? Bool == true {
-                    return ["content": [text(try String(contentsOf: report.url.appendingPathComponent(ReportBundle.manifestName), encoding: .utf8))]]
+                    return ["content": [text(try report.manifestText)]]
                 }
                 return ["content": [text(try report.summary)]]
             default:
@@ -197,36 +194,14 @@ struct MCPServer {
 
     // MARK: Reports
 
-    /// The save folder from the app's settings, the Desktop until it is changed.
-    static var saveFolder: URL {
-        if let path = UserDefaults(suiteName: "dev.mariomiletta.Screenme")?.string(forKey: "saveDirectory"), !path.isEmpty {
-            return URL(fileURLWithPath: path, isDirectory: true)
-        }
-        return FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask)[0]
-    }
-
-    /// The newest `Report …` folder in `parent` that has a `summary.md`, by the date of that file.
-    static func latestReport(in parent: URL) -> URL? {
-        let folders = (try? FileManager.default.contentsOfDirectory(at: parent, includingPropertiesForKeys: nil, options: .skipsHiddenFiles)) ?? []
-        let reports: [(URL, Date)] = folders.compactMap { folder in
-            guard folder.lastPathComponent.hasPrefix("Report ") else { return nil }
-            let file = folder.appendingPathComponent("summary.md")
-            guard let date = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate else { return nil }
-            return (folder, date)
-        }
-        return reports.max { $0.1 < $1.1 }?.0
-    }
-
     /// summary.md, then the contact sheet with its path, then the folder's path.
-    private func reportResult(_ folder: URL) throws -> [String: Any] {
-        let markdown = try String(contentsOf: folder.appendingPathComponent("summary.md"), encoding: .utf8)
-        var content: [[String: Any]] = [text(markdown)]
-        let sheet = folder.appendingPathComponent("contact-sheet.png")
-        if let png = Self.pngData(of: sheet) {
+    private func reportResult(_ report: ReportBundle) throws -> [String: Any] {
+        var content: [[String: Any]] = [text(try report.summary)]
+        if let png = Self.pngData(of: report.contactSheet) {
             content.append(["type": "image", "data": png.base64EncodedString(), "mimeType": "image/png"])
-            content.append(text(sheet.path))
+            content.append(text(report.contactSheet.path))
         }
-        content.append(text("Report folder: \(folder.path)"))
+        content.append(text("Report folder: \(report.url.path)"))
         return ["content": content]
     }
 

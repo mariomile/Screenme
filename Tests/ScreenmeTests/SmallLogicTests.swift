@@ -9,9 +9,10 @@ final class DurationFormatTests: XCTestCase {
         XCTAssertEqual(Duration.format(3723), "1:02:03")
     }
 
-    func testRoundsWithoutTenthsAndCutsWithTenths() {
+    func testRoundsToTheSecondOrTheTenth() {
         XCTAssertEqual(Duration.format(11.6), "0:12")
-        XCTAssertEqual(Duration.format(12.47, tenths: true), "0:12.4")
+        XCTAssertEqual(Duration.format(12.47, tenths: true), "0:12.5", "to the nearest tenth")
+        XCTAssertEqual(Duration.format(3723.46, tenths: true), "1:02:03.5")
         XCTAssertEqual(Duration.format(12, tenths: true), "0:12.0")
     }
 

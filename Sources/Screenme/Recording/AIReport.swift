@@ -63,22 +63,8 @@ struct Transcript: Equatable {
 /// `report.json`, the manifest with every word, event, mark and window.
 /// Everything here is plain data; `AIReporter` does the transcription, the frames and the files.
 struct AIReport {
-    /// What the recording shows and where it was made.
-    struct Environment: Codable, Equatable {
-        var app: String?
-        var window: String?
-        var page: String?
-        var system: String
-        var screen: String?
-        var video: String
-        var date: String
-    }
+    typealias Environment = ReportManifest.Environment
 
-    static let videoName = "recording.mp4"
-    static let summaryName = "summary.md"
-    static let manifestName = "report.json"
-    static let contactSheetName = "contact-sheet.png"
-    static let fullContactSheetName = "contact-sheet-full.png"
 
     /// The report folder.
     var folder: URL
@@ -97,16 +83,6 @@ struct AIReport {
     var crops: [AutoCrop.Crop?] = []
 
     var isCropped: Bool { crops.contains { $0 != nil } }
-
-    /// `frames/frame-03.png` is keyframe #3 (index 2).
-    static func frameName(_ index: Int) -> String {
-        String(format: "frames/frame-%02d.png", index + 1)
-    }
-
-    /// The uncropped keyframe, when the report is cropped.
-    static func fullFrameName(_ index: Int) -> String {
-        String(format: "frames-full/frame-%02d.png", index + 1)
-    }
 
     /// Fills `keyframes` for a video of `duration` seconds, sampled as `samples`.
     mutating func makeKeyframes(duration: Double, samples: [FrameSample]) {
@@ -280,13 +256,53 @@ struct AIReport {
             + "For a closer look at a moment (something that moves, or happens between keyframes), run `screenme zoom \"\(folder.path)\" --at 0:12` (or `--phrase \"words they said\"`, or `--mark N`): it prints the path of a grid of frames around it. "
             + "If the request is still unclear, ask the user before you change anything.")
         lines.append("")
-        lines.append("- Contact sheet: `\(path(Self.contactSheetName))`")
-        lines.append("- Frames: `\(path("frames"))`" + (keyframes.isEmpty ? "" : " (`frame-01.png` to `\(String(format: "frame-%02d.png", keyframes.count))`)"))
+        lines.append("- Contact sheet: `\(path(ReportLayout.contactSheet))`")
+        lines.append("- Frames: `\(path(ReportLayout.frames))`"
+            + (keyframes.isEmpty ? "" : " (`\(ReportLayout.frameFile(0))` to `\(ReportLayout.frameFile(keyframes.count - 1))`)"))
         if isCropped {
-            lines.append("- Uncropped frames: `\(path("frames-full"))`, and their contact sheet: `\(path(Self.fullContactSheetName))`")
+            lines.append("- Uncropped frames: `\(path(ReportLayout.fullFrames))`, and their contact sheet: `\(path(ReportLayout.fullContactSheet))`")
         }
-        lines.append("- Video: `\(path(Self.videoName))`")
-        lines.append("- Manifest: `\(path(Self.manifestName))` (every word with its time, the events, marks and windows)")
+        lines.append("- Video: `\(path(ReportLayout.video))`")
+        lines.append("- Manifest: `\(path(ReportLayout.manifest))` (every word with its time, the events, marks and windows)")
         return lines.joined(separator: "\n") + "\n"
+    }
+}
+
+extension AIReport {
+    var manifest: ReportManifest {
+        let recorded = events?.events ?? []
+        let texts = eventTexts
+        func owner(_ event: Int) -> Int {
+            (keyframes.firstIndex { $0.events.contains(event) } ?? 0) + 1
+        }
+        let entries = keyframes.enumerated().map { index, keyframe in
+            ReportManifest.KeyframeEntry(
+                number: index + 1, time: keyframe.time, moment: keyframe.moment, reason: keyframe.reason,
+                file: ReportLayout.frame(index), fullFile: isCropped ? ReportLayout.fullFrame(index) : nil,
+                crop: crops.indices.contains(index) ? crops[index].map {
+                    ReportManifest.Crop(rect: ReportManifest.Rect(x: $0.rect.minX, y: $0.rect.minY, width: $0.rect.width, height: $0.rect.height),
+                                        apps: $0.apps)
+                } : nil,
+                text: keyframe.text,
+                events: keyframe.events.map { ReportManifest.KeyframeEvent(index: $0, time: recorded[$0].time, kind: recorded[$0].kind, text: texts[$0]) })
+        }
+        let marks = marks.map { mark in
+            let event = recorded[mark.event]
+            return ReportManifest.Mark(number: mark.number, time: event.time, kind: event.kind, tool: event.tool, color: event.color,
+                                       box: event.box, x: event.x, y: event.y, keyframe: owner(mark.event))
+        }
+        func segments(_ list: [TranscriptSegment]) -> [ReportManifest.Segment] {
+            list.map { ReportManifest.Segment(start: $0.start, end: $0.end, text: $0.text) }
+        }
+        return ReportManifest(
+            title: title, environment: environment, duration: duration,
+            area: events.map { ReportManifest.Size(width: $0.width, height: $0.height) },
+            video: ReportLayout.video, summary: ReportLayout.summary, contactSheet: ReportLayout.contactSheet,
+            contactSheetFull: isCropped ? ReportLayout.fullContactSheet : nil,
+            croppedTo: isCropped ? AutoCrop.appNames(crops) : nil,
+            keyframes: entries,
+            transcript: ReportManifest.Transcript(segments: segments(transcript.segments), words: segments(transcript.words),
+                                                  noNarration: transcript.segments.isEmpty ? noNarration : nil),
+            marks: marks, events: recorded, windows: events?.windows)
     }
 }

@@ -54,7 +54,7 @@ enum Pref {
     static let afterRecordingAIReport = PrefKey(name: "afterRecordingAIReport", defaultValue: false)
 
     // Files
-    static let saveDirectory = PrefKey(name: "saveDirectory", defaultValue: FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask)[0].path)
+    static let saveDirectory = PrefKey(name: ScreenmePaths.saveFolderKey, defaultValue: FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask)[0].path)
     static let imageFormat = PrefKey(name: "imageFormat", defaultValue: ImageFormat.png)
     static let jpegQuality = PrefKey(name: "jpegQuality", defaultValue: 0.9)
     static let retinaResolution = PrefKey(name: "retinaResolution", defaultValue: true) // false = save at 1x

@@ -4,7 +4,8 @@ import Foundation
 
 /// `contact-sheet.png`: every keyframe of a report in one picture, three to a row in time order, each with a big
 /// `#N`, its time and what was said under it, on a dark background. An agent reads the whole recording at a glance
-/// and opens a frame by its number. Pure Core Graphics, so it runs anywhere and is unit tested.
+/// and opens a frame by its number. `screenme zoom` draws its grids of frames with it too. Pure Core Graphics, so
+/// it runs anywhere and is unit tested.
 enum ContactSheet {
     struct Cell {
         var image: CGImage
@@ -27,9 +28,9 @@ enum ContactSheet {
 
     /// The size of the sheet and where each thumbnail box goes, top-left origin. The caption is under each box.
     /// Fewer cells than `columns` make a narrower sheet. `boxHeight` is the height of every thumbnail box.
-    static func layout(count: Int, boxHeight: CGFloat) -> (size: CGSize, boxes: [CGRect]) {
+    static func layout(count: Int, boxHeight: CGFloat, columns: Int = columns) -> (size: CGSize, boxes: [CGRect]) {
         guard count > 0 else { return (.zero, []) }
-        let columns = min(count, Self.columns)
+        let columns = min(count, max(columns, 1))
         let rows = (count + columns - 1) / columns
         let cellHeight = boxHeight + captionHeight
         let size = CGSize(width: CGFloat(columns) * thumbnailWidth + CGFloat(columns + 1) * gap,
@@ -50,9 +51,9 @@ enum ContactSheet {
         return min(max((thumbnailWidth * ratios[ratios.count / 2]).rounded(), 200), 900)
     }
 
-    /// The sheet, or nil without cells.
-    static func render(_ cells: [Cell]) -> CGImage? {
-        let (size, boxes) = layout(count: cells.count, boxHeight: boxHeight(for: cells.map(\.image)))
+    /// The sheet, `columns` cells to a row, or nil without cells. `tenths` shows each time to the tenth of a second.
+    static func render(_ cells: [Cell], columns: Int = columns, tenths: Bool = false) -> CGImage? {
+        let (size, boxes) = layout(count: cells.count, boxHeight: boxHeight(for: cells.map(\.image)), columns: columns)
         guard !cells.isEmpty else { return nil }
         let height = size.height
         return CGImage.drawn(width: Int(size.width), height: Int(height), colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!) { context in
@@ -74,7 +75,7 @@ enum ContactSheet {
                 context.restoreGState()
 
                 drawBadge("#\(cell.number)", at: CGPoint(x: box.minX + 12, y: box.minY + 12), height: height, in: context)
-                let time = Duration.format(cell.time)
+                let time = Duration.format(cell.time, tenths: tenths)
                 drawText(time, font: font(22, bold: true), color: timeColor,
                          in: CGRect(x: box.minX + 4, y: box.maxY + 14, width: box.width - 8, height: 28), lines: 1, height: height, context: context)
                 drawText(cell.caption, font: font(23, bold: false), color: textColor,
@@ -86,12 +87,7 @@ enum ContactSheet {
     /// `image` scaled down to the thumbnail width (twice that would only make the sheet heavier), or as it is
     /// when it is smaller.
     static func thumbnail(_ image: CGImage) -> CGImage {
-        guard CGFloat(image.width) > thumbnailWidth else { return image }
-        let width = Int(thumbnailWidth), height = max(Int((CGFloat(image.height) * thumbnailWidth / CGFloat(image.width)).rounded()), 1)
-        return CGImage.drawn(width: width, height: height, colorSpace: image.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!) { context in
-            context.interpolationQuality = .high
-            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
-        } ?? image
+        image.scaledDown(maxWidth: Int(thumbnailWidth))
     }
 
     /// `size` scaled to fit inside `box`, centered.

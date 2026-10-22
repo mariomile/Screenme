@@ -3,9 +3,7 @@ import CoreGraphics
 
 /// One frame of a report: the moment it shows, why it was cut, and what was said and done while it was on screen.
 struct Keyframe: Equatable {
-    enum Reason: String, Codable {
-        case start, drawing, pin, click, drag, scroll, app, change, cue
-    }
+    typealias Reason = KeyframeReason
 
     /// Where the frame is taken, in seconds of the video.
     var time: Double
