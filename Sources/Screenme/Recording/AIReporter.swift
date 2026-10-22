@@ -47,26 +47,26 @@ enum AIReporter {
 
     /// Writes the report folder for `video` inside `parent` and returns the report. The folder is built as a hidden
     /// sibling and moved into place when it is complete, so a `Report …` folder is never half written; a failure
-    /// leaves nothing behind. Asks for speech recognition only when the video has sound. Not on the main actor:
-    /// copying, decoding and writing PNGs take a while.
+    /// leaves nothing behind, and hidden folders a crash left there are removed after a day. Asks for speech
+    /// recognition only when the video has sound. Not on the main actor: copying, decoding and writing PNGs take a while.
     static func write(_ video: URL, context: CaptureContext, events: RecordingEvents?, recordedAt date: Date,
                       screen: AIReport.Environment.Screen? = nil, autoCrop: Bool = true, in parent: URL,
                       progress: @escaping @Sendable (Double) -> Void = { _ in }) async throws -> AIReport {
-        let folder = newFolder(in: parent)
-        let building = parent.appendingPathComponent(".\(folder.lastPathComponent) \(UUID().uuidString)", isDirectory: true)
+        removeAbandoned(in: parent)
+        let name = ReportLayout.folderName(at: Date())
+        let building = parent.appendingPathComponent(".\(name) \(UUID().uuidString)", isDirectory: true)
         do {
-            let report = try await build(video, into: building, finalFolder: folder, context: context, events: events, recordedAt: date,
+            let report = try await build(video, into: building, context: context, events: events, recordedAt: date,
                                          screen: screen, autoCrop: autoCrop, progress: progress)
-            try FileManager.default.moveItem(at: building, to: folder)
-            return report
+            return try place(report, from: building, named: name, in: parent)
         } catch {
             try? FileManager.default.removeItem(at: building)
             throw error
         }
     }
 
-    /// Writes the report's files into `building`; their text names `folder`, where they end up.
-    private static func build(_ video: URL, into building: URL, finalFolder folder: URL, context: CaptureContext, events: RecordingEvents?,
+    /// Writes the report's files into `building`, all but the summary, which names the folder they end up in.
+    private static func build(_ video: URL, into building: URL, context: CaptureContext, events: RecordingEvents?,
                               recordedAt date: Date, screen: AIReport.Environment.Screen?, autoCrop: Bool,
                               progress: @escaping @Sendable (Double) -> Void) async throws -> AIReport {
         let asset = AVURLAsset(url: video)
@@ -98,7 +98,7 @@ enum AIReporter {
             video: AIReport.Environment.Video(width: Int(abs(natural.width)), height: Int(abs(natural.height)), duration: duration),
             // Whole seconds, as report.json keeps it.
             date: Date(timeIntervalSinceReferenceDate: date.timeIntervalSinceReferenceDate.rounded(.down)))
-        let report = AIReport(folder: folder, environment: environment, narration: said, recording: events, keyframes: keyframes)
+        let report = AIReport(folder: building, environment: environment, narration: said, recording: events, keyframes: keyframes)
 
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
@@ -135,8 +135,36 @@ enum AIReporter {
         }
 
         try report.manifest.json().write(to: building.appendingPathComponent(ReportLayout.manifest))
-        try report.summary.write(to: building.appendingPathComponent(ReportLayout.summary), atomically: true, encoding: .utf8)
         return report
+    }
+
+    /// Moves the report built in `building` to `name` in `parent`, or `name 2`, `name 3`… when that is taken, writing
+    /// the summary for the folder it is about to become. The name is settled at the move, so two reports made in the
+    /// same second both arrive.
+    private static func place(_ built: AIReport, from building: URL, named name: String, in parent: URL) throws -> AIReport {
+        var report = built
+        var number = 1
+        while true {
+            report.folder = parent.appendingPathComponent(number == 1 ? name : "\(name) \(number)", isDirectory: true)
+            try report.summary.write(to: building.appendingPathComponent(ReportLayout.summary), atomically: true, encoding: .utf8)
+            do {
+                try FileManager.default.moveItem(at: building, to: report.folder)
+                return report
+            } catch CocoaError.fileWriteFileExists {
+                number += 1
+            }
+        }
+    }
+
+    /// Removes the hidden folders of reports a crash left half built in `parent`, once they have not changed for
+    /// `age`: a report being built now is never touched.
+    static func removeAbandoned(in parent: URL, olderThan age: TimeInterval = 24 * 3600) {
+        let cutoff = Date().addingTimeInterval(-age)
+        let items = (try? FileManager.default.contentsOfDirectory(at: parent, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+        for item in items where item.lastPathComponent.hasPrefix("." + ReportLayout.folderPrefix) {
+            let modified = (try? item.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+            if modified < cutoff { try? FileManager.default.removeItem(at: item) }
+        }
     }
 
     /// Frames are large enough to read any text on screen, small enough for an agent to look at a couple of dozen.
@@ -149,18 +177,6 @@ enum AIReporter {
         let pixels = CGRect(x: rect.minX * sx, y: rect.minY * sy, width: rect.width * sx, height: rect.height * sy).integral
             .intersection(CGRect(x: 0, y: 0, width: image.width, height: image.height))
         return pixels.isEmpty ? nil : image.cropping(to: pixels)
-    }
-
-    /// `Report 2026-10-21 at 10.22.33`, with a number when that name is taken.
-    private static func newFolder(in parent: URL) -> URL {
-        let name = ReportLayout.folderName(at: Date())
-        var url = parent.appendingPathComponent(name, isDirectory: true)
-        var number = 2
-        while FileManager.default.fileExists(atPath: url.path) {
-            url = parent.appendingPathComponent("\(name) \(number)", isDirectory: true)
-            number += 1
-        }
-        return url
     }
 
     /// What was said, or why there is nothing.

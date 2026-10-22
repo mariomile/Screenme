@@ -432,16 +432,67 @@ final class AIReportTests: XCTestCase {
         XCTAssertEqual(again.keyframes.map(\.time), [0.3])
     }
 
+    /// A report that fails once its hidden folder holds files (here the keyframes cannot be written) leaves nothing behind.
     func testAFailedReportLeavesNothingBehind() async throws {
         let directory = try Self.temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
-        let notAVideo = directory.appendingPathComponent("input.mp4")
-        try Data("not a video".utf8).write(to: notAVideo)
+        let video = directory.appendingPathComponent("input.mp4")
+        try await Self.writeSilentVideo(to: video, seconds: 1)
         do {
-            _ = try await AIReporter.write(notAVideo, context: CaptureContext(), events: nil, recordedAt: Date(), in: directory)
-            XCTFail("a file that is not a video makes no report")
-        } catch {}
+            _ = try await AIReporter.write(video, context: CaptureContext(), events: nil, recordedAt: Date(), in: directory) { value in
+                // The video is copied in; from now on the frames folder takes no files.
+                guard value == 0.1, let building = Self.building(in: directory) else { return }
+                try? FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: building.appendingPathComponent("frames").path)
+            }
+            XCTFail("a report whose keyframes cannot be written fails")
+        } catch {
+            XCTAssertEqual((error as? CocoaError)?.code, .fileWriteUnknown, "it failed writing a keyframe: \(error)")
+        }
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path), ["input.mp4"])
+    }
+
+    /// The folder's name is settled when it moves into place: when the name was taken while the report was built
+    /// (another report made in the same second), it gets a number, and its summary names the folder it ended up in.
+    func testAReportWhoseNameIsTakenWhileItIsBuiltGetsANumber() async throws {
+        let directory = try Self.temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let video = directory.appendingPathComponent("input.mp4")
+        try await Self.writeSilentVideo(to: video, seconds: 1)
+        let report = try await AIReporter.write(video, context: CaptureContext(), events: nil, recordedAt: Date(), in: directory) { value in
+            // ".Report 2026-10-21 at 10.22.33 <UUID>" is being built: another folder takes "Report 2026-10-21 at 10.22.33".
+            guard value == 0.1, let building = Self.building(in: directory) else { return }
+            let name = String(building.lastPathComponent.dropFirst().dropLast(UUID().uuidString.count + 1))
+            try? FileManager.default.createDirectory(at: directory.appendingPathComponent(name), withIntermediateDirectories: true)
+        }
+
+        let name = report.folder.lastPathComponent
+        XCTAssertTrue(name.hasPrefix("Report ") && name.hasSuffix(" 2"), name)
+        let taken = String(name.dropLast(2))
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path).sorted(), [taken, name, "input.mp4"].sorted())
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.appendingPathComponent(taken).path), [],
+                       "the other folder is left alone")
+        let summary = try String(contentsOf: report.folder.appendingPathComponent("summary.md"), encoding: .utf8)
+        XCTAssertEqual(summary, report.summary)
+        XCTAssertTrue(summary.contains("- Contact sheet: `\(report.folder.path)/contact-sheet.png`"), summary)
+    }
+
+    /// Hidden folders of reports a crash left half built go once they are a day old; nothing else in the save folder does.
+    func testFoldersACrashLeftHalfBuiltAreRemovedAfterADay() throws {
+        let directory = try Self.temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let abandoned = directory.appendingPathComponent(".Report 2026-10-19 at 09.00.00 \(UUID().uuidString)")
+        let building = directory.appendingPathComponent(".Report 2026-10-21 at 09.00.00 \(UUID().uuidString)")
+        let report = directory.appendingPathComponent("Report 2026-10-19 at 10.00.00")
+        let hidden = directory.appendingPathComponent(".notes")
+        let twoDaysAgo = Date().addingTimeInterval(-2 * 24 * 3600)
+        for folder in [abandoned, building, report, hidden] {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            if folder != building { try FileManager.default.setAttributes([.modificationDate: twoDaysAgo], ofItemAtPath: folder.path) }
+        }
+
+        AIReporter.removeAbandoned(in: directory)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path).sorted(),
+                       [hidden, building, report].map(\.lastPathComponent).sorted())
     }
 
     func testCropsKeyframesOfAScreenRecordingAndKeepsTheFullFrames() async throws {
@@ -473,6 +524,12 @@ final class AIReportTests: XCTestCase {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("AIReportTests-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory
+    }
+
+    /// The hidden folder a report is being built in.
+    nonisolated static func building(in directory: URL) -> URL? {
+        (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil))?
+            .first { $0.lastPathComponent.hasPrefix(".Report ") }
     }
 
     /// A gray H.264 video with no audio track, 10 frames a second, a little brighter every frame.

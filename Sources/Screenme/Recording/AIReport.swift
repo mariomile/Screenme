@@ -89,8 +89,8 @@ struct AIReport {
         var keyframe: Int
     }
 
-    /// The report folder.
-    let folder: URL
+    /// The report folder: where it is built until `AIReporter` moves it into place.
+    var folder: URL
     let environment: Environment
     let narration: Narration
     /// The recorded area in points. Nil for a recording made without events.
