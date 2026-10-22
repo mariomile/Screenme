@@ -39,6 +39,9 @@ struct VideoEditorDelivery {
 @MainActor
 final class VideoEditorModel: ObservableObject {
     let item: CaptureItem
+    /// The file the editor plays and exports from: the capture's cursorless source when it has one (a Smooth cursor
+    /// recording, see `BakedCursor`), so the cursor can be drawn again in any style. Otherwise the capture itself.
+    let videoURL: URL
     let player = AVPlayer()
     private let asset: AVURLAsset
     private weak var window: NSWindow?
@@ -108,6 +111,9 @@ final class VideoEditorModel: ObservableObject {
     /// The recording's clicks and cursor, when it was recorded with them.
     let events: RecordingEvents?
     private let cursorPath: CursorPath?
+    /// With a source: the cursor style the editor opened with. The capture was rendered in it, so with that style and
+    /// nothing else changed the capture is already the output.
+    private let openedCursor: CursorStyle?
 
     var source: VideoSource { VideoSource(size: videoSize, events: events, cursor: cursorPath) }
 
@@ -117,9 +123,15 @@ final class VideoEditorModel: ObservableObject {
     init(item: CaptureItem, delivery: VideoEditorDelivery = .live) {
         self.item = item
         self.delivery = delivery
-        events = RecordingEvents.events(for: item.url)
+        let source = BakedCursor.source(for: item.url)
+        videoURL = source ?? item.url
+        var events = RecordingEvents.events(for: item.url)
+        // The capture's events say its cursor is in the picture; the source was filmed without it.
+        if source != nil { events?.cursor?.hidden = true }
+        self.events = events
         cursorPath = VideoSource.cursorPath(of: events)
-        asset = AVURLAsset(url: item.url)
+        openedCursor = source != nil ? CursorStyle.saved : nil
+        asset = AVURLAsset(url: videoURL)
         edit.canvas = VideoCanvas.saved
         edit.cursor = CursorStyle.saved
         edit.zoomStrength = min(max(Prefs[Pref.videoZoomStrength], AutoZoom.strengthRange.lowerBound), AutoZoom.strengthRange.upperBound)
@@ -277,10 +289,14 @@ final class VideoEditorModel: ObservableObject {
     /// How long the export plays, at its speed.
     var outputDuration: Double { clipDuration / edit.speed }
 
-    /// True when the output would be a byte-for-byte copy of the recording.
-    private var isUnmodified: Bool {
-        format == .mp4 && trimStart <= 0.001 && trimEnd >= duration - 0.001 && resolution == .original
-            && (!mute || !hasAudio) && quality == .high && codec == .h264 && edit.isPlain(for: source)
+    /// True when the output would be a byte-for-byte copy of the capture.
+    var isUnmodified: Bool {
+        guard format == .mp4 && trimStart <= 0.001 && trimEnd >= duration - 0.001 && resolution == .original
+            && (!mute || !hasAudio) && quality == .high && codec == .h264 else { return false }
+        guard let openedCursor else { return edit.isPlain(for: source) }
+        var rest = edit
+        rest.cursor.show = false
+        return edit.cursor == openedCursor && rest.isPlain(for: source)
     }
 
     enum Action {
@@ -353,10 +369,10 @@ final class VideoEditorModel: ObservableObject {
         switch format {
         case .mp4:
             let settings = VideoExportSettings(range: range, renderer: renderer, quality: quality, codec: codec, mute: mute)
-            let url = try await VideoTranscoder.export(item.url, settings: settings, progress: progress)
+            let url = try await VideoTranscoder.export(videoURL, settings: settings, progress: progress)
             return CaptureItem(url: url, kind: .video)
         case .gif:
-            let url = try await GIFExporter.export(item.url, range: range, renderer: renderer, fps: gifFPS, quality: quality,
+            let url = try await GIFExporter.export(videoURL, range: range, renderer: renderer, fps: gifFPS, quality: quality,
                                                    progress: progress)
             return CaptureItem(url: url, kind: .gif)
         }
