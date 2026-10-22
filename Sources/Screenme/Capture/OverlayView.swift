@@ -3,8 +3,9 @@ import QuartzCore
 
 /// One borderless panel per display. It never draws anything itself: `OverlayView` is layer based.
 final class OverlayPanel: FloatingPanel {
-    init(screen: NSScreen) {
-        super.init(frame: screen.frame, level: .screenSaver, canBeKey: true, hasShadow: false,
+    /// `level` is lower for a repeat capture, so the Quick Access cards and toasts of each shot show over the picker.
+    init(screen: NSScreen, level: NSWindow.Level = .screenSaver) {
+        super.init(frame: screen.frame, level: level, canBeKey: true, hasShadow: false,
                    collectionBehavior: [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle])
         acceptsMouseMovedEvents = true
         setFrame(screen.frame, display: false)

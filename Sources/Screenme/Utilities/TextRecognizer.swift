@@ -6,11 +6,12 @@ import Vision
 enum TextRecognizer {
     /// Recognized text in reading order. Honors `Pref.ocrKeepLineBreaks` and `Pref.ocrDetectQR`.
     /// When the selection is mostly a QR or barcode, returns just its payload.
-    static func recognize(_ image: CGImage) async throws -> String {
+    /// `priority` is lower for work nobody waits for, like indexing History.
+    static func recognize(_ image: CGImage, priority: TaskPriority = .userInitiated) async throws -> String {
         let keepLineBreaks = Prefs[Pref.ocrKeepLineBreaks]
         let detectCodes = Prefs[Pref.ocrDetectQR]
         let language = Prefs[Pref.ocrLanguage]
-        return try await Task.detached(priority: .userInitiated) {
+        return try await Task.detached(priority: priority) {
             try run(image, keepLineBreaks: keepLineBreaks, detectCodes: detectCodes, language: language)
         }.value
     }

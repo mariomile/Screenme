@@ -70,7 +70,7 @@ private func searchText(for item: CaptureItem) -> String {
         kind,
         item.url.lastPathComponent,
     ]
-    return parts.joined(separator: " ").lowercased()
+    return parts.joined(separator: " ")
 }
 
 // MARK: - View
@@ -83,9 +83,9 @@ private struct HistoryGridView: View {
     @State private var selection: Set<UUID> = []
 
     private var groups: [HistoryDayGroup] {
-        let tokens = query.lowercased().split(whereSeparator: \.isWhitespace).map(String.init)
+        let tokens = HistorySearch.tokens(query)
         let visible = history.items.filter { item in
-            filter.includes(item) && (tokens.isEmpty || { let text = searchText(for: item); return tokens.allSatisfy(text.contains) }())
+            filter.includes(item) && HistorySearch.matches(tokens, details: searchText(for: item), imageText: history.recognizedText[item.url])
         }
         let calendar = Calendar.current
         let byDay = Dictionary(grouping: visible) { calendar.startOfDay(for: $0.date) }
@@ -161,7 +161,7 @@ private struct HistoryGridView: View {
     private var searchField: some View {
         HStack(spacing: 6) {
             Image(systemName: "magnifyingglass").foregroundStyle(.secondary).font(.system(size: 12))
-            TextField("Search by date", text: $query)
+            TextField("Search date or text", text: $query)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
             if !query.isEmpty {
@@ -181,6 +181,7 @@ private struct HistoryGridView: View {
     @ViewBuilder
     private var content: some View {
         let groups = groups
+        let tokens = HistorySearch.tokens(query)
         if history.items.isEmpty {
             ContentUnavailableView {
                 Label("No captures yet", systemImage: "photo.on.rectangle.angled")
@@ -205,7 +206,8 @@ private struct HistoryGridView: View {
                             LazyVGrid(columns: [GridItem(.adaptive(minimum: 190, maximum: 260), spacing: 16, alignment: .top)], spacing: 18) {
                                 ForEach(group.items) { item in
                                     HistoryGridCell(item: item, revision: history.revision(of: item.url),
-                                                isSelected: selection.contains(item.id)) { select(item) }
+                                                isSelected: selection.contains(item.id),
+                                                textMatch: HistorySearch.excerpt(of: history.recognizedText[item.url], matching: tokens)) { select(item) }
                                 }
                             }
                             .padding(.horizontal, 20)
@@ -246,6 +248,8 @@ private struct HistoryGridCell: View {
     let item: CaptureItem
     let revision: Int
     let isSelected: Bool
+    /// The line of text in the image that matches the search, when it does.
+    let textMatch: String?
     let select: () -> Void
 
     @State private var thumbnail: Thumbnail?
@@ -301,6 +305,14 @@ private struct HistoryGridCell: View {
                     Label(Duration.format(duration), systemImage: "play.fill")
                         .labelStyle(HistoryBadgeStyle())
                         .padding(6)
+                }
+            }
+            .overlay(alignment: .bottomLeading) {
+                if let textMatch, !hovering {
+                    Label("Text", systemImage: "text.viewfinder")
+                        .labelStyle(HistoryBadgeStyle())
+                        .padding(6)
+                        .help("Matches text in this image\n\(textMatch)")
                 }
             }
             .overlay { if hovering { hoverActions } }
