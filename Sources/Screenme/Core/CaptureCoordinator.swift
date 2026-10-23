@@ -173,7 +173,9 @@ final class CaptureCoordinator {
     /// Writes an image capture and runs the after-capture actions. The notch cover, the watermark and the encoding
     /// run off the main thread; meanwhile a Quick Access card already shows `image` from memory and waits for the file.
     /// `target`: where the picture came from, for its notch cover and its context (Copy for AI).
-    func deliver(_ image: CGImage, from target: CaptureTarget? = nil) async throws {
+    /// `quietly`: only written and added to History, as for an agent's capture: nothing opens, nothing is copied.
+    @discardableResult
+    func deliver(_ image: CGImage, from target: CaptureTarget? = nil, quietly: Bool = false) async throws -> CaptureItem {
         let item = CaptureItem(url: Storage.newURL(extension: Prefs[Pref.imageFormat].fileExtension), kind: .image)
         if let target { CaptureContexts.record(CaptureContexts.context(of: target), for: item.url) }
         let cover = target.flatMap(Notch.cover(for:))
@@ -182,24 +184,85 @@ final class CaptureCoordinator {
             try Storage.write(Watermark.applied(to: cover?.applied(to: image) ?? image), to: item.url)
             return item.url
         }
-        try await afterCapture(item, preview: image, file: file)
+        if quietly {
+            _ = try await file.value
+            record(item)
+        } else {
+            try await afterCapture(item, preview: image, file: file)
+        }
+        return item
     }
 
     // MARK: Recordings
 
     /// Stops the recording and delivers it. Busy until then, so a new capture cannot start
-    /// while a recording is still turning into a GIF.
-    func stopRecording() async {
-        guard !busy else { return }
+    /// while a recording is still turning into a GIF. `reportForAI`: also make a Report for AI, after the busy window.
+    /// `quietly`: only added to History, without the after-recording actions, as for an agent's recording.
+    @discardableResult
+    func stopRecording(reportForAI: Bool = Prefs[Pref.afterRecordingAIReport], quietly: Bool = false) async -> CaptureItem? {
+        guard !busy else { return nil }
         busy = true
         defer { busy = false }
-        guard let item = await RecordingController.shared.stop() else { return }
+        guard let item = await RecordingController.shared.stop() else { return nil }
         // The file is complete: nothing is left to wait for or to fail.
-        try? await afterCapture(item, file: Task { item.url })
+        if quietly { record(item) } else { try? await afterCapture(item, file: Task { item.url }) }
         // Outside the busy window: transcribing can take a while, and a new capture need not wait for it.
-        if Prefs[Pref.afterRecordingAIReport], CaptureAction.reportForAI.isAvailable(for: item.kind) {
+        if reportForAI, CaptureAction.reportForAI.isAvailable(for: item.kind) {
             Task { await CaptureAction.reportForAI.perform(item) }
         }
+        return item
+    }
+
+    // MARK: Agents
+
+    /// A screenshot an agent asked for over the agent socket. Unlike `perform`, it waits for the file and returns it,
+    /// skips the after-capture actions (the agent asks for those with `act`), and a failure goes back to the agent
+    /// instead of a toast. `target` nil is the screen under the pointer.
+    /// `scrolling`: a scrolling capture that scrolls by itself to the end of the content.
+    func agentScreenshot(_ target: ActionLink.Target?, scrolling: Bool = false) async throws -> CaptureItem {
+        try checkReadyForAgent()
+        busy = true
+        defer { busy = false }
+        var hidIcons = false
+        if Prefs[Pref.hideDesktopIconsInShots] {
+            hidIcons = await DesktopIcons.hideForCapture(settle: true)
+        }
+        defer { if hidIcons { DesktopIcons.setHidden(false) } }
+        let resolved = try await target?.captureTarget() ?? .display(.underMouse)
+        if scrolling {
+            guard let image = try await ScrollingCapture.run(resolved, autoScroll: true) else {
+                throw AgentError("The scrolling capture was cancelled")
+            }
+            return try await deliver(image, quietly: true)
+        }
+        if case .area = resolved { previousArea = resolved }
+        return try await deliver(try await Capturer.screenshot(resolved), from: resolved, quietly: true)
+    }
+
+    /// Starts a recording with the saved recording settings, without the pre-record bar.
+    func agentStartRecording(_ target: ActionLink.Target?) async throws {
+        try checkReadyForAgent()
+        busy = true
+        defer { busy = false }
+        let resolved = try await target?.captureTarget() ?? .display(.underMouse)
+        try await RecordingController.shared.start(resolved, usingSavedSettings: true)
+        guard RecordingController.shared.isRecording else { throw AgentError("The recording did not start") }
+    }
+
+    /// Stops the recording an agent (or the user) started and returns the finished file.
+    func agentStopRecording() async throws -> CaptureItem {
+        guard RecordingController.shared.isRecording else { throw AgentError("No recording is running") }
+        guard let item = await stopRecording(reportForAI: false, quietly: true) else { throw AgentError("The recording could not be saved") }
+        return item
+    }
+
+    private func checkReadyForAgent() throws {
+        guard Permission.screenRecording.isGranted else {
+            throw AgentError("Screenme does not have the Screen Recording permission. Turn it on in System Settings > "
+                + "Privacy & Security > Screen & System Audio Recording.")
+        }
+        guard !RecordingController.shared.isRecording else { throw AgentError("A recording is running. Stop it first.") }
+        guard !busy else { throw AgentError("Another capture is in progress. Try again when it ends.") }
     }
 
     // MARK: After capture

@@ -58,11 +58,13 @@ enum Redaction {
         Storage.encoded(image, as: ImageFormat(of: original)).flatMap { TemporaryCopies.write($0, named: original.lastPathComponent) }
     }
 
-    /// A redacted temporary copy of the image file, for sharing. Nil when there is nothing to hide, or the file is not
-    /// a still image (a GIF or a video is shared as it is). Throws when the image cannot be read or checked, or the
-    /// copy cannot be made: then nothing may be shared.
+    /// A redacted temporary copy of the image file, for sharing. Nil when there is nothing to hide, or the file is a
+    /// GIF or a video (shared as it is). Throws when the image cannot be read or checked, is a still image in a format
+    /// other than PNG or JPEG, or the copy cannot be made: then nothing may be shared.
     static func redactedCopy(of url: URL) async throws -> (url: URL, count: Int)? {
-        guard ["png", "jpg", "jpeg"].contains(url.pathExtension.lowercased()) else { return nil }
+        let type = url.pathExtension.lowercased()
+        if ["gif", "mp4", "mov", "m4v"].contains(type) { return nil }
+        guard ["png", "jpg", "jpeg"].contains(type) else { throw Failure.unchecked }
         guard let source = ImageSource.load(url: url) else { throw Failure.unchecked }
         guard let (image, count) = try await hidingSensitive(in: source.image, unit: source.unit) else { return nil }
         guard let copy = write(image, like: url) else { throw Failure.notWritten }

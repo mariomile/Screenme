@@ -42,14 +42,14 @@ struct MCPServer {
         case "tools/call":
             let name = params["name"] as? String ?? ""
             guard let tool = Tool(rawValue: name) else { return error(id: id, code: -32602, message: "Unknown tool: \(name)") }
-            return result(id: id, await call(tool, Tool.Arguments(params["arguments"] as? [String: Any] ?? [:])))
+            return result(id: id, await call(tool, AgentArguments(params["arguments"] as? [String: Any] ?? [:])))
         default:
             return error(id: id, code: -32601, message: "Method not found: \(method)")
         }
     }
 
     /// A tool result. Failures are results with `isError`, so the model reads them.
-    private func call(_ tool: Tool, _ arguments: Tool.Arguments) async -> [String: Any] {
+    private func call(_ tool: Tool, _ arguments: AgentArguments) async -> [String: Any] {
         do {
             let output = try await tool.command(arguments).run(context)
             let images = output.images.compactMap(Self.pngData).map { ["type": "image", "data": $0.base64EncodedString(), "mimeType": "image/png"] }

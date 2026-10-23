@@ -53,7 +53,7 @@ private struct HistoryDayGroup: Identifiable {
 }
 
 /// Text a date search can match: names of the day and month, numbers, the time, the kind of capture.
-private func searchText(for item: CaptureItem) -> String {
+func searchText(for item: CaptureItem) -> String {
     let date = item.date
     let kind = switch item.kind {
     case .image: "screenshot image"

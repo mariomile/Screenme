@@ -10,10 +10,14 @@ import SwiftUI
 /// One at a time: only `CaptureCoordinator` calls it, inside its busy window.
 @MainActor
 enum ScrollingCapture {
-    /// Returns the stitched image, or nil when cancelled.
-    static func run(_ target: CaptureTarget) async throws -> CGImage? {
+    /// Returns the stitched image, or nil when cancelled. `autoScroll`: Screenme scrolls the content to its end and
+    /// finishes by itself, for agents; it throws when it cannot.
+    static func run(_ target: CaptureTarget, autoScroll: Bool = false) async throws -> CGImage? {
         let (filter, configuration) = try await target.streamSetup(showsCursor: false, retina: Prefs[Pref.retinaResolution])
-        return await ScrollSession(frame: target.cocoaFrame, filter: filter, configuration: configuration).run()
+        let session = ScrollSession(frame: target.cocoaFrame, filter: filter, configuration: configuration, autoScroll: autoScroll)
+        let image = await session.run()
+        if let failure = session.failure { throw AgentError(failure) }
+        return image
     }
 }
 
@@ -68,11 +72,16 @@ final class ScrollSession: ObservableObject {
     private var continuation: CheckedContinuation<CGImage?, Never>?
     private var autoTask: Task<Void, Never>?
     private var lastAdvance = Date()
+    /// Scrolls by itself from the start and finishes at the end of the content.
+    private let autoScroll: Bool
+    /// Why an automatic capture gave up.
+    private(set) var failure: String?
 
-    init(frame: CGRect, filter: SCContentFilter, configuration: SCStreamConfiguration) {
+    init(frame: CGRect, filter: SCContentFilter, configuration: SCStreamConfiguration, autoScroll: Bool = false) {
         self.frame = frame
         self.filter = filter
         self.configuration = configuration
+        self.autoScroll = autoScroll
     }
 
     func run() async -> CGImage? {
@@ -82,7 +91,16 @@ final class ScrollSession: ObservableObject {
         return await withCheckedContinuation { continuation in
             self.continuation = continuation
             showPanel()
-            Task { await start() }
+            Task {
+                await start()
+                guard autoScroll else { return }
+                await toggleAutoScroll()
+                guard isAutoScrolling else {
+                    failure = needsAccess ? Message.needsAccess : status
+                    await cancel()
+                    return
+                }
+            }
         }
     }
 
@@ -178,6 +196,7 @@ final class ScrollSession: ObservableObject {
         case .limit:
             limitReached = true
             stopAutoScroll()
+            if autoScroll { Task { await done() } }
         case .lost:
             lost = true
         case .first, .advanced, .still, .scrolledBack:
@@ -226,6 +245,12 @@ final class ScrollSession: ObservableObject {
             if checkedDirection, Date().timeIntervalSince(lastAdvance) > 1.6 {
                 stopAutoScroll()
                 endReached = true
+                // Outside this task, which `done` cancels. Content that stopped matching is not the end of the page.
+                if autoScroll {
+                    let failed = lost
+                    if failed { failure = "The scrolling capture lost its place in the content; try a smaller area or window" }
+                    Task { if failed { await self.cancel() } else { await self.done() } }
+                }
                 return
             }
         }

@@ -8,21 +8,27 @@ enum AIReporter {
     /// Makes the report, copies it and shows the folder. Returns false when it failed, which an alert says.
     @MainActor
     static func make(_ item: CaptureItem) async -> Bool {
-        let toast = Toast.progress("Creating report for AI")
-        defer { toast.finish() }
         do {
-            let context = await CaptureContexts.context(for: item.url)
-            let report = try await write(item.url, context: context, events: RecordingEvents.events(for: item.url),
-                                         recordedAt: item.date, screen: mainScreen(), autoCrop: Prefs[Pref.reportAutoCrop],
-                                         in: Storage.saveDirectory) { value in
-                Task { @MainActor in toast.update(value) }
-            }
+            let report = try await create(item)
             copy(report)
             NSWorkspace.shared.activateFileViewerSelecting([report.folder.appendingPathComponent(ReportLayout.summary)])
             return true
         } catch {
             CaptureCoordinator.shared.report(error)
             return false
+        }
+    }
+
+    /// Writes the report into the save folder, with a progress toast, and returns it.
+    @MainActor
+    static func create(_ item: CaptureItem) async throws -> AIReport {
+        let toast = Toast.progress("Creating report for AI")
+        defer { toast.finish() }
+        let context = await CaptureContexts.context(for: item.url)
+        return try await write(item.url, context: context, events: RecordingEvents.events(for: item.url),
+                               recordedAt: item.date, screen: mainScreen(), autoCrop: Prefs[Pref.reportAutoCrop],
+                               in: Storage.saveDirectory) { value in
+            Task { @MainActor in toast.update(value) }
         }
     }
 

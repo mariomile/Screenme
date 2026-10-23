@@ -15,6 +15,8 @@ targets:
       - Sources/Screenme
       # The report format and drawing shared with the command line tool.
       - Sources/ReportFormat
+      # The agent channel's wire format, shared with the command line tool.
+      - Sources/AgentProtocol
       # The agent skill, printed by `screenme skill` from Contents/Resources.
       - path: skills/screenme/SKILL.md
         buildPhase: resources
@@ -55,7 +57,7 @@ targets:
   screenme-cli:
     type: tool
     platform: macOS
-    sources: [Sources/ScreenmeCLI, Sources/ReportFormat]
+    sources: [Sources/ScreenmeCLI, Sources/ReportFormat, Sources/AgentProtocol]
     settings:
       base:
         PRODUCT_NAME: screenme
@@ -83,6 +85,7 @@ targets:
     sources:
       - Tests/ScreenmeCLITests
       - Sources/ReportFormat
+      - Sources/AgentProtocol
       - path: Sources/ScreenmeCLI
         excludes: [main.swift]
     settings:

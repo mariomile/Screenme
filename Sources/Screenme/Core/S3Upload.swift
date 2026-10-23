@@ -230,6 +230,16 @@ enum S3Upload {
         return settings.publicLink(key: key)
     }
 
+    /// Uploads a capture the way Upload & Copy Link does, a copy with sensitive info hidden when that setting is on,
+    /// and returns its public link and how many items were hidden.
+    @MainActor
+    static func share(_ file: URL, settings: UploadSettings,
+                      progress: (@Sendable (Double) -> Void)? = nil) async throws -> (link: String, hidden: Int) {
+        let shared = try await Redaction.shareableCopy(of: file)
+        let link = try await put(shared.url, key: randomKey(extension: shared.url.pathExtension), settings: settings, progress: progress)
+        return (link, shared.hidden)
+    }
+
     /// Uploads a tiny text object and deletes it again, to check the settings.
     static func test(settings: UploadSettings) async throws {
         let key = ".screenme-test-\(randomKey(extension: "txt"))"

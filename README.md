@@ -85,15 +85,40 @@ Every action has a `screenme://` link, for Shortcuts, Raycast or scripts:
 
 ### Command line
 
-`scripts/install.sh` links a `screenme` command into `/opt/homebrew/bin` (or `~/.local/bin`). It asks the running app for the capture through those links, without bringing Screenme forward, and prints the new file's path.
+`scripts/install.sh` links a `screenme` command into `/opt/homebrew/bin` (or `~/.local/bin`). Everything Screenme does is there, so an agent can drive it as you would: captures, recordings, reports, text, redaction, uploads and every setting. It talks to the app over a private socket (`~/Library/Application Support/Screenme/agent.sock`, readable by your user only; web pages cannot reach it), starts Screenme in the background when it is not running, and never brings it forward. `FILE` is a capture's path, or `latest`, the default.
 
 ```bash
-screenme capture fullscreen
+screenme capture fullscreen              # the screen under the pointer; prints the file's path
 screenme capture area 100 100 640 400    # x y width height, screen points, top-left origin
 screenme capture window Safari           # app name or bundle ID
+screenme capture window Safari --scrolling   # scrolls the window to the end, one tall image (needs Accessibility)
+screenme record start [window Safari]    # with your saved recording settings (mic, camera, clicks, keys)
+screenme record stop [--report]          # the video's path; --report also makes a Report for AI
+screenme report [FILE]                   # a Report for AI from a recording
 screenme latest                          # path of the newest capture
 screenme list --limit 5                  # recent captures, newest first
+screenme search invoice --limit 5        # History search: text in the image, a date, a kind
+screenme text [FILE]                     # the text in a screenshot (and QR codes)
+screenme redact [FILE]                   # a copy with emails, keys, cards, IBANs, IPs and faces pixelated
+screenme upload [FILE]                   # to your bucket; prints the public link
+screenme upload --test                   # checks the upload settings
+screenme act copy_for_ai [FILE]          # a Quick Access action: copy, copy_for_ai, copy_markdown, save, reveal, edit, pin
+screenme windows                         # windows on screen with their frames, for capture area or window
+screenme status                          # permissions, recording state, folders
 ```
+
+Settings, every one in the Settings window, by the key it is stored under:
+
+```bash
+screenme settings                        # all, grouped as in Settings, with value, allowed values and what each does
+screenme settings --json                 # the same as JSON
+screenme settings get imageFormat
+screenme settings set imageFormat jpg
+screenme settings set s3Endpoint https://ACCOUNT.r2.cloudflarestorage.com
+screenme settings set s3SecretAccessKey ...   # goes to the Keychain; reads only say "(set)"
+```
+
+A wrong value is refused with what the setting takes. The app picks up a change at once, as if you had made it in Settings.
 
 For Reports for AI (a report folder, or `latest` for the newest one in your save folder, the default):
 
@@ -108,7 +133,7 @@ screenme skill                                 # the agent skill, below
 
 `zoom` and `frames` write into the report's `zoom/` folder and print the paths; `zoom` also prints the time of each cell and what was said.
 
-`capture` waits up to 20 seconds for the file and exits with an error if none appears (Screenme not allowed to record the screen, another capture in progress, no such window). Your after-capture settings still apply: a capture is also copied, shown in Quick Access, and so on.
+A capture returns once the file is written, or fails with the reason (Screenme not allowed to record the screen, another capture or a recording in progress, no such window). A capture or recording an agent makes goes to History only: your after-capture settings (copy, Quick Access, the editor, pin) are left out, so nothing opens on your screen. The agent asks for any of them with `screenme act`.
 
 ### MCP server for AI agents
 
@@ -127,11 +152,18 @@ screenme skill                                 # the agent skill, below
 
 That block goes in the client's MCP config (Claude Desktop: `~/Library/Application Support/Claude/claude_desktop_config.json`; Cursor: `~/.cursor/mcp.json`). In Claude Code: `claude mcp add screenme -- /Applications/Screenme.app/Contents/Helpers/screenme mcp`. In Codex: `codex mcp add screenme -- /Applications/Screenme.app/Contents/Helpers/screenme mcp`.
 
-The agent then has six tools: `take_screenshot` (mode `fullscreen`, `area` with `x`, `y`, `width`, `height`, or `window` with `app`), `get_latest_capture`, `get_latest_report` (the newest Report for AI in your save folder: `summary.md` and the contact sheet), `zoom_report` (`at`, `phrase` or `mark`, with `span` and `grid`: the zoom grid as an image), `inspect_report` (`summary.md` and the contact sheet, or `report.json` with `json`) and `list_captures` (one path per line). Screenshots come back as an image (scaled to at most 1568 pixels on the long side) plus the path of the full-size file.
+The agent then has a tool for each command:
+
+- Captures: `take_screenshot` (mode `fullscreen`, `area` with `x`, `y`, `width`, `height`, or `window` with `app`; `scrolling` for one tall image), `get_latest_capture`, `list_captures`, `search_captures`, `list_windows`.
+- Recordings: `start_recording`, `stop_recording` (`report` to also make a Report for AI), `make_report`, `get_latest_report` (`summary.md` and the contact sheet), `zoom_report` (`at`, `phrase` or `mark`, with `span` and `grid`), `inspect_report` (`json` for `report.json`).
+- Working with a capture (`path`, default the newest): `read_text`, `redact_capture`, `upload_capture` (the public link), `capture_action` (copy, copy_for_ai, copy_markdown, save, reveal, edit, pin).
+- Settings: `get_settings`, `set_setting` (`key`, `value`), `test_upload`, `get_status`.
+
+Screenshots come back as an image (scaled to at most 1568 pixels on the long side) plus the path of the full-size file. A refusal (a wrong setting value, no permission, a recording already running) comes back as a tool error the agent can read.
 
 ### Agent skill
 
-`skills/screenme/SKILL.md` teaches an agent (Claude Code, Codex, OpenCode and others that read skills) how to read a Report for AI: the contact sheet first, then the keyframes, frames by number, what the red marks and pins mean, and when to run `screenme zoom`. The app carries a copy, so `screenme skill` prints it without the repo. To install it for Claude Code:
+`skills/screenme/SKILL.md` teaches an agent (Claude Code, Codex, OpenCode and others that read skills) how to read a Report for AI (the contact sheet first, then the keyframes, frames by number, what the red marks and pins mean, and when to run `screenme zoom`) and how to drive Screenme with the commands above. The app carries a copy, so `screenme skill` prints it without the repo. To install it for Claude Code:
 
 ```bash
 mkdir -p ~/.claude/skills/screenme

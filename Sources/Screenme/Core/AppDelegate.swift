@@ -35,6 +35,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         hotKeys.onTrigger = { [weak self] action in self?.coordinator.perform(action) }
         hotKeys.registerAll()
 
+        // UI tests run with their own settings suite next to the installed copy: they leave its agent socket alone.
+        if UserDefaults.standard.string(forKey: "ScreenmeDefaultsSuite") == nil { AgentServer.shared.start() }
+
         CaptureHistory.shared.prune()
         TemporaryCopies.removeStale()
         Updater.shared.announceIfUpdated()

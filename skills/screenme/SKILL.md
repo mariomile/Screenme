@@ -1,6 +1,6 @@
 ---
 name: screenme
-description: Read and dig into a Screenme Report for AI, a screen recording where someone talked, clicked and drew red marks to show you a problem. Use whenever a message contains one (a summary starting "# Report:" with "#N [m:ss]" keyframe lines, a "Report <date>" folder path, a contact-sheet.png from one), when the user says "look at my report" or "my recording", or when you need the `screenme` command to zoom into a moment, pull frames or inspect a report.
+description: Read a Screenme Report for AI (a screen recording where someone talked, clicked and drew red marks to show you a problem) and drive Screenme on this Mac. Use whenever a message contains a report (a summary starting "# Report:" with "#N [m:ss]" keyframe lines, a "Report <date>" folder path, a contact-sheet.png from one), when the user says "look at my report" or "my recording", or when you need to take a screenshot or a scrolling capture, record the screen, read the text in a capture, redact or upload one, search past captures, or read or change Screenme's settings with the `screenme` command.
 ---
 
 # Screenme reports
@@ -81,3 +81,32 @@ screenme skill                         # prints this guide
 `zoom` and `frames` write into the report's `zoom/` folder; leave the rest of the folder as it is.
 
 With the Screenme MCP server connected, the same is available as tools: `get_latest_report` (summary and contact sheet), `zoom_report` and `inspect_report`.
+
+## Driving Screenme
+
+The same tool does everything the app does, so you can take the capture you need instead of asking the user for one. It talks to the running app (starting it in the background if needed); the app must be allowed to record the screen. `FILE` is a capture's path, or `latest`, the default. Check `screenme status` first when something fails: it lists the permissions.
+
+```sh
+screenme capture fullscreen                  # the screen under the pointer; prints the path
+screenme capture area X Y W H                # screen points, top-left origin
+screenme capture window "Google Chrome"      # the app's front window (name or bundle ID)
+screenme capture window Safari --scrolling   # scrolls it to the end into one tall image; moves the pointer, needs Accessibility
+screenme windows                             # what is on screen, with frames for capture area/window
+screenme record start [window APP | area X Y W H]   # saved settings: mic, camera, clicks, keys
+screenme record stop --report                # the video, plus a Report for AI from it
+screenme report [FILE]                       # a Report for AI from an existing recording
+screenme list --limit 5                      # recent captures, newest first
+screenme search "invoice"                    # by the text in them, a date (yesterday, 2026-10-22) or a kind
+screenme text [FILE]                         # the text in a screenshot, read on this Mac
+screenme redact [FILE]                       # a pixelated copy hiding emails, keys, cards, IBANs, IPs, faces
+screenme upload [FILE]                       # the public link from the user's own bucket
+screenme act copy_for_ai [FILE]              # copy, copy_for_ai, copy_markdown, save, reveal, edit, pin
+screenme settings [--json]                   # every setting: key, value, allowed values, what it does
+screenme settings get KEY
+screenme settings set KEY VALUE
+screenme status
+```
+
+Open a capture's path to look at it. Settings use the keys `screenme settings` prints, with the allowed values next to each; a wrong value is refused with what it takes. Before an upload, remember the link is public: upload only what the user asked to share. A recording keeps running until `record stop`, so stop the ones you start. Your captures go to the user's History without opening anything on their screen; use `act` when they want one copied, pinned or opened.
+
+MCP tools for the same: `take_screenshot` (`scrolling`), `get_latest_capture`, `list_captures`, `search_captures`, `list_windows`, `start_recording`, `stop_recording`, `make_report`, `read_text`, `redact_capture`, `upload_capture`, `test_upload`, `capture_action`, `get_settings`, `set_setting`, `get_status`.

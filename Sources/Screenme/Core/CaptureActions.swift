@@ -135,21 +135,13 @@ enum CaptureAction: CaseIterable {
                 SettingsWindow.show(tab: .upload)
                 return false
             }
-            let shared: (url: URL, hidden: Int)
-            do {
-                shared = try await Redaction.shareableCopy(of: item.url)
-            } catch {
-                Feedback.failure(error.localizedDescription, duration: 3.2)
-                return false
-            }
             let progress = Toast.progress("Uploading")
             do {
-                let link = try await S3Upload.put(shared.url, key: S3Upload.randomKey(extension: shared.url.pathExtension),
-                                                  settings: settings) { value in
+                let shared = try await S3Upload.share(item.url, settings: settings) { value in
                     Task { @MainActor in progress.update(value) }
                 }
                 progress.finish()
-                Clipboard.copyText(link)
+                Clipboard.copyText(shared.link)
                 confirm(hidden: shared.hidden)
             } catch {
                 progress.finish()

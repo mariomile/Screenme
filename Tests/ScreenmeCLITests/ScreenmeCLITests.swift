@@ -16,21 +16,45 @@ final class CommandParsingTests: XCTestCase {
         XCTAssertEqual(try Command.parse(["list"]), .list(limit: 10))
         XCTAssertEqual(try Command.parse(["list", "--limit", "3"]), .list(limit: 3))
         XCTAssertEqual(try Command.parse(["mcp"]), .mcp)
+        XCTAssertEqual(try Command.parse(["capture", "window", "Safari", "--scrolling"]), .capture(.window(app: "Safari"), scrolling: true))
+        XCTAssertEqual(try Command.parse(["record", "start"]), .recordStart(.fullscreen))
+        XCTAssertEqual(try Command.parse(["record", "start", "area", "1", "2", "30", "40"]), .recordStart(.area(x: 1, y: 2, width: 30, height: 40)))
+        XCTAssertEqual(try Command.parse(["record", "stop"]), .recordStop(report: false))
+        XCTAssertEqual(try Command.parse(["record", "stop", "--report"]), .recordStop(report: true))
+        XCTAssertEqual(try Command.parse(["report"]), .makeReport(path: "latest"))
+        XCTAssertEqual(try Command.parse(["report", "/tmp/a.mp4"]), .makeReport(path: "/tmp/a.mp4"))
+        XCTAssertEqual(try Command.parse(["search", "invoice", "total"]), .search(query: "invoice total", limit: 20))
+        XCTAssertEqual(try Command.parse(["search", "--limit", "2", "yesterday"]), .search(query: "yesterday", limit: 2))
+        XCTAssertEqual(try Command.parse(["text"]), .text(path: "latest"))
+        XCTAssertEqual(try Command.parse(["redact", "a.png"]), .redact(path: "a.png"))
+        XCTAssertEqual(try Command.parse(["upload"]), .upload(path: "latest"))
+        XCTAssertEqual(try Command.parse(["upload", "--test"]), .testUpload)
+        XCTAssertEqual(try Command.parse(["act", "copy"]), .act(action: "copy", path: "latest"))
+        XCTAssertEqual(try Command.parse(["act", "pin", "a.png"]), .act(action: "pin", path: "a.png"))
+        XCTAssertEqual(try Command.parse(["settings"]), .settings(key: nil, json: false))
+        XCTAssertEqual(try Command.parse(["settings", "--json"]), .settings(key: nil, json: true))
+        XCTAssertEqual(try Command.parse(["settings", "get", "imageFormat"]), .settings(key: "imageFormat", json: false))
+        XCTAssertEqual(try Command.parse(["settings", "set", "imageFormat", "jpeg"]), .setSetting(key: "imageFormat", value: .string("jpeg")))
+        XCTAssertEqual(try Command.parse(["windows"]), .windows)
+        XCTAssertEqual(try Command.parse(["status"]), .status)
     }
 
     func testRejectsBadArguments() {
         for arguments in [["shoot"], ["capture"], ["capture", "area", "1", "2", "3"], ["capture", "area", "1", "2", "x", "4"],
                           ["capture", "area", "1", "2", "0", "4"], ["capture", "window"], ["capture", "fullscreen", "extra"],
-                          ["list", "--limit"], ["list", "--limit", "0"], ["list", "5"], ["latest", "now"], ["mcp", "--stdio"]] {
+                          ["list", "--limit"], ["list", "--limit", "0"], ["list", "5"], ["latest", "now"], ["mcp", "--stdio"],
+                          ["record"], ["record", "pause"], ["record", "stop", "--now"], ["report", "a", "b"], ["search"],
+                          ["search", "--limit", "0", "x"], ["upload", "a", "b"], ["act"], ["act", "delete"], ["settings", "get"],
+                          ["settings", "set", "a"], ["settings", "reset"], ["windows", "all"], ["status", "now"]] {
             XCTAssertThrowsError(try Command.parse(arguments), "\(arguments)")
         }
     }
 
-    func testLinksMatchTheAppsLinks() {
-        XCTAssertEqual(CaptureRequest.fullscreen.link.absoluteString, "screenme://capture-fullscreen")
-        XCTAssertEqual(CaptureRequest.area(x: 100, y: 80, width: 640.5, height: 400).link.absoluteString,
-                       "screenme://capture-area?x=100&y=80&width=640.5&height=400")
-        XCTAssertEqual(CaptureRequest.window(app: "Google Chrome").link.absoluteString, "screenme://capture-window?app=Google%20Chrome")
+    func testCaptureArgumentsAreTheOnesTheAppTakes() {
+        XCTAssertEqual(CaptureRequest.fullscreen.arguments, ["mode": .string("fullscreen")])
+        XCTAssertEqual(CaptureRequest.area(x: 100, y: 80, width: 640.5, height: 400).arguments,
+                       ["mode": .string("area"), "x": .number(100), "y": .number(80), "width": .number(640.5), "height": .number(400)])
+        XCTAssertEqual(CaptureRequest.window(app: "Google Chrome").arguments, ["mode": .string("window"), "app": .string("Google Chrome")])
     }
 }
 
@@ -82,34 +106,14 @@ final class CaptureFolderTests: XCTestCase {
         XCTAssertNil(folder.latest)
         XCTAssertNil(CaptureFolder(url: folder.url.appendingPathComponent("missing")).latest)
     }
-
-    func testNewImageIgnoresExistingAndHalfWrittenFiles() throws {
-        try writePNG("old.png", modified: Date().addingTimeInterval(-60))
-        let existing = folder.names()
-        XCTAssertNil(folder.newImage(notIn: existing))
-
-        // A PNG cut short, as the app's file looks while it is still being written.
-        let full = try Data(contentsOf: folder.url.appendingPathComponent("old.png"))
-        let partial = folder.url.appendingPathComponent("new.png")
-        try full.prefix(full.count / 2).write(to: partial)
-        XCTAssertNil(folder.newImage(notIn: existing))
-
-        try full.write(to: partial)
-        XCTAssertEqual(folder.newImage(notIn: existing)?.lastPathComponent, "new.png")
-    }
-
-    func testJPEGIsCompleteAtItsEndMarker() throws {
-        let jpeg = folder.url.appendingPathComponent("shot.jpg")
-        try Data([0xFF, 0xD8, 0xFF, 0xE0, 0, 0, 0, 0, 0, 0]).write(to: jpeg)
-        XCTAssertFalse(CaptureFolder.isComplete(jpeg))
-        try Data([0xFF, 0xD8, 0xFF, 0xE0, 0, 0, 0, 0, 0xFF, 0xD9]).write(to: jpeg)
-        XCTAssertTrue(CaptureFolder.isComplete(jpeg))
-    }
 }
 
 final class MCPServerTests: XCTestCase {
     var folder: CaptureFolder!
-    var captured: [CaptureRequest] = []
+    /// The calls the commands made to the app.
+    var calls: [AppCall] = []
+    /// What the stub app answers, by command; `capture` writes a 3000 x 1000 PNG and answers its path.
+    var replies: [String: [String: Any]] = [:]
 
     override func setUpWithError() throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("ScreenmeMCPTests-\(UUID().uuidString)")
@@ -121,13 +125,17 @@ final class MCPServerTests: XCTestCase {
         try? FileManager.default.removeItem(at: folder.url)
     }
 
-    /// Captures write a 3000 x 1000 PNG instead of asking the app; reports are in the same folder.
+    /// A stub app instead of the socket; reports are in the same folder as captures.
     var context: Command.Context {
-        Command.Context(folder: folder, reports: folder.url) { request in
-            self.captured.append(request)
-            return try self.writeImage(width: 3000, height: 1000)
+        Command.Context(folder: folder, reports: folder.url) { call in
+            self.calls.append(call)
+            if call.command == "capture" { return ["path": try self.writeImage(width: 3000, height: 1000).path] }
+            guard let reply = self.replies[call.command] else { throw AppChannel.Failure.refused("no stub for \(call.command)") }
+            return reply
         }
     }
+
+    var captured: [[String: AppCall.Value]] { calls.filter { $0.command == "capture" }.map(\.arguments) }
 
     var server: MCPServer { MCPServer(context: context) }
 
@@ -175,17 +183,21 @@ final class MCPServerTests: XCTestCase {
         XCTAssertEqual((tool?["error"] as? [String: Any])?["code"] as? Int, -32602)
     }
 
-    func testListsSixTools() async throws {
+    func testListsEveryTool() async throws {
         let response = try await send(#"{"jsonrpc":"2.0","id":4,"method":"tools/list"}"#)
         let tools = try XCTUnwrap((response?["result"] as? [String: Any])?["tools"] as? [[String: Any]])
-        XCTAssertEqual(tools.compactMap { $0["name"] as? String },
-                       ["take_screenshot", "get_latest_capture", "get_latest_report", "zoom_report", "inspect_report", "list_captures"])
-        XCTAssertTrue(tools.allSatisfy { $0["inputSchema"] is [String: Any] })
+        XCTAssertEqual(tools.compactMap { $0["name"] as? String }, Tool.allCases.map(\.rawValue))
+        XCTAssertEqual(tools.count, 19)
+        XCTAssertTrue(tools.allSatisfy { ($0["inputSchema"] as? [String: Any])?["type"] as? String == "object" })
+        XCTAssertTrue(tools.allSatisfy { !($0["description"] as? String ?? "").isEmpty })
+        // Every schema serializes, as the server sends it.
+        XCTAssertNoThrow(try JSONSerialization.data(withJSONObject: tools))
     }
 
     func testTakeScreenshotReturnsAScaledImageAndThePath() async throws {
         let response = try await send(#"{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"take_screenshot","arguments":{"mode":"area","x":10,"y":20,"width":300.5,"height":100}}}"#)
-        XCTAssertEqual(captured, [.area(x: 10, y: 20, width: 300.5, height: 100)])
+        XCTAssertEqual(captured, [CaptureRequest.area(x: 10, y: 20, width: 300.5, height: 100).arguments])
+        XCTAssertEqual(calls.first?.timeout, 60)
         let result = try XCTUnwrap(response?["result"] as? [String: Any])
         XCTAssertNil(result["isError"])
         let content = try XCTUnwrap(result["content"] as? [[String: Any]])
@@ -225,14 +237,15 @@ final class MCPServerTests: XCTestCase {
     }
 
     func testToolsBecomeCommands() throws {
-        func command(_ tool: Tool, _ arguments: [String: Any]) throws -> Command { try tool.command(Tool.Arguments(arguments)) }
+        func command(_ tool: Tool, _ arguments: [String: Any]) throws -> Command { try tool.command(AgentArguments(arguments)) }
         XCTAssertEqual(try command(.takeScreenshot, ["mode": "fullscreen"]), .capture(.fullscreen))
         XCTAssertEqual(try command(.takeScreenshot, ["mode": "window", "app": "Safari"]), .capture(.window(app: "Safari")))
         XCTAssertEqual(try command(.takeScreenshot, ["mode": "area", "x": 1, "y": 2.5, "width": 30, "height": 4]),
                        .capture(.area(x: 1, y: 2.5, width: 30, height: 4)))
         XCTAssertThrowsError(try command(.takeScreenshot, ["mode": "area", "x": 1, "y": 2, "width": 0, "height": 4]))
         XCTAssertThrowsError(try command(.takeScreenshot, ["mode": "area", "x": "1", "y": 2, "width": 3, "height": 4]), "a number as text")
-        XCTAssertThrowsError(try command(.takeScreenshot, [:]))
+        XCTAssertEqual(try command(.takeScreenshot, [:]), .capture(.fullscreen), "the screen under the pointer by default")
+        XCTAssertThrowsError(try command(.takeScreenshot, ["mode": "screen"]))
         XCTAssertEqual(try command(.getLatestReport, [:]), .inspect(bundle: "latest", json: false))
         XCTAssertEqual(try command(.inspectReport, ["report": "/tmp/R", "json": true]), .inspect(bundle: "/tmp/R", json: true))
         XCTAssertThrowsError(try command(.inspectReport, ["json": 1]), "a number is not a boolean")
@@ -248,8 +261,122 @@ final class MCPServerTests: XCTestCase {
         XCTAssertThrowsError(try command(.zoomReport, ["mark": 0]))
         XCTAssertThrowsError(try command(.zoomReport, ["at": 1, "phrase": "here"]))
         XCTAssertThrowsError(try command(.zoomReport, [:]))
-        XCTAssertEqual(Tool.allCases.map(\.rawValue), ["take_screenshot", "get_latest_capture", "get_latest_report", "zoom_report",
-                                                       "inspect_report", "list_captures"])
+
+        XCTAssertEqual(try command(.takeScreenshot, ["mode": "window", "app": "Safari", "scrolling": true]),
+                       .capture(.window(app: "Safari"), scrolling: true))
+        XCTAssertThrowsError(try command(.takeScreenshot, ["scrolling": "yes"]))
+        XCTAssertEqual(try command(.startRecording, [:]), .recordStart(.fullscreen))
+        XCTAssertEqual(try command(.startRecording, ["mode": "window", "app": "Notes"]), .recordStart(.window(app: "Notes")))
+        XCTAssertEqual(try command(.stopRecording, [:]), .recordStop(report: false))
+        XCTAssertEqual(try command(.stopRecording, ["report": true]), .recordStop(report: true))
+        XCTAssertEqual(try command(.makeReport, [:]), .makeReport(path: "latest"))
+        XCTAssertEqual(try command(.searchCaptures, ["query": "invoice"]), .search(query: "invoice", limit: 20))
+        XCTAssertEqual(try command(.searchCaptures, ["query": "invoice", "limit": 3]), .search(query: "invoice", limit: 3))
+        XCTAssertThrowsError(try command(.searchCaptures, [:]))
+        XCTAssertThrowsError(try command(.searchCaptures, ["query": ""]))
+        XCTAssertEqual(try command(.readText, ["path": "/tmp/a.png"]), .text(path: "/tmp/a.png"))
+        XCTAssertEqual(try command(.redactCapture, [:]), .redact(path: "latest"))
+        XCTAssertEqual(try command(.uploadCapture, [:]), .upload(path: "latest"))
+        XCTAssertEqual(try command(.testUpload, [:]), .testUpload)
+        XCTAssertEqual(try command(.captureAction, ["action": "copy_for_ai"]), .act(action: "copy_for_ai", path: "latest"))
+        XCTAssertThrowsError(try command(.captureAction, ["action": "delete"]))
+        XCTAssertThrowsError(try command(.captureAction, [:]))
+        XCTAssertEqual(try command(.getSettings, [:]), .settings(key: nil, json: true))
+        XCTAssertEqual(try command(.getSettings, ["key": "imageFormat"]), .settings(key: "imageFormat", json: true))
+        XCTAssertEqual(try command(.setSetting, ["key": "playSound", "value": false]), .setSetting(key: "playSound", value: .bool(false)))
+        XCTAssertEqual(try command(.setSetting, ["key": "jpegQuality", "value": 0.8]), .setSetting(key: "jpegQuality", value: .number(0.8)))
+        XCTAssertEqual(try command(.setSetting, ["key": "imageFormat", "value": "jpeg"]), .setSetting(key: "imageFormat", value: .string("jpeg")))
+        XCTAssertThrowsError(try command(.setSetting, ["key": "imageFormat"]))
+        XCTAssertThrowsError(try command(.setSetting, ["value": 1]))
+        XCTAssertThrowsError(try command(.setSetting, ["key": "a", "value": ["nested"]]))
+        XCTAssertEqual(try command(.listWindows, [:]), .windows)
+        XCTAssertEqual(try command(.getStatus, [:]), .status)
+    }
+
+    func testAppCommandsSendTheirCallsAndFormatTheReplies() async throws {
+        replies = [
+            "record_start": ["recording": true],
+            "record_stop": ["path": "/v.mp4", "report": "/R", "summary": "# R"],
+            "search_history": ["results": [["path": "/a.png", "excerpt": "the total"], ["path": "/b.png"]]],
+            "recognize_text": ["text": "Hello"],
+            "redact": ["path": "/a-redacted.png", "hidden": 2],
+            "upload": ["url": "https://bucket/x.png", "hidden": 0],
+            "test_upload": ["ok": true],
+            "act": ["done": true],
+            "settings": ["settings": [["key": "playSound", "section": "General", "value": true, "type": "bool", "description": "Sound"],
+                                      ["key": "selfTimer", "section": "Screenshots", "value": 5, "type": "integer", "options": [3, 5, 10]]]],
+            "set_setting": ["key": "selfTimer", "value": 10],
+            "list_windows": ["windows": [["app": "Safari", "title": "Docs", "x": 0, "y": 25, "width": 800, "height": 600]]],
+            "status": ["recording": false],
+        ]
+
+        let scrolling = try await Command.capture(.fullscreen, scrolling: true).run(context)
+        XCTAssertEqual(scrolling.images.count, 1)
+        XCTAssertEqual(calls.last?.arguments["scrolling"], .bool(true))
+        XCTAssertEqual(calls.last?.timeout, 600, "a scrolling capture takes minutes")
+
+        let started = try await Command.recordStart(.window(app: "Notes")).run(context)
+        XCTAssertEqual(calls.last, AppCall(command: "record_start", arguments: ["mode": .string("window"), "app": .string("Notes")]))
+        XCTAssertTrue(started.text.contains("screenme record stop"))
+
+        let stopped = try await Command.recordStop(report: true).run(context)
+        XCTAssertEqual(calls.last?.arguments, ["report": .bool(true)])
+        XCTAssertEqual(stopped.text, "/v.mp4\nReport for AI: /R\n\n# R")
+        XCTAssertEqual(stopped.images, [URL(fileURLWithPath: "/R").appendingPathComponent(ReportLayout.contactSheet)])
+
+        replies["record_stop"] = ["path": "/v.gif", "report_error": "A Report for AI needs a video; this recording is a gif"]
+        let gif = try await Command.recordStop(report: true).run(context)
+        XCTAssertEqual(gif.text, "/v.gif\nNo Report for AI: A Report for AI needs a video; this recording is a gif")
+
+        let found = try await Command.search(query: "total", limit: 5).run(context)
+        XCTAssertEqual(calls.last?.arguments, ["query": .string("total"), "limit": .number(5)])
+        XCTAssertEqual(found.text, "/a.png\n    the total\n/b.png")
+
+        let text = try await Command.text(path: "latest").run(context)
+        XCTAssertEqual(text.text, "Hello")
+        // `latest` is the newest capture, resolved by the tool.
+        XCTAssertEqual(calls.last?.arguments["path"], .string(try XCTUnwrap(folder.latest).url.path))
+
+        let redacted = try await Command.redact(path: "/a.png").run(context)
+        XCTAssertEqual(redacted.text, "/a-redacted.png\n2 hidden")
+        XCTAssertEqual(redacted.images, [URL(fileURLWithPath: "/a-redacted.png")])
+
+        let uploaded = try await Command.upload(path: "/a.png").run(context)
+        XCTAssertEqual(uploaded.text, "https://bucket/x.png")
+        XCTAssertEqual(calls.last?.timeout, 600)
+        _ = try await Command.testUpload.run(context)
+        XCTAssertEqual(calls.last?.command, "test_upload")
+
+        let acted = try await Command.act(action: "pin", path: "/a.png").run(context)
+        XCTAssertEqual(calls.last?.arguments, ["action": .string("pin"), "path": .string("/a.png")])
+        XCTAssertEqual(acted.text, "Done.")
+
+        let settings = try await Command.settings(key: nil, json: false).run(context)
+        XCTAssertEqual(settings.text, "General\n  playSound = true   [bool]  Sound\n\nScreenshots\n  selfTimer = 5   [3 | 5 | 10]  ")
+        let one = try await Command.settings(key: "selfTimer", json: false).run(context)
+        XCTAssertTrue(one.text.contains("\"key\" : \"selfTimer\""))
+        do {
+            _ = try await Command.settings(key: "nope", json: false).run(context)
+            XCTFail("an unknown key")
+        } catch {
+            XCTAssertTrue(error is Command.UsageError)
+        }
+        let set = try await Command.setSetting(key: "selfTimer", value: .string("10")).run(context)
+        XCTAssertEqual(calls.last?.arguments, ["key": .string("selfTimer"), "value": .string("10")])
+        XCTAssertEqual(set.text, "selfTimer = 10")
+
+        let windows = try await Command.windows.run(context)
+        XCTAssertEqual(windows.text, "Safari: Docs  (0, 25, 800 x 600)")
+        let status = try await Command.status.run(context)
+        XCTAssertEqual(status.text, "{\n  \"recording\" : false\n}")
+    }
+
+    func testAnAppErrorIsAToolError() async throws {
+        let response = try await send(#"{"jsonrpc":"2.0","id":20,"method":"tools/call","params":{"name":"test_upload"}}"#)
+        let result = try XCTUnwrap(response?["result"] as? [String: Any])
+        XCTAssertEqual(result["isError"] as? Bool, true)
+        let text = (result["content"] as? [[String: Any]])?.first?["text"] as? String
+        XCTAssertEqual(text, "no stub for test_upload")
     }
 
     func testCommandsRunToTextAndImages() async throws {
@@ -263,7 +390,7 @@ final class MCPServerTests: XCTestCase {
         XCTAssertEqual(empty, Command.Output(text: ""))
 
         let shot = try await Command.capture(.fullscreen).run(context)
-        XCTAssertEqual(captured, [.fullscreen])
+        XCTAssertEqual(captured, [CaptureRequest.fullscreen.arguments])
         XCTAssertEqual(shot.images.count, 1)
         XCTAssertEqual(shot.text, shot.images.first?.path)
         let latest = try await Command.latest.run(context)
