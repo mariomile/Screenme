@@ -5,7 +5,8 @@ import Foundation
 ///
 /// The app listens on a Unix socket in its Application Support folder, readable by this user only, so a web page
 /// cannot reach it the way it can open a `screenme://` link. One connection carries one exchange: the tool writes a
-/// request and closes its side, the app writes the reply and closes the connection. Both are JSON objects:
+/// request, the app writes the reply, the tool closes the connection once it has read it. Each is one JSON object on
+/// one line, ending with a line break, so neither side waits for the other to close to know a message is whole:
 ///
 ///     {"command": "capture", "arguments": {"mode": "window", "app": "Safari"}, "timeout": 60}
 ///     {"result": {"path": "/Users/…/Screenme 2026-10-23 at 10.12.40.png"}}
@@ -35,10 +36,18 @@ enum AgentChannel {
         let description: String
     }
 
+    /// The byte that ends a message. JSON written on one line holds no raw line break.
+    static let endOfMessage = UInt8(ascii: "\n")
+
+    /// The first whole message in `buffer`, without its line break; nil while it is still arriving.
+    static func message(in buffer: Data) -> Data? {
+        buffer.firstIndex(of: endOfMessage).map { buffer[buffer.startIndex..<$0] }
+    }
+
     static func encode(_ request: Request) throws -> Data {
         var object: [String: Any] = ["command": request.command, "arguments": request.arguments]
         if let timeout = request.timeout { object["timeout"] = timeout }
-        return try JSONSerialization.data(withJSONObject: object)
+        return try JSONSerialization.data(withJSONObject: object) + [endOfMessage]
     }
 
     static func decodeRequest(_ data: Data) throws -> Request {
@@ -56,8 +65,8 @@ enum AgentChannel {
         case .error(let message): ["error": message]
         }
         // A result the app built is always serializable; an error message stands in if one ever is not.
-        return (try? JSONSerialization.data(withJSONObject: object))
-            ?? Data(#"{"error":"the reply could not be written as JSON"}"#.utf8)
+        let json = (try? JSONSerialization.data(withJSONObject: object)) ?? Data(#"{"error":"the reply could not be written as JSON"}"#.utf8)
+        return json + [endOfMessage]
     }
 
     static func decodeReply(_ data: Data) throws -> Reply {

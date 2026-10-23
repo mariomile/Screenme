@@ -65,23 +65,28 @@ final class AgentServer {
         receive(connection, into: Data())
     }
 
-    /// Reads until the tool closes its side, then answers. A request over 1 MB is refused.
+    /// Reads one line, answers it, then waits for the tool to close the connection after reading the reply: closing
+    /// it here could drop the reply before the tool reads it. A request over 1 MB is refused.
     private nonisolated func receive(_ connection: NWConnection, into buffer: Data) {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [weak self] data, _, complete, error in
             var buffer = buffer
             if let data { buffer.append(data) }
-            if error != nil || buffer.count > 1 << 20 {
+            guard error == nil, buffer.count <= 1 << 20 else {
                 connection.cancel()
                 return
             }
-            guard complete else {
-                self?.receive(connection, into: buffer)
+            guard let request = AgentChannel.message(in: buffer) else {
+                if complete { connection.cancel() } else { self?.receive(connection, into: buffer) }
                 return
             }
             Task { @MainActor in
-                let reply = await AgentAPI.reply(to: buffer)
-                connection.send(content: AgentChannel.encode(reply), contentContext: .finalMessage, isComplete: true,
-                                completion: .contentProcessed { _ in connection.cancel() })
+                let reply = await AgentAPI.reply(to: request)
+                connection.send(content: AgentChannel.encode(reply), completion: .contentProcessed { error in
+                    guard error == nil else { return connection.cancel() }
+                    // The tool closes once it has the reply; a tool that never does is let go after 10 s.
+                    connection.receive(minimumIncompleteLength: 1, maximumLength: 1) { _, _, _, _ in connection.cancel() }
+                    DispatchQueue.global().asyncAfter(deadline: .now() + 10) { connection.cancel() }
+                })
             }
         }
     }

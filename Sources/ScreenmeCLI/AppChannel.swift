@@ -114,7 +114,7 @@ enum AppChannel {
     }
 }
 
-/// One connection: write the request, close the writing side, read the reply until the app closes.
+/// One connection: write the request, read until the reply's line break, close.
 /// Everything runs on one serial queue, so `finished` needs no lock.
 private final class Exchange: @unchecked Sendable {
     /// Nothing listens on the socket: the app is not running, or not yet.
@@ -141,7 +141,7 @@ private final class Exchange: @unchecked Sendable {
             switch state {
             case .ready:
                 connected = true
-                connection.send(content: request, contentContext: .finalMessage, isComplete: true, completion: .contentProcessed { [self] error in
+                connection.send(content: request, completion: .contentProcessed { [self] error in
                     if let error { finish(.failure(error)) }
                 })
                 receive()
@@ -158,8 +158,10 @@ private final class Exchange: @unchecked Sendable {
     private func receive() {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 1 << 20) { [self] data, _, complete, error in
             if let data { reply.append(data) }
-            if complete {
-                finish(.success(reply))
+            if let message = AgentChannel.message(in: reply) {
+                finish(.success(message))
+            } else if complete {
+                finish(.failure(AppChannel.Failure.refused("Screenme closed the connection before it answered")))
             } else if let error {
                 finish(.failure(error))
             } else {

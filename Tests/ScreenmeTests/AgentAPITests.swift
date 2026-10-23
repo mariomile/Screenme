@@ -100,6 +100,7 @@ final class AgentAPITests: PrefsSandboxTestCase {
         XCTAssertEqual(emptyArea, "mode area needs x, y, width and height, with a width and height above 0")
 
         let garbageReply = await AgentAPI.reply(to: Data("not json".utf8))
+        XCTAssertEqual(AgentChannel.encode(garbageReply).last, AgentChannel.endOfMessage)
         let garbage = AgentChannel.encode(garbageReply)
         XCTAssertEqual(error(try AgentChannel.decodeReply(garbage)), "the request is not a JSON object with a command")
     }
@@ -123,6 +124,9 @@ final class AgentAPITests: PrefsSandboxTestCase {
         XCTAssertEqual(request.command, "capture")
         XCTAssertEqual(request.arguments["app"] as? String, "Safari")
         XCTAssertNil(request.timeout)
+        let line = try AgentChannel.encode(AgentChannel.Request(command: "status", arguments: ["text": "a\nb"]))
+        XCTAssertEqual(line.filter { $0 == AgentChannel.endOfMessage }.count, 1, "one line, a line break in a value escaped")
+        XCTAssertNil(AgentChannel.message(in: line.dropLast()), "not whole without its line break")
         let status = try AgentChannel.decodeRequest(Data(#"{"command":"status"}"#.utf8))
         XCTAssertEqual(status.arguments.count, 0)
         let timed = try AgentChannel.decodeRequest(AgentChannel.encode(AgentChannel.Request(command: "upload", arguments: [:], timeout: 1800)))
@@ -173,6 +177,25 @@ final class AgentServerTests: PrefsSandboxTestCase {
         withExtendedLifetime(server) {}
     }
 
+    /// Every reply arrives whole: the app must not drop the connection before the tool has read it.
+    func testEveryReplyArrives() async throws {
+        let socket = try temporaryFolder().appendingPathComponent("b.sock")
+        let server = await MainActor.run { AgentServer() }
+        await server.start(at: socket)
+        let request = try AgentChannel.encode(AgentChannel.Request(command: "settings", arguments: [:]))
+        var failures = 0
+        for attempt in 0..<100 {
+            do {
+                _ = try AgentChannel.decodeReply(try await exchange(request, at: socket))
+            } catch {
+                // The listener may still be starting on the first tries.
+                if attempt > 5 { failures += 1 } else { try await Task.sleep(for: .milliseconds(100)) }
+            }
+        }
+        XCTAssertEqual(failures, 0)
+        withExtendedLifetime(server) {}
+    }
+
     private func exchange(_ request: Data, at socket: URL) async throws -> Data {
         try await withCheckedThrowingContinuation { continuation in
             let connection = NWConnection(to: .unix(path: socket.path), using: .tcp)
@@ -188,13 +211,21 @@ final class AgentServerTests: PrefsSandboxTestCase {
             func receive() {
                 connection.receive(minimumIncompleteLength: 1, maximumLength: 1 << 20) { data, _, complete, error in
                     if let data { reply.append(data) }
-                    if complete { finish(.success(reply)) } else if let error { finish(.failure(error)) } else { receive() }
+                    if let message = AgentChannel.message(in: reply) {
+                        finish(.success(message))
+                    } else if complete {
+                        finish(.failure(URLError(.networkConnectionLost)))
+                    } else if let error {
+                        finish(.failure(error))
+                    } else {
+                        receive()
+                    }
                 }
             }
             connection.stateUpdateHandler = { state in
                 switch state {
                 case .ready:
-                    connection.send(content: request, contentContext: .finalMessage, isComplete: true, completion: .idempotent)
+                    connection.send(content: request, completion: .idempotent)
                     receive()
                 case .waiting(let error), .failed(let error):
                     finish(.failure(error))
