@@ -1,4 +1,4 @@
-import CoreGraphics
+import AppKit
 import XCTest
 @testable import Screenme
 
@@ -126,6 +126,62 @@ final class ScrollStitcherTests: XCTestCase {
         XCTAssertTrue((0..<20).allSatisfy { rowIsConstant($0, 40) })
         XCTAssertTrue((image.height - 16..<image.height).allSatisfy { rowIsConstant($0, 220) })
         XCTAssertFalse(rowIsConstant(20 + 5, 40), "the header must not repeat down the page")
+    }
+
+    /// A real page: black text on white with wide empty margins and gaps, a sticky nav bar, Retina-sized
+    /// frames and the uneven steps of a trackpad flick (fast, then slowing down, with idle frames).
+    func testRenderedTextPageWithTrackpadMomentum() throws {
+        let pageWidth = 1400, viewport = 900, nav = 96
+        let offsets = [0, 4, 30, 140, 320, 560, 780, 960, 1100, 1190, 1240, 1262, 1270, 1270, 1290, 1420, 1700, 2050, 2300, 2420, 2460]
+        let page = renderTextPage(width: pageWidth, height: offsets.last! + viewport)
+        let rowBytes = pageWidth * 4
+        func shot(_ offset: Int) -> [UInt8] {
+            var out = Array(page[(offset * rowBytes)..<((offset + viewport) * rowBytes)])
+            out.replaceSubrange(0..<(nav * rowBytes), with: repeatElement(30, count: nav * rowBytes)) // the sticky nav bar
+            return out
+        }
+        let stitcher = try XCTUnwrap(ScrollStitcher(width: pageWidth, height: viewport))
+        for offset in offsets {
+            let outcome = shot(offset).withUnsafeBufferPointer { stitcher.add($0.baseAddress!, bytesPerRow: rowBytes) }
+            XCTAssertNotEqual(outcome, .lost, "offset \(offset)")
+        }
+        let image = try XCTUnwrap(stitcher.finish())
+        XCTAssertEqual(image.height, offsets.last! + viewport)
+        // Below the nav bar, every stitched row is the page row at the same height.
+        let stitched = bytes(of: image)
+        let wrong = (nav..<image.height).first { stitched[($0 * rowBytes)..<(($0 + 1) * rowBytes)] != page[($0 * rowBytes)..<(($0 + 1) * rowBytes)] }
+        XCTAssertNil(wrong, "first stitched row that differs from the page")
+    }
+
+    /// White page with paragraphs of 15 pt text drawn at 2x, headings, and blank gaps between sections.
+    private func renderTextPage(width: Int, height: Int) -> [UInt8] {
+        var pixels = [UInt8](repeating: 255, count: width * height * 4)
+        pixels.withUnsafeMutableBytes { raw in
+            let context = CGContext(data: raw.baseAddress, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+                                    space: CGColorSpaceCreateDeviceRGB(),
+                                    bitmapInfo: CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.noneSkipFirst.rawValue)!
+            context.setFillColor(CGColor(gray: 1, alpha: 1))
+            context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+            let previous = NSGraphicsContext.current
+            NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
+            defer { NSGraphicsContext.current = previous }
+            let words = "the total on the checkout page is wrong because the discount code is applied twice when the plan changes and nobody noticed until a customer wrote in".split(separator: " ")
+            var y = height - 140
+            var section = 0
+            while y > 60 {
+                let heading = NSAttributedString(string: "Section \(section + 1): what happened", attributes: [.font: NSFont.boldSystemFont(ofSize: 44)])
+                heading.draw(at: CGPoint(x: 200, y: y))
+                y -= 90
+                for line in 0..<(6 + section % 4) where y > 60 {
+                    let text = (0..<12).map { String(words[(section * 7 + line * 5 + $0) % words.count]) }.joined(separator: " ")
+                    NSAttributedString(string: text, attributes: [.font: NSFont.systemFont(ofSize: 30)]).draw(at: CGPoint(x: 200, y: y))
+                    y -= 52
+                }
+                y -= 160 // the empty gap between sections
+                section += 1
+            }
+        }
+        return pixels
     }
 
     func testFinishTwiceReturnsNil() throws {

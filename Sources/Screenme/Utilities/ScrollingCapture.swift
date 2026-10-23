@@ -5,7 +5,8 @@ import ScreenCaptureKit
 import SwiftUI
 
 /// Scrolling capture: while the content under `target` scrolls, frames are stitched into one tall image.
-/// A floating panel next to the area has Start, Auto-scroll, Done and Cancel, plus a live preview.
+/// Capturing starts as soon as the area is picked; a floating panel next to it has Auto-scroll, Done
+/// and Cancel, plus a live preview.
 /// One at a time: only `CaptureCoordinator` calls it, inside its busy window.
 @MainActor
 enum ScrollingCapture {
@@ -39,8 +40,7 @@ final class ScrollSession: ObservableObject {
     @Published private var error: String?
 
     private enum Message {
-        static let ready = "Place the page where you want it, press Start, then scroll the area. Or let Screenme scroll for you."
-        static let capturing = "Scroll slowly. Screenme stitches as you go."
+        static let capturing = "Scroll the area. Screenme stitches as you go. Press Done at the end, or let Screenme scroll for you."
         static let lost = "Lost track of the content. Scroll back a little."
         static let auto = "Scrolling for you. Press Done any time."
         static let end = "Reached the end of the page. Press Done."
@@ -56,7 +56,7 @@ final class ScrollSession: ObservableObject {
         if needsAccess { return Message.needsAccess }
         if endReached { return Message.end }
         if isAutoScrolling { return Message.auto }
-        return phase == .ready ? Message.ready : Message.capturing
+        return Message.capturing
     }
 
     private let frame: CGRect
@@ -82,6 +82,7 @@ final class ScrollSession: ObservableObject {
         return await withCheckedContinuation { continuation in
             self.continuation = continuation
             showPanel()
+            Task { await start() }
         }
     }
 
@@ -128,7 +129,6 @@ final class ScrollSession: ObservableObject {
             needsAccess = true
             return
         }
-        if phase == .ready { await start() }
         guard phase == .capturing, stream != nil else { return }
         needsAccess = false
         endReached = false

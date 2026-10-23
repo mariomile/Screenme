@@ -63,6 +63,9 @@ struct ScrollPanelView: View {
                 Image(systemName: "arrow.up.and.down.text.horizontal")
                     .foregroundStyle(Color.accentColor)
                 Text("Scrolling Capture").font(.system(size: 13, weight: .semibold))
+                if session.phase == .capturing {
+                    Circle().fill(.red).frame(width: 7, height: 7)
+                }
             }
             .padding(.top, 14)
 
@@ -75,18 +78,17 @@ struct ScrollPanelView: View {
             Spacer(minLength: 8)
 
             VStack(spacing: 7) {
-                startButton
                 Button { Task { await session.toggleAutoScroll() } } label: {
                     Label(session.isAutoScrolling ? "Stop Auto-scroll" : "Auto-scroll",
                           systemImage: session.isAutoScrolling ? "stop.fill" : "arrow.down.to.line")
                 }
                 .buttonStyle(ScrollPanelButtonStyle(kind: .secondary))
-                .disabled(session.phase == .finishing)
+                .disabled(session.phase != .capturing)
 
                 Button { Task { await session.done() } } label: {
                     Label("Done", systemImage: "checkmark")
                 }
-                .buttonStyle(ScrollPanelButtonStyle(kind: session.phase == .capturing ? .primary : .secondary))
+                .buttonStyle(ScrollPanelButtonStyle(kind: .primary))
                 .disabled(session.phase != .capturing)
 
                 Button("Cancel") { Task { await session.cancel() } }
@@ -97,22 +99,6 @@ struct ScrollPanelView: View {
         }
         .padding(.horizontal, 14)
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    @ViewBuilder
-    private var startButton: some View {
-        Button { Task { await session.start() } } label: {
-            if session.phase == .ready {
-                Label("Start", systemImage: "play.fill")
-            } else {
-                HStack(spacing: 6) {
-                    Circle().fill(.red).frame(width: 7, height: 7)
-                    Text("Capturing")
-                }
-            }
-        }
-        .buttonStyle(ScrollPanelButtonStyle(kind: session.phase == .ready ? .primary : .secondary))
-        .disabled(session.phase != .ready)
     }
 }
 
