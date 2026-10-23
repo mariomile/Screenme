@@ -104,6 +104,7 @@ screenme act copy_for_ai [FILE]              # copy, copy_for_ai, copy_markdown,
 screenme settings [--json]                   # every setting: key, value, allowed values, what it does
 screenme settings get KEY
 screenme settings set KEY VALUE
+printf %s "$SECRET" | screenme settings set s3SecretAccessKey --stdin   # secrets never as an argument
 screenme status
 ```
 

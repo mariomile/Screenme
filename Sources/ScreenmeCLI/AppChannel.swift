@@ -60,7 +60,8 @@ enum AppChannel {
 
     /// Sends the call and returns the app's result, or throws the app's error as a `Failure`.
     static func send(_ call: AppCall) async throws -> [String: Any] {
-        let request = try AgentChannel.encode(AgentChannel.Request(command: call.command, arguments: call.arguments.mapValues(\.json)))
+        let request = try AgentChannel.encode(AgentChannel.Request(command: call.command, arguments: call.arguments.mapValues(\.json),
+                                                                   timeout: call.timeout))
         let data: Data
         do {
             data = try await exchange(request, timeout: call.timeout)

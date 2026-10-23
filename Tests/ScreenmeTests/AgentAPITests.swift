@@ -62,6 +62,11 @@ final class AgentAPITests: PrefsSandboxTestCase {
         XCTAssertThrowsError(try prefix.set(3), "a number is not text")
     }
 
+    func testACommandWithinItsTimeAnswers() async throws {
+        let result = try await AgentAPI.run(.settings, AgentArguments([:]), within: 0.5)
+        XCTAssertEqual((result["settings"] as? [Any])?.count, AgentSetting.all.count)
+    }
+
     func testTheSaveFolderMustExist() throws {
         let folder = try temporaryFolder()
         let setting = try XCTUnwrap(AgentSetting.named(Pref.saveDirectory.name))
@@ -117,7 +122,11 @@ final class AgentAPITests: PrefsSandboxTestCase {
         let request = try AgentChannel.decodeRequest(AgentChannel.encode(AgentChannel.Request(command: "capture", arguments: ["mode": "window", "app": "Safari"])))
         XCTAssertEqual(request.command, "capture")
         XCTAssertEqual(request.arguments["app"] as? String, "Safari")
-        XCTAssertEqual(try AgentChannel.decodeRequest(Data(#"{"command":"status"}"#.utf8)).arguments.count, 0)
+        XCTAssertNil(request.timeout)
+        let status = try AgentChannel.decodeRequest(Data(#"{"command":"status"}"#.utf8))
+        XCTAssertEqual(status.arguments.count, 0)
+        let timed = try AgentChannel.decodeRequest(AgentChannel.encode(AgentChannel.Request(command: "upload", arguments: [:], timeout: 1800)))
+        XCTAssertEqual(timed.timeout, 1800)
 
         guard case .result(let result) = try AgentChannel.decodeReply(AgentChannel.encode(.result(["path": "/a.png"]))) else {
             return XCTFail("a result")

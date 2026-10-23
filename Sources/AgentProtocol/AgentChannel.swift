@@ -7,7 +7,7 @@ import Foundation
 /// cannot reach it the way it can open a `screenme://` link. One connection carries one exchange: the tool writes a
 /// request and closes its side, the app writes the reply and closes the connection. Both are JSON objects:
 ///
-///     {"command": "capture", "arguments": {"mode": "window", "app": "Safari"}}
+///     {"command": "capture", "arguments": {"mode": "window", "app": "Safari"}, "timeout": 60}
 ///     {"result": {"path": "/Users/…/Screenme 2026-10-23 at 10.12.40.png"}}
 ///     {"error": "No window of Safari is on screen"}
 enum AgentChannel {
@@ -20,6 +20,9 @@ enum AgentChannel {
     struct Request {
         let command: String
         let arguments: [String: Any]
+        /// Seconds the tool waits for the reply. The app stops the work a little before, so the tool hears why
+        /// instead of giving up while the work goes on.
+        var timeout: TimeInterval?
     }
 
     /// A reply is a result or an error, never both.
@@ -33,7 +36,9 @@ enum AgentChannel {
     }
 
     static func encode(_ request: Request) throws -> Data {
-        try JSONSerialization.data(withJSONObject: ["command": request.command, "arguments": request.arguments])
+        var object: [String: Any] = ["command": request.command, "arguments": request.arguments]
+        if let timeout = request.timeout { object["timeout"] = timeout }
+        return try JSONSerialization.data(withJSONObject: object)
     }
 
     static func decodeRequest(_ data: Data) throws -> Request {
@@ -41,7 +46,8 @@ enum AgentChannel {
               let command = object["command"] as? String else {
             throw FormatError(description: "the request is not a JSON object with a command")
         }
-        return Request(command: command, arguments: object["arguments"] as? [String: Any] ?? [:])
+        let timeout = (object["timeout"] as? NSNumber).map(\.doubleValue).flatMap { $0 > 0 ? $0 : nil }
+        return Request(command: command, arguments: object["arguments"] as? [String: Any] ?? [:], timeout: timeout)
     }
 
     static func encode(_ reply: Reply) -> Data {

@@ -15,7 +15,11 @@ enum ScrollingCapture {
     static func run(_ target: CaptureTarget, autoScroll: Bool = false) async throws -> CGImage? {
         let (filter, configuration) = try await target.streamSetup(showsCursor: false, retina: Prefs[Pref.retinaResolution])
         let session = ScrollSession(frame: target.cocoaFrame, filter: filter, configuration: configuration, autoScroll: autoScroll)
-        let image = await session.run()
+        let image = await withTaskCancellationHandler {
+            await session.run()
+        } onCancel: {
+            Task { @MainActor in await session.cancel() }
+        }
         if let failure = session.failure { throw AgentError(failure) }
         return image
     }

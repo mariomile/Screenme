@@ -115,10 +115,12 @@ screenme settings --json                 # the same as JSON
 screenme settings get imageFormat
 screenme settings set imageFormat jpg
 screenme settings set s3Endpoint https://ACCOUNT.r2.cloudflarestorage.com
-screenme settings set s3SecretAccessKey ...   # goes to the Keychain; reads only say "(set)"
+pbpaste | screenme settings set s3SecretAccessKey --stdin   # to the Keychain, never on the command line; reads say "(set)"
 ```
 
-A wrong value is refused with what the setting takes. The app picks up a change at once, as if you had made it in Settings.
+A wrong value is refused with what the setting takes. The app picks up a change at once, as if you had made it in Settings. `--stdin` reads any value from standard input; use it for the secret so it stays out of your shell history.
+
+Every command tells the app how long it will wait (a minute; 10 minutes for a scrolling capture, 30 for an upload, 15 for a report). Shortly before that the app stops an upload or a scrolling capture and says so, so nothing goes up after the command gave up.
 
 For Reports for AI (a report folder, or `latest` for the newest one in your save folder, the default):
 

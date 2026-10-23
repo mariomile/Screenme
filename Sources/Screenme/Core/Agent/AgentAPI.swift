@@ -29,9 +29,28 @@ enum AgentAPI {
             guard let command = Command(rawValue: request.command) else {
                 return .error("unknown command \(request.command); Screenme knows \(Command.allCases.map(\.rawValue).joined(separator: ", "))")
             }
-            return .result(try await run(command, AgentArguments(request.arguments)))
+            return .result(try await run(command, AgentArguments(request.arguments), within: request.timeout))
         } catch {
             return .error(message(for: error))
+        }
+    }
+
+    /// Runs the command, cancelled 2 s before the tool stops waiting: an upload or a scrolling capture then stops
+    /// instead of finishing after the tool gave up, and the tool hears so. Work that does not stop when cancelled
+    /// still finishes.
+    static func run(_ command: Command, _ arguments: AgentArguments, within timeout: TimeInterval?) async throws -> [String: Any] {
+        guard let timeout else { return try await run(command, arguments) }
+        let seconds = max(timeout - 2, 1)
+        let work = Task { try await run(command, arguments) }
+        let deadline = Task {
+            try await Task.sleep(for: .seconds(seconds))
+            work.cancel()
+        }
+        defer { deadline.cancel() }
+        do {
+            return try await work.value
+        } catch where work.isCancelled {
+            throw AgentError("Screenme stopped \(command.rawValue) after \(Int(seconds)) s, before it finished")
         }
     }
 

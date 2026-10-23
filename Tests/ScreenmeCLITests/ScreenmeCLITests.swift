@@ -35,6 +35,7 @@ final class CommandParsingTests: XCTestCase {
         XCTAssertEqual(try Command.parse(["settings", "--json"]), .settings(key: nil, json: true))
         XCTAssertEqual(try Command.parse(["settings", "get", "imageFormat"]), .settings(key: "imageFormat", json: false))
         XCTAssertEqual(try Command.parse(["settings", "set", "imageFormat", "jpeg"]), .setSetting(key: "imageFormat", value: .string("jpeg")))
+        XCTAssertEqual(try Command.parse(["settings", "set", "s3SecretAccessKey", "--stdin"]), .setSetting(key: "s3SecretAccessKey", value: nil))
         XCTAssertEqual(try Command.parse(["windows"]), .windows)
         XCTAssertEqual(try Command.parse(["status"]), .status)
     }
@@ -343,7 +344,7 @@ final class MCPServerTests: XCTestCase {
 
         let uploaded = try await Command.upload(path: "/a.png").run(context)
         XCTAssertEqual(uploaded.text, "https://bucket/x.png")
-        XCTAssertEqual(calls.last?.timeout, 600)
+        XCTAssertEqual(calls.last?.timeout, 1800, "a big recording takes a while to upload")
         _ = try await Command.testUpload.run(context)
         XCTAssertEqual(calls.last?.command, "test_upload")
 
@@ -364,6 +365,18 @@ final class MCPServerTests: XCTestCase {
         let set = try await Command.setSetting(key: "selfTimer", value: .string("10")).run(context)
         XCTAssertEqual(calls.last?.arguments, ["key": .string("selfTimer"), "value": .string("10")])
         XCTAssertEqual(set.text, "selfTimer = 10")
+
+        var piped = context
+        piped.input = { "s3cr3t\n" }
+        _ = try await Command.setSetting(key: "s3SecretAccessKey", value: nil).run(piped)
+        XCTAssertEqual(calls.last?.arguments, ["key": .string("s3SecretAccessKey"), "value": .string("s3cr3t")], "without the line break")
+        piped.input = { "" }
+        do {
+            _ = try await Command.setSetting(key: "s3SecretAccessKey", value: nil).run(piped)
+            XCTFail("nothing piped in")
+        } catch {
+            XCTAssertTrue(error is Command.UsageError)
+        }
 
         let windows = try await Command.windows.run(context)
         XCTAssertEqual(windows.text, "Safari: Docs  (0, 25, 800 x 600)")

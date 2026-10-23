@@ -80,7 +80,8 @@ enum Command: Equatable {
     case testUpload
     case act(action: String, path: String)
     case settings(key: String?, json: Bool)
-    case setSetting(key: String, value: AppCall.Value)
+    /// `value` nil: read from standard input (`--stdin`), so a secret stays out of the command line and shell history.
+    case setSetting(key: String, value: AppCall.Value?)
     case windows
     case status
     case zoom(ZoomRequest)
@@ -113,7 +114,9 @@ enum Command: Equatable {
                                                save, reveal, edit, pin
           screenme settings [--json]           Every setting with its value, type and allowed values
           screenme settings get KEY            One setting
-          screenme settings set KEY VALUE      Change a setting (the upload secret is s3SecretAccessKey)
+          screenme settings set KEY VALUE      Change a setting
+          screenme settings set KEY --stdin    ... reading the value from standard input: use it for s3SecretAccessKey,
+                                               so the secret stays out of your shell history
           screenme windows                     The windows on screen, front to back, with their frames
           screenme status                      Permissions, recording state and folders
           screenme mcp                         Run the MCP server on stdin and stdout
@@ -202,8 +205,8 @@ enum Command: Equatable {
                 guard rest.count == 2 else { throw UsageError("settings get needs one KEY") }
                 return .settings(key: rest[1], json: false)
             case "set":
-                guard rest.count == 3 else { throw UsageError("settings set needs KEY and VALUE") }
-                return .setSetting(key: rest[1], value: .string(rest[2]))
+                guard rest.count == 3 else { throw UsageError("settings set needs KEY and VALUE, or KEY --stdin") }
+                return .setSetting(key: rest[1], value: rest[2] == "--stdin" ? nil : .string(rest[2]))
             default:
                 throw UsageError("settings takes get KEY, set KEY VALUE or --json")
             }
@@ -335,6 +338,8 @@ extension Command {
         var folder: CaptureFolder
         var reports: URL
         var app: (AppCall) async throws -> [String: Any]
+        /// Standard input, for `settings set KEY --stdin`.
+        var input: () -> String? = { String(data: FileHandle.standardInput.readDataToEndOfFile(), encoding: .utf8) }
 
         static var standard: Context {
             Context(folder: .standard, reports: ScreenmePaths.saveFolder, app: AppChannel.send)
@@ -389,7 +394,7 @@ extension Command {
             let hidden = result["hidden"] as? Int ?? 0
             return Output(text: hidden > 0 ? "\(copy)\n\(hidden) hidden" : "\(copy)\nNothing sensitive found", images: [URL(fileURLWithPath: copy)])
         case .upload(let path):
-            let result = try await context.app(AppCall(command: "upload", arguments: ["path": .string(try resolve(path, context))], timeout: 600))
+            let result = try await context.app(AppCall(command: "upload", arguments: ["path": .string(try resolve(path, context))], timeout: 1800))
             let hidden = result["hidden"] as? Int ?? 0
             return Output(text: try result.string("url") + (hidden > 0 ? "\n\(hidden) hidden in the uploaded copy" : ""))
         case .testUpload:
@@ -407,7 +412,8 @@ extension Command {
                 return Output(text: Self.json(setting))
             }
             return Output(text: json ? Self.json(settings) : Self.settingsText(settings))
-        case .setSetting(let key, let value):
+        case .setSetting(let key, let given):
+            let value = try given ?? Self.inputValue(context)
             let result = try await context.app(AppCall(command: "set_setting", arguments: ["key": .string(key), "value": value]))
             return Output(text: "\(key) = \(Self.describe(result["value"] as Any))")
         case .windows:
@@ -442,6 +448,14 @@ extension Command {
         guard path == "latest" else { return path }
         guard let latest = context.folder.latest else { throw Failure.noCaptures(context.folder.url.path) }
         return latest.url.path
+    }
+
+    /// The value piped in, without the line break `echo` adds.
+    private static func inputValue(_ context: Context) throws -> AppCall.Value {
+        guard let text = context.input()?.trimmingCharacters(in: .newlines), !text.isEmpty else {
+            throw UsageError("--stdin needs the value on standard input, like: pbpaste | screenme settings set KEY --stdin")
+        }
+        return .string(text)
     }
 
     /// A recording's path, and its report's folder, summary and contact sheet when it has one.
