@@ -277,7 +277,10 @@ final class ScrollSession: ObservableObject {
 
         let panel = FloatingPanel(frame: CGRect(x: x, y: y, width: size.width, height: height), level: .statusBar)
         panel.isMovableByWindowBackground = true
-        panel.contentView = NSHostingView(rootView: ScrollPanelView(session: self))
+        let host = NSHostingView(rootView: ScrollPanelView(session: self))
+        // The panel keeps the frame above: a tall preview would otherwise grow it past the screen and hide Done.
+        host.sizingOptions = []
+        panel.contentView = host
         panel.present()
         self.panel = panel
     }
