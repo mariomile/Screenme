@@ -26,9 +26,23 @@ final class DeliverTests: PrefsSandboxTestCase {
         let folder = try temporaryFolder()
         for (name, type) in [("shot.png", "public.png"), ("shot.jpg", "public.jpeg")] {
             let url = folder.appendingPathComponent(name)
-            try Storage.write(image(width: 8, height: 8), to: url)
+            try Storage.write(image(width: 8, height: 8), to: url, scale: 2)
             let source = try XCTUnwrap(CGImageSourceCreateWithURL(url as CFURL, nil))
             XCTAssertEqual(CGImageSourceGetType(source) as String?, type)
+        }
+    }
+
+    /// A Retina capture says so in its DPI; without it apps show it at twice its size on screen, blurred.
+    @MainActor
+    func testWriteRecordsPixelsPerPointAsDPI() throws {
+        let folder = try temporaryFolder()
+        for (name, scale) in [("retina.png", 2.0), ("retina.jpg", 2.0), ("standard.png", 1.0)] {
+            let url = folder.appendingPathComponent(name)
+            try Storage.write(image(width: 8, height: 8), to: url, scale: scale)
+            let source = try XCTUnwrap(CGImageSourceCreateWithURL(url as CFURL, nil))
+            let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any])
+            XCTAssertEqual(properties[kCGImagePropertyDPIWidth] as? Double, 72 * scale, name)
+            XCTAssertEqual(ImageSource.unit(of: url), scale, name)
         }
     }
 }

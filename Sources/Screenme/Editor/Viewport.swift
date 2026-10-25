@@ -26,8 +26,10 @@ struct Viewport {
 
     private var canvasSize: CGSize { layout.canvasSize }
 
+    /// On whole points, so at actual size each image pixel lands on a screen pixel instead of being blurred across two.
     var canvasOrigin: CGPoint {
-        CGPoint(x: viewSize.width / 2 - canvasSize.width * zoom / 2 + pan.x, y: viewSize.height / 2 - canvasSize.height * zoom / 2 + pan.y)
+        CGPoint(x: (viewSize.width / 2 - canvasSize.width * zoom / 2 + pan.x).rounded(),
+                y: (viewSize.height / 2 - canvasSize.height * zoom / 2 + pan.y).rounded())
     }
 
     /// The canvas, in view points.

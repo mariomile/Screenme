@@ -46,6 +46,15 @@ final class ImageSource {
         guard let src = CGImageSourceCreateWithURL(url as CFURL, nil),
               let image = CGImageSourceCreateImageAtIndex(src, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary)
         else { return nil }
+        return ImageSource(image: image, unit: unit(of: src))
+    }
+
+    /// Pixels per point of an image file, from its DPI; files without one count as captured with the Retina setting.
+    static func unit(of url: URL) -> CGFloat {
+        CGImageSourceCreateWithURL(url as CFURL, nil).map(unit(of:)) ?? 1
+    }
+
+    private static func unit(of src: CGImageSource) -> CGFloat {
         var unit: CGFloat = 0
         if let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any],
            let dpi = props[kCGImagePropertyDPIWidth] as? Double, dpi > 1 {
@@ -54,7 +63,7 @@ final class ImageSource {
         if unit == 0 {
             unit = Prefs[Pref.retinaResolution] ? (NSScreen.main?.backingScaleFactor ?? 2) : 1
         }
-        return ImageSource(image: image, unit: min(unit, 4))
+        return min(unit, 4)
     }
 
     var bounds: CGRect { CGRect(origin: .zero, size: size) }

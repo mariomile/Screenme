@@ -172,8 +172,8 @@ enum AIClipboard {
         if Prefs[Pref.hideSensitiveWhenSharing] {
             do {
                 if let result = try await Redaction.hidingSensitive(in: image, unit: unit),
-                   let data = NSBitmapImageRep(cgImage: result.image).representation(using: .png, properties: [:]),
-                   let file = Redaction.write(result.image, like: path.deletingPathExtension().appendingPathExtension("png")) {
+                   let data = Storage.encoded(result.image, as: .png, scale: unit),
+                   let file = Redaction.write(result.image, like: path.deletingPathExtension().appendingPathExtension("png"), scale: unit) {
                     // The editor's unredacted temporary file must not stay behind (a copy of the same name was just
                     // overwritten in place); a capture file stays.
                     if path != captureURL, path != file { try? FileManager.default.removeItem(at: path) }
@@ -199,7 +199,7 @@ enum AIClipboard {
     @MainActor
     static func copy(_ item: CaptureItem) async -> Int? {
         guard let source = ImageSource.load(url: item.url),
-              let png = NSBitmapImageRep(cgImage: source.image).representation(using: .png, properties: [:]) else { return nil }
+              let png = Storage.encoded(source.image, as: .png, scale: source.unit) else { return nil }
         return await copy(image: source.image, png: png, path: item.url, captureURL: item.url, unit: source.unit)
     }
 }

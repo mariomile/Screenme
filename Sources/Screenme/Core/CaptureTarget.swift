@@ -116,6 +116,16 @@ extension CaptureTarget {
         }
     }
 
+    /// Pixels per point of a capture of this target, as `streamSetup` makes it with the Retina setting.
+    @MainActor
+    var pixelScale: CGFloat {
+        guard Prefs[Pref.retinaResolution] else { return 1 }
+        switch self {
+        case .display(let screen), .area(_, let screen): return screen.backingScaleFactor
+        case .window: return NSScreen.at(CGPoint(x: cocoaFrame.midX, y: cocoaFrame.midY)).backingScaleFactor
+        }
+    }
+
     /// The on-screen frame in global Cocoa coordinates, used to outline a recording.
     var cocoaFrame: CGRect {
         switch self {

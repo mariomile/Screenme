@@ -86,18 +86,21 @@ enum ImageCombiner {
     /// Combines `items`, oldest first, into a new capture and opens it in the editor.
     @MainActor
     static func combineAndEdit(_ items: [CaptureItem], layout: Layout) {
-        open(combine(items.sorted { $0.date < $1.date }.map(\.url), layout: layout), failure: "Could not combine")
+        let urls = items.sorted { $0.date < $1.date }.map(\.url)
+        open(combine(urls, layout: layout), from: urls, failure: "Could not combine")
     }
 
     /// Before & After of `before` and `after` as a new capture, opened in the editor.
     @MainActor
     static func beforeAfterAndEdit(before: CaptureItem, after: CaptureItem) {
-        open(beforeAfter(before: before.url, after: after.url), failure: "Could not compare")
+        open(beforeAfter(before: before.url, after: after.url), from: [before.url, after.url], failure: "Could not compare")
     }
 
     @MainActor
-    private static func open(_ image: CGImage?, failure: String) {
-        guard let image, let url = try? Storage.write(image) else {
+    /// `sources`: the captures it was made from; it keeps their pixels per point (the smallest, as nothing is enlarged).
+    private static func open(_ image: CGImage?, from sources: [URL], failure: String) {
+        let scale = sources.map(ImageSource.unit(of:)).min() ?? 1
+        guard let image, let url = try? Storage.write(image, scale: scale) else {
             Feedback.failure(failure)
             return
         }

@@ -36,24 +36,27 @@ enum Storage {
     }
 
     /// Writes in the user's chosen format (PNG or JPEG).
-    static func write(_ image: CGImage) throws -> URL {
+    static func write(_ image: CGImage, scale: CGFloat) throws -> URL {
         let url = newURL(extension: Prefs[Pref.imageFormat].fileExtension)
-        try write(image, to: url)
+        try write(image, to: url, scale: scale)
         return url
     }
 
     /// Encodes `image` into `url` in the format its extension names. Safe off the main thread.
-    static func write(_ image: CGImage, to url: URL) throws {
-        guard let data = encoded(image, as: ImageFormat(of: url)) else { throw CocoaError(.fileWriteUnknown) }
+    static func write(_ image: CGImage, to url: URL, scale: CGFloat) throws {
+        guard let data = encoded(image, as: ImageFormat(of: url), scale: scale) else { throw CocoaError(.fileWriteUnknown) }
         try data.write(to: url)
     }
 
     /// `image` as a file of `format`, JPEG at the user's quality. Safe off the main thread.
-    static func encoded(_ image: CGImage, as format: ImageFormat) -> Data? {
+    /// `scale` is its pixels per point, saved as its DPI (144 for Retina): without it apps show a Retina capture
+    /// at twice its size on screen, blurred.
+    static func encoded(_ image: CGImage, as format: ImageFormat, scale: CGFloat) -> Data? {
         let data = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(data, format.type.identifier as CFString, 1, nil) else { return nil }
-        let options = format == .jpg ? [kCGImageDestinationLossyCompressionQuality: Prefs[Pref.jpegQuality]] as CFDictionary : nil
-        CGImageDestinationAddImage(destination, image, options)
+        var properties: [CFString: Any] = [kCGImagePropertyDPIWidth: 72 * scale, kCGImagePropertyDPIHeight: 72 * scale]
+        if format == .jpg { properties[kCGImageDestinationLossyCompressionQuality] = Prefs[Pref.jpegQuality] }
+        CGImageDestinationAddImage(destination, image, properties as CFDictionary)
         return CGImageDestinationFinalize(destination) ? data as Data : nil
     }
 

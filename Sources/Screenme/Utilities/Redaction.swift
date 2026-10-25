@@ -54,8 +54,8 @@ enum Redaction {
 
     /// A temporary copy named like `original`, in its format, holding `image` (`TemporaryCopies`): sharing the same
     /// capture again overwrites it.
-    static func write(_ image: CGImage, like original: URL) -> URL? {
-        Storage.encoded(image, as: ImageFormat(of: original)).flatMap { TemporaryCopies.write($0, named: original.lastPathComponent) }
+    static func write(_ image: CGImage, like original: URL, scale: CGFloat) -> URL? {
+        Storage.encoded(image, as: ImageFormat(of: original), scale: scale).flatMap { TemporaryCopies.write($0, named: original.lastPathComponent) }
     }
 
     /// A redacted temporary copy of the image file, for sharing. Nil when there is nothing to hide, or the file is a
@@ -67,7 +67,7 @@ enum Redaction {
         guard ["png", "jpg", "jpeg"].contains(type) else { throw Failure.unchecked }
         guard let source = ImageSource.load(url: url) else { throw Failure.unchecked }
         guard let (image, count) = try await hidingSensitive(in: source.image, unit: source.unit) else { return nil }
-        guard let copy = write(image, like: url) else { throw Failure.notWritten }
+        guard let copy = write(image, like: url, scale: source.unit) else { throw Failure.notWritten }
         return (copy, count)
     }
 }

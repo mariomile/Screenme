@@ -72,8 +72,8 @@ final class RedactionTests: XCTestCase {
         let image = try noisyImage()
         let name = "Screenme-test-\(UUID().uuidString).png"
         let original = URL(fileURLWithPath: "/captures/" + name)
-        let first = try XCTUnwrap(Redaction.write(image, like: original))
-        let second = try XCTUnwrap(Redaction.write(image, like: original))
+        let first = try XCTUnwrap(Redaction.write(image, like: original, scale: 2))
+        let second = try XCTUnwrap(Redaction.write(image, like: original, scale: 2))
         defer { try? FileManager.default.removeItem(at: first) }
         XCTAssertEqual(first, second)
         XCTAssertEqual(first.lastPathComponent, name)

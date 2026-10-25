@@ -131,7 +131,7 @@ final class CaptureCoordinator {
         case .scrollingCapture:
             guard let result = try await select(.scrolling, target) else { return }
             guard let image = try await ScrollingCapture.run(result.target) else { return }
-            try await deliver(image)
+            try await deliver(image, scale: result.target.pixelScale)
 
         case .recordScreen:
             guard let result = try await select(.recording, target) else { return }
@@ -161,7 +161,7 @@ final class CaptureCoordinator {
 
     private func finishScreenshot(_ result: SelectionResult) async throws {
         if case .area = result.target { previousArea = result.target }
-        try await deliver(try await image(for: result), from: result.target)
+        try await deliver(try await image(for: result), scale: result.target.pixelScale, from: result.target)
     }
 
     /// The frozen picture when the picker had one, otherwise a fresh capture.
@@ -172,16 +172,16 @@ final class CaptureCoordinator {
 
     /// Writes an image capture and runs the after-capture actions. The notch cover, the watermark and the encoding
     /// run off the main thread; meanwhile a Quick Access card already shows `image` from memory and waits for the file.
-    /// `target`: where the picture came from, for its notch cover and its context (Copy for AI).
+    /// `scale`: the image's pixels per point. `target`: where the picture came from, for its notch cover and its context (Copy for AI).
     /// `quietly`: only written and added to History, as for an agent's capture: nothing opens, nothing is copied.
     @discardableResult
-    func deliver(_ image: CGImage, from target: CaptureTarget? = nil, quietly: Bool = false) async throws -> CaptureItem {
+    func deliver(_ image: CGImage, scale: CGFloat, from target: CaptureTarget? = nil, quietly: Bool = false) async throws -> CaptureItem {
         let item = CaptureItem(url: Storage.newURL(extension: Prefs[Pref.imageFormat].fileExtension), kind: .image)
         if let target { CaptureContexts.record(CaptureContexts.context(of: target), for: item.url) }
         let cover = target.flatMap(Notch.cover(for:))
         Sounds.shutter()
         let file = Task.detached(priority: .userInitiated) {
-            try Storage.write(Watermark.applied(to: cover?.applied(to: image) ?? image), to: item.url)
+            try Storage.write(Watermark.applied(to: cover?.applied(to: image) ?? image), to: item.url, scale: scale)
             return item.url
         }
         if quietly {
@@ -233,10 +233,10 @@ final class CaptureCoordinator {
             guard let image = try await ScrollingCapture.run(resolved, autoScroll: true) else {
                 throw AgentError("The scrolling capture was cancelled")
             }
-            return try await deliver(image, quietly: true)
+            return try await deliver(image, scale: resolved.pixelScale, quietly: true)
         }
         if case .area = resolved { previousArea = resolved }
-        return try await deliver(try await Capturer.screenshot(resolved), from: resolved, quietly: true)
+        return try await deliver(try await Capturer.screenshot(resolved), scale: resolved.pixelScale, from: resolved, quietly: true)
     }
 
     /// Starts a recording with the saved recording settings, without the pre-record bar.
