@@ -28,6 +28,26 @@ enum AnnotationEditor {
         guard let source = ImageSource.load(url: saved?.original ?? item.url) else { return nil }
         return EditorController(item: item, source: source, saved: saved?.state)
     }
+
+    /// The traffic lights, the toolbar's margins and the gaps between its items: measured at 136 points.
+    private static let toolbarChrome: CGFloat = 150
+
+    /// The narrowest window that shows every toolbar item.
+    static func minimumWidth(for items: [NSToolbarItem]) -> CGFloat {
+        ceil(items.compactMap { $0.view?.fittingSize.width }.reduce(0, +)) + toolbarChrome
+    }
+
+    static func toolbarItem<V: View>(_ identifier: NSToolbarItem.Identifier, _ view: V) -> NSToolbarItem {
+        let host = NSHostingView(rootView: view)
+        let size = host.fittingSize
+        host.translatesAutoresizingMaskIntoConstraints = false
+        host.widthAnchor.constraint(equalToConstant: ceil(size.width)).isActive = true
+        host.heightAnchor.constraint(equalToConstant: max(ceil(size.height), 28)).isActive = true
+        let item = NSToolbarItem(itemIdentifier: identifier)
+        item.view = host
+        item.isBordered = false
+        return item
+    }
 }
 
 /// Owns the window, its toolbar and its Cmd shortcuts for one capture.
@@ -62,8 +82,6 @@ private final class EditorWindow: NSObject, NSWindowDelegate, NSToolbarDelegate 
         }
         super.init()
 
-        window.setContentSize(size)
-        window.contentMinSize = CGSize(width: 980, height: 600)
         window.titleVisibility = .hidden
         window.delegate = self
         controller.window = window
@@ -74,6 +92,11 @@ private final class EditorWindow: NSObject, NSWindowDelegate, NSToolbarDelegate 
         toolbar.allowsUserCustomization = false
         window.toolbar = toolbar
         window.toolbarStyle = .unified
+
+        // Never narrower than the toolbar: AppKit would hide its right end, Copy and Done with it.
+        let minimum = CGSize(width: max(980, AnnotationEditor.minimumWidth(for: toolbar.items)), height: 600)
+        window.contentMinSize = minimum
+        window.setContentSize(CGSize(width: max(size.width, minimum.width), height: max(size.height, minimum.height)))
         WindowPresenter.center(window)
 
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
@@ -167,22 +190,10 @@ private final class EditorWindow: NSObject, NSWindowDelegate, NSToolbarDelegate 
     func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier,
                  willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
         switch itemIdentifier {
-        case Self.leading: return item(itemIdentifier, ToolbarLeading(c: controller))
-        case Self.tools: return item(itemIdentifier, ToolPalette(c: controller))
-        case Self.trailing: return item(itemIdentifier, ToolbarTrailing(c: controller))
+        case Self.leading: return AnnotationEditor.toolbarItem(itemIdentifier, ToolbarLeading(c: controller))
+        case Self.tools: return AnnotationEditor.toolbarItem(itemIdentifier, ToolPalette(c: controller))
+        case Self.trailing: return AnnotationEditor.toolbarItem(itemIdentifier, ToolbarTrailing(c: controller))
         default: return nil
         }
-    }
-
-    private func item<V: View>(_ identifier: NSToolbarItem.Identifier, _ view: V) -> NSToolbarItem {
-        let host = NSHostingView(rootView: view)
-        let size = host.fittingSize
-        host.translatesAutoresizingMaskIntoConstraints = false
-        host.widthAnchor.constraint(equalToConstant: ceil(size.width)).isActive = true
-        host.heightAnchor.constraint(equalToConstant: max(ceil(size.height), 28)).isActive = true
-        let item = NSToolbarItem(itemIdentifier: identifier)
-        item.view = host
-        item.isBordered = false
-        return item
     }
 }
