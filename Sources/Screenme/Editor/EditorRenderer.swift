@@ -38,7 +38,7 @@ enum EditorRenderer {
             ctx.setFillColor(state.canvasFill.cgColor)
             ctx.fill(layout.cropRect)
         }
-        drawBase(source, ctx: ctx)
+        drawBase(source, ctx: ctx, baseScale: baseScale)
         for a in state.annotations { drawRedaction(a, source: source, unit: unit, ctx: ctx) }
         drawSpotlights(state.annotations, dim: state.spotlightDim, crop: layout.cropRect, ctx: ctx)
         ctx.restoreGState()
@@ -81,9 +81,14 @@ enum EditorRenderer {
         ctx.restoreGState()
     }
 
-    private static func drawBase(_ source: ImageSource, ctx: CGContext) {
-        let device = hypot(ctx.ctm.a, ctx.ctm.b)
-        drawImage(source.level(forScale: device), in: source.bounds, ctx: ctx)
+    private static func drawBase(_ source: ImageSource, ctx: CGContext, baseScale: CGFloat) {
+        drawImage(baseImage(source, transform: ctx.ctm, baseScale: baseScale), in: source.bounds, ctx: ctx)
+    }
+
+    /// The copy of the image to draw under `transform`. The on-screen context's transform leaves out the Retina
+    /// scale: without `baseScale` a capture shown at actual size would be drawn from its half-resolution copy, blurred.
+    static func baseImage(_ source: ImageSource, transform: CGAffineTransform, baseScale: CGFloat) -> CGImage {
+        source.level(forScale: hypot(transform.a, transform.b) * baseScale)
     }
 
     /// Pixelate and blur replace the image's pixels under them; other kinds draw nothing here.
