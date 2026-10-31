@@ -51,7 +51,6 @@ final class ScrollStitcher {
     private var previousLuma: [UInt8] = []
     /// Per sample: how often it stayed put while the page moved. Above zero means pinned to the screen.
     private var pinned: [Int8]
-    private var preview: ScrollPreviewBuilder
     private var finished = false
 
     init?(width: Int, height: Int) {
@@ -64,7 +63,6 @@ final class ScrollStitcher {
         fileURL = FileManager.default.temporaryDirectory.appendingPathComponent("screenme-scroll-\(UUID().uuidString).raw")
         fd = open(fileURL.path, O_RDWR | O_CREAT | O_TRUNC, 0o600)
         guard fd >= 0 else { return nil }
-        preview = ScrollPreviewBuilder(width: width)
     }
 
     deinit {
@@ -136,11 +134,6 @@ final class ScrollStitcher {
 
     // MARK: Output
 
-    /// A small version of the stitched result for the live preview.
-    func previewImage() -> CGImage? {
-        preview.image(colorSpace: colorSpace)
-    }
-
     /// The finished image, backed by the memory-mapped temporary file. Call once.
     func finish() -> CGImage? {
         guard !finished else { return nil }
@@ -175,7 +168,6 @@ final class ScrollStitcher {
         guard ftruncate(fd, bytes) == 0 else { return }
         lseek(fd, bytes, SEEK_SET)
         totalRows = rows
-        preview.truncate(toStitchedRows: rows)
     }
 
     private func writeRows(_ start: UnsafePointer<UInt8>, bytesPerRow: Int, count: Int, isFooter: Bool) {
@@ -188,7 +180,6 @@ final class ScrollStitcher {
                 if n <= 0 { return }
                 written += n
             }
-            preview.add(row: pointer, index: totalRows)
             totalRows += 1
         }
     }
@@ -401,56 +392,5 @@ final class ScrollStitcher {
             let l = abs(lhs.shift - lastShift), r = abs(rhs.shift - lastShift)
             return l != r ? l < r : abs(lhs.shift) < abs(rhs.shift)
         }?.shift
-    }
-}
-
-// MARK: - Preview
-
-/// Keeps a thumbnail-width copy of the stitched rows, sampled every few rows.
-private struct ScrollPreviewBuilder {
-    private let step: Int
-    private let previewWidth: Int
-    private var pixels: [UInt8] = []
-    private(set) var rowCount = 0
-
-    init(width: Int) {
-        step = max(1, width / 280)
-        previewWidth = width / step
-    }
-
-    mutating func add(row: UnsafePointer<UInt8>, index: Int) {
-        guard index % step == 0 else { return }
-        let base = pixels.count
-        pixels.append(contentsOf: repeatElement(0, count: previewWidth * 4))
-        pixels.withUnsafeMutableBufferPointer { out in
-            for x in 0..<previewWidth {
-                var b = 0, g = 0, r = 0
-                for k in 0..<step {
-                    let p = row + (x * step + k) * 4
-                    b += Int(p[0]); g += Int(p[1]); r += Int(p[2])
-                }
-                let o = base + x * 4
-                out[o] = UInt8(b / step)
-                out[o + 1] = UInt8(g / step)
-                out[o + 2] = UInt8(r / step)
-                out[o + 3] = 255
-            }
-        }
-        rowCount += 1
-    }
-
-    mutating func truncate(toStitchedRows rows: Int) {
-        let keep = (rows + step - 1) / step
-        guard keep < rowCount else { return }
-        pixels.removeLast((rowCount - keep) * previewWidth * 4)
-        rowCount = keep
-    }
-
-    func image(colorSpace: CGColorSpace) -> CGImage? {
-        guard rowCount > 0, let provider = CGDataProvider(data: Data(pixels) as CFData) else { return nil }
-        let info = CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.noneSkipFirst.rawValue
-        return CGImage(width: previewWidth, height: rowCount, bitsPerComponent: 8, bitsPerPixel: 32,
-                       bytesPerRow: previewWidth * 4, space: colorSpace, bitmapInfo: CGBitmapInfo(rawValue: info),
-                       provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
     }
 }

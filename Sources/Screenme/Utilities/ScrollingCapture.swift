@@ -2,18 +2,19 @@ import AppKit
 import CoreMedia
 import CoreVideo
 import ScreenCaptureKit
-import SwiftUI
 
-/// Scrolling capture: while the content under `target` scrolls, frames are stitched into one tall image.
-/// Capturing starts as soon as the area is picked; a floating panel next to it has Auto-scroll, Done
-/// and Cancel, plus a live preview.
+/// Scrolling capture: as soon as the area is picked, Screenme scrolls the content under it to the end and
+/// stitches the frames into one tall image. Nothing of Screenme is on screen meanwhile. A click anywhere
+/// stops it and keeps what was stitched; Esc cancels. Without Accessibility access Screenme cannot scroll,
+/// so the user scrolls and clicks at the end.
 /// One at a time: only `CaptureCoordinator` calls it, inside its busy window.
 @MainActor
 enum ScrollingCapture {
-    /// Returns the stitched image, or nil when cancelled. `autoScroll`: Screenme scrolls the content to its end and
-    /// finishes by itself, for agents; it throws when it cannot.
-    static func run(_ target: CaptureTarget, autoScroll: Bool = false) async throws -> CGImage? {
-        let session = ScrollSession(target: target, autoScroll: autoScroll)
+    /// Returns the stitched image, or nil when cancelled. `forAgent`: nobody is there to scroll or click, so missing
+    /// Accessibility access or losing track of the content throws instead of returning what was stitched.
+    static func run(_ target: CaptureTarget, forAgent: Bool = false) async throws -> CGImage? {
+        let (filter, configuration) = try await target.streamSetup(showsCursor: false, retina: Prefs[Pref.retinaResolution])
+        let session = ScrollSession(frame: target.cocoaFrame, filter: filter, configuration: configuration, forAgent: forAgent)
         let image = await withTaskCancellationHandler {
             await session.run()
         } onCancel: {
@@ -26,63 +27,37 @@ enum ScrollingCapture {
 
 // MARK: - Session
 
-/// One scrolling capture, from the panel opening to Done or Cancel. It keeps the facts
-/// (phase, lost, limit, end of page, error, auto-scrolling) and the panel's message follows from them.
+/// One scrolling capture, from the stream starting to the end of the page, a click, or Esc.
 @MainActor
-final class ScrollSession: ObservableObject {
-    enum Phase { case ready, starting, capturing, finishing }
-
-    @Published private(set) var phase: Phase = .ready
-    @Published private(set) var rows = 0
-    @Published private(set) var preview: CGImage?
-    @Published private(set) var isAutoScrolling = false
-    /// The last frames did not match the content seen so far.
-    @Published private var lost = false
-    @Published private var limitReached = false
-    /// Auto-scroll stopped because the page stopped moving.
-    @Published private var endReached = false
-    /// Auto-scroll was asked for without Accessibility access.
-    @Published private var needsAccess = false
-    /// Why the stream could not start.
-    @Published private var error: String?
-
+final class ScrollSession {
     private enum Message {
-        static let capturing = "Scroll the area. Screenme stitches as you go. Press Done at the end, or let Screenme scroll for you."
-        static let lost = "Lost track of the content. Scroll back a little."
-        static let auto = "Scrolling for you. Press Done any time."
-        static let end = "Reached the end of the page. Press Done."
-        static let limit = "Reached the maximum height. Press Done."
-        static let needsAccess = "Auto-scroll needs Accessibility access. Allow Screenme in System Settings, or scroll yourself."
+        static let needsAccess = "Scrolling capture needs Accessibility access to scroll by itself. Allow Screenme in System Settings."
+        static let scrollYourself = "Scroll to the end, then click"
+        static let lost = "The scrolling capture lost its place in the content; try a smaller area or window"
     }
 
-    /// What the panel tells the user, from the facts above.
-    var status: String {
-        if let error { return "Could not start: \(error)" }
-        if limitReached { return Message.limit }
-        if lost { return Message.lost }
-        if needsAccess { return Message.needsAccess }
-        if endReached { return Message.end }
-        if isAutoScrolling { return Message.auto }
-        return Message.capturing
-    }
-
-    private let target: CaptureTarget
     private let frame: CGRect
+    private let filter: SCContentFilter
+    private let configuration: SCStreamConfiguration
+    private let forAgent: Bool
     private let engine = ScrollStitchEngine()
     private var stream: SCStream?
-    private var panel: FloatingPanel?
     private var continuation: CheckedContinuation<CGImage?, Never>?
     private var autoTask: Task<Void, Never>?
+    private var monitors: [Any] = []
+    private var rows = 0
     private var lastAdvance = Date()
-    /// Scrolls by itself from the start and finishes at the end of the content.
-    private let autoScroll: Bool
-    /// Why an automatic capture gave up.
+    /// The last frames did not match the content seen so far.
+    private var lost = false
+    private var finishing = false
+    /// Why the capture gave up.
     private(set) var failure: String?
 
-    init(target: CaptureTarget, autoScroll: Bool = false) {
-        self.target = target
-        self.frame = target.cocoaFrame
-        self.autoScroll = autoScroll
+    init(frame: CGRect, filter: SCContentFilter, configuration: SCStreamConfiguration, forAgent: Bool) {
+        self.frame = frame
+        self.filter = filter
+        self.configuration = configuration
+        self.forAgent = forAgent
     }
 
     func run() async -> CGImage? {
@@ -91,98 +66,85 @@ final class ScrollSession: ObservableObject {
         }
         return await withCheckedContinuation { continuation in
             self.continuation = continuation
-            showPanel()
-            Task {
-                await start()
-                guard autoScroll else { return }
-                await toggleAutoScroll()
-                guard isAutoScrolling else {
-                    failure = needsAccess ? Message.needsAccess : status
-                    await cancel()
-                    return
-                }
-            }
+            Task { await start() }
         }
     }
 
-    // MARK: Controls
+    // MARK: Start and stop
 
-    func start() async {
-        guard phase == .ready else { return }
-        phase = .starting
-        error = nil
-        needsAccess = false
-        let stream: SCStream
+    private func start() async {
+        configuration.minimumFrameInterval = CMTime(value: 1, timescale: 30)
+        configuration.queueDepth = 5
+        configuration.pixelFormat = kCVPixelFormatType_32BGRA
+        configuration.showsCursor = false
+
+        let stream = SCStream(filter: filter, configuration: configuration, delegate: engine)
         do {
-            // Built now, with the panel on screen: Screenme only counts as a shareable app, and gets left out of the picture, once it has a window.
-            let (filter, configuration) = try await target.streamSetup(showsCursor: false, retina: Prefs[Pref.retinaResolution])
-            configuration.minimumFrameInterval = CMTime(value: 1, timescale: 30)
-            configuration.queueDepth = 5
-            configuration.pixelFormat = kCVPixelFormatType_32BGRA
-            configuration.showsCursor = false
-            stream = SCStream(filter: filter, configuration: configuration, delegate: engine)
             try stream.addStreamOutput(engine, type: .screen, sampleHandlerQueue: engine.queue)
             try await stream.startCapture()
         } catch {
-            guard phase == .starting else { return }
-            phase = .ready
-            self.error = error.localizedDescription
+            guard !finishing else { return }
+            failure = "Could not start the scrolling capture: \(error.localizedDescription)"
+            await cancel()
             return
         }
-        // Cancel was pressed while the stream started: nothing will stop it later, so stop it now.
-        guard phase == .starting else {
+        // Cancelled while the stream started: nothing will stop it later, so stop it now.
+        guard !finishing else {
             try? await stream.stopCapture()
             return
         }
         self.stream = stream
-        phase = .capturing
         lastAdvance = Date()
+        watchForStop()
+
+        if Permission.accessibility.isGranted {
+            autoTask = Task { [weak self] in await self?.autoScrollLoop() }
+        } else if forAgent {
+            failure = Message.needsAccess
+            await cancel()
+        } else {
+            Permission.accessibility.request()
+            Toast.show(Message.scrollYourself, symbol: "arrow.down.to.line", duration: 3)
+        }
     }
 
-    func toggleAutoScroll() async {
-        if isAutoScrolling {
-            stopAutoScroll()
-            return
-        }
-        guard Permission.accessibility.isGranted else {
-            Permission.accessibility.request()
-            error = nil
-            needsAccess = true
-            return
-        }
-        guard phase == .capturing, stream != nil else { return }
-        needsAccess = false
-        endReached = false
-        isAutoScrolling = true
-        autoTask = Task { [weak self] in await self?.autoScrollLoop() }
+    /// A click anywhere keeps what was stitched; Esc throws it away. Esc is only seen with Accessibility access.
+    private func watchForStop() {
+        if let click = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown], handler: { [weak self] _ in
+            Task { @MainActor in await self?.done() }
+        }) { monitors.append(click) }
+        if let key = NSEvent.addGlobalMonitorForEvents(matching: .keyDown, handler: { [weak self] event in
+            guard event.keyCode == 53 else { return }
+            Task { @MainActor in await self?.cancel() }
+        }) { monitors.append(key) }
     }
 
     func done() async {
-        guard phase == .capturing, stream != nil else { return }
-        phase = .finishing
-        stopAutoScroll()
-        await stopStream()
+        guard !finishing, stream != nil else { return }
+        finishing = true
+        await stop()
         close(with: engine.finish())
     }
 
     func cancel() async {
-        guard phase != .finishing else { return }
-        phase = .finishing
-        stopAutoScroll()
-        await stopStream()
+        guard !finishing else { return }
+        finishing = true
+        await stop()
         engine.cancel()
         close(with: nil)
     }
 
-    private func stopStream() async {
+    private func stop() async {
+        autoTask?.cancel()
+        autoTask = nil
+        monitors.forEach(NSEvent.removeMonitor)
+        monitors.removeAll()
         engine.onUpdate = nil
         if let stream { try? await stream.stopCapture() }
         stream = nil
     }
 
     private func close(with image: CGImage?) {
-        panel?.dismiss()
-        panel = nil
         continuation?.resume(returning: image)
         continuation = nil
     }
@@ -190,16 +152,12 @@ final class ScrollSession: ObservableObject {
     // MARK: Updates
 
     private func apply(_ update: ScrollStitchEngine.Update) {
-        // The first frame can arrive before startCapture returns; it carries the first preview.
-        guard phase == .capturing || phase == .starting else { return }
+        guard !finishing else { return }
         if update.rows != rows { lastAdvance = Date() }
         rows = update.rows
-        if let image = update.preview { preview = image }
         switch update.outcome {
         case .limit:
-            limitReached = true
-            stopAutoScroll()
-            if autoScroll { Task { await done() } }
+            Task { await done() }
         case .lost:
             lost = true
         case .first, .advanced, .still, .scrolledBack:
@@ -209,13 +167,7 @@ final class ScrollSession: ObservableObject {
 
     // MARK: Auto-scroll
 
-    private func stopAutoScroll() {
-        autoTask?.cancel()
-        autoTask = nil
-        isAutoScrolling = false
-    }
-
-    /// Posts pixel scroll events over the middle of the area until the page stops moving.
+    /// Posts pixel scroll events over the middle of the area until the page stops moving, then finishes.
     private func autoScrollLoop() async {
         let height = CaptureTarget.primaryHeight
         let point = CGPoint(x: frame.midX, y: height - frame.midY)
@@ -246,41 +198,16 @@ final class ScrollSession: ObservableObject {
                 lastAdvance = Date()
             }
             if checkedDirection, Date().timeIntervalSince(lastAdvance) > 1.6 {
-                stopAutoScroll()
-                endReached = true
-                // Outside this task, which `done` cancels. Content that stopped matching is not the end of the page.
-                if autoScroll {
-                    let failed = lost
-                    if failed { failure = "The scrolling capture lost its place in the content; try a smaller area or window" }
-                    Task { if failed { await self.cancel() } else { await self.done() } }
+                // Outside this task, which `done` and `cancel` cancel. For an agent, content that stopped
+                // matching is not the end of the page; a person gets what was stitched.
+                if forAgent, lost {
+                    failure = Message.lost
+                    Task { await self.cancel() }
+                } else {
+                    Task { await self.done() }
                 }
                 return
             }
         }
-    }
-
-    // MARK: Panel
-
-    private func showPanel() {
-        let size = CGSize(width: 344, height: 420)
-        let screen = NSScreen.at(CGPoint(x: frame.midX, y: frame.midY))
-        let visible = screen.visibleFrame
-        let height = min(max(frame.height, size.height), visible.height - 24)
-        let gap: CGFloat = 14
-
-        var x = frame.maxX + gap
-        if x + size.width > visible.maxX - 8 { x = frame.minX - gap - size.width }
-        if x < visible.minX + 8 { x = visible.maxX - size.width - 16 } // no room beside the area: sit over its edge
-        let top = min(frame.maxY, visible.maxY - 12)
-        let y = max(visible.minY + 12, top - height)
-
-        let panel = FloatingPanel(frame: CGRect(x: x, y: y, width: size.width, height: height), level: .statusBar)
-        panel.isMovableByWindowBackground = true
-        let host = NSHostingView(rootView: ScrollPanelView(session: self))
-        // The panel keeps the frame above: a tall preview would otherwise grow it past the screen and hide Done.
-        host.sizingOptions = []
-        panel.contentView = host
-        panel.present()
-        self.panel = panel
     }
 }

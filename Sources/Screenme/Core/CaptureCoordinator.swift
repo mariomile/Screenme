@@ -230,7 +230,7 @@ final class CaptureCoordinator {
         defer { if hidIcons { DesktopIcons.setHidden(false) } }
         let resolved = try await target?.captureTarget() ?? .display(.underMouse)
         if scrolling {
-            guard let image = try await ScrollingCapture.run(resolved, autoScroll: true) else {
+            guard let image = try await ScrollingCapture.run(resolved, forAgent: true) else {
                 throw AgentError("The scrolling capture was cancelled")
             }
             return try await deliver(image, scale: resolved.pixelScale, quietly: true)

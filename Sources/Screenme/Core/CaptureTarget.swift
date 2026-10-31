@@ -59,7 +59,10 @@ extension CaptureTarget {
     func streamSetup(showsCursor: Bool = false, retina: Bool = true,
                      including extraWindows: [CGWindowID] = [],
                      hidingNotifications: Bool = false) async throws -> (SCContentFilter, SCStreamConfiguration) {
-        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        // Off-screen windows too: an app is listed, and so can be excluded, only through the windows listed.
+        // With on-screen windows only, Screenme is missing whenever it shows nothing yet, and windows it opens
+        // later (a panel, a toast) end up in the picture.
+        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
         let extras = content.windows.filter { extraWindows.contains($0.windowID) }
         let config = SCStreamConfiguration()
         config.showsCursor = showsCursor

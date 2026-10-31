@@ -4,14 +4,12 @@ import Foundation
 import ScreenCaptureKit
 
 /// Receives ScreenCaptureKit frames on its own queue, feeds them to the stitcher and publishes what happened.
-/// It reports facts (rows so far, the last frame's outcome, a preview); `ScrollSession` decides what they mean.
+/// It reports facts (rows so far, the last frame's outcome); `ScrollSession` decides what they mean.
 /// Access to the stitcher is serialized between the frame queue and the main actor.
 final class ScrollStitchEngine: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
     struct Update {
         var rows: Int
         var outcome: ScrollStitcher.Outcome
-        /// Set when the stitched image grew since the last update.
-        var preview: CGImage?
     }
 
     let queue = DispatchQueue(label: "dev.mariomiletta.Screenme.scrolling", qos: .userInitiated)
@@ -22,7 +20,6 @@ final class ScrollStitchEngine: NSObject, SCStreamOutput, SCStreamDelegate, @unc
     private var stitcher: ScrollStitcher?
     private var closed = false
     private var lastPublish = Date.distantPast
-    private var publishedRows = -1
     private var advances = 0
     private var backs = 0
 
@@ -70,9 +67,7 @@ final class ScrollStitchEngine: NSObject, SCStreamOutput, SCStreamDelegate, @unc
         let now = Date()
         guard now.timeIntervalSince(lastPublish) > 0.2 || outcome == .lost || outcome == .limit else { return }
         lastPublish = now
-        let grew = stitcher.totalRows != publishedRows
-        publishedRows = stitcher.totalRows
-        onUpdate?(Update(rows: stitcher.totalRows, outcome: outcome, preview: grew ? stitcher.previewImage() : nil))
+        onUpdate?(Update(rows: stitcher.totalRows, outcome: outcome))
     }
 
     /// Frames that moved the page forward and backward since the last call.

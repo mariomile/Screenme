@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 /// The borderless, transparent, always-on-top panel behind every Screenme overlay: Quick Access cards,
-/// toasts, HUDs, recording controls, the scrolling capture panel, the self-timer, pins and the picker.
+/// toasts, HUDs, recording controls, the self-timer, pins and the picker.
 /// It joins every Space and full-screen app, and showing it never activates Screenme.
 class FloatingPanel: NSPanel {
     private let allowsKey: Bool
