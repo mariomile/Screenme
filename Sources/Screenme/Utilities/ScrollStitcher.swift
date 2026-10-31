@@ -10,6 +10,10 @@ import Foundation
 /// animations. Only rows below everything seen so far are appended, so scrolling back and forth
 /// never duplicates content.
 ///
+/// Pixels that stay put while the page moves (a fixed sidebar, a floating chat button) are tracked per
+/// screen position. Once seen, they are not copied into the rows added later: each is replaced by the
+/// nearest row above or below where nothing is pinned, so they show once, in the first frame, not once per frame.
+///
 /// Stitched rows go to a temporary file rather than memory, and the final image is memory-mapped
 /// from it, so a page of tens of thousands of pixels costs almost no resident memory.
 /// Not thread-safe: callers serialize access.
@@ -41,6 +45,12 @@ final class ScrollStitcher {
     private var cursor = 0
     private var lastShift = 0
     private var footer: [UInt8] = []
+    /// Luma of every `lumaStep`-th pixel of each row, for the previous and the current frame.
+    private static let lumaStep = 4
+    private let lumaWidth: Int
+    private var previousLuma: [UInt8] = []
+    /// Per sample: how often it stayed put while the page moved. Above zero means pinned to the screen.
+    private var pinned: [Int8]
     private var preview: ScrollPreviewBuilder
     private var finished = false
 
@@ -49,6 +59,8 @@ final class ScrollStitcher {
         self.width = width
         self.height = height
         bands = min(Self.bandCount, max(1, width / 8))
+        lumaWidth = width / Self.lumaStep
+        pinned = [Int8](repeating: 0, count: (width / Self.lumaStep) * height)
         fileURL = FileManager.default.temporaryDirectory.appendingPathComponent("screenme-scroll-\(UUID().uuidString).raw")
         fd = open(fileURL.path, O_RDWR | O_CREAT | O_TRUNC, 0o600)
         guard fd >= 0 else { return nil }
@@ -67,10 +79,12 @@ final class ScrollStitcher {
     func add(_ base: UnsafePointer<UInt8>, bytesPerRow: Int) -> Outcome {
         guard !finished else { return .still }
         let current = signatures(base, bytesPerRow: bytesPerRow)
+        let currentLuma = lumas(base, bytesPerRow: bytesPerRow)
 
         guard hasPrevious else {
             append(base, bytesPerRow: bytesPerRow, rows: 0..<height)
             previous = current
+            previousLuma = currentLuma
             hasPrevious = true
             return .first
         }
@@ -79,12 +93,18 @@ final class ScrollStitcher {
         let regionHeight = height - top - bottom
         if top >= height || regionHeight < 48 {
             previous = current
+            previousLuma = currentLuma
             return .still
         }
 
         guard let shift = findShift(previous, current, top: top, bottom: bottom) else { return .lost }
         previous = current
-        if shift == 0 { return .still }
+        if shift == 0 {
+            previousLuma = currentLuma
+            return .still
+        }
+        trackPinned(currentLuma, shift: shift)
+        previousLuma = currentLuma
 
         // The first frame was appended whole, including a sticky footer that hides real content.
         if shift > 0, bottom > 0, cursor == 0, totalRows == height { truncate(to: height - bottom) }
@@ -98,7 +118,11 @@ final class ScrollStitcher {
         let from = max(0, totalRows - cursor)
         let to = min(height - bottom, from + (Self.maxRows - totalRows))
         guard to > from else { return .still }
-        append(base, bytesPerRow: bytesPerRow, rows: from..<to)
+        if let unpinned = withoutPinned(base, bytesPerRow: bytesPerRow, rows: from..<to) {
+            unpinned.withUnsafeBufferPointer { writeRows($0.baseAddress!, bytesPerRow: width * 4, count: to - from, isFooter: false) }
+        } else {
+            append(base, bytesPerRow: bytesPerRow, rows: from..<to)
+        }
 
         // Remember the footer so it can close the image once, at the end.
         footer.removeAll(keepingCapacity: true)
@@ -219,6 +243,92 @@ final class ScrollStitcher {
             total += d
         }
         return total <= bands * 3 / 2
+    }
+
+    // MARK: Pinned pixels
+
+    private func lumas(_ base: UnsafePointer<UInt8>, bytesPerRow: Int) -> [UInt8] {
+        var result = [UInt8](repeating: 0, count: lumaWidth * height)
+        result.withUnsafeMutableBufferPointer { out in
+            for y in 0..<height {
+                let row = base + y * bytesPerRow
+                for i in 0..<lumaWidth {
+                    let p = row + i * Self.lumaStep * 4
+                    out[y * lumaWidth + i] = UInt8((Int(p[2]) * 77 + Int(p[1]) * 151 + Int(p[0]) * 28) >> 8)
+                }
+            }
+        }
+        return result
+    }
+
+    /// Compares the frames at the same screen position and at the position the page moved to.
+    /// A sample that kept its value while the page's value moved away is pinned; one that moved with the page is not.
+    private func trackPinned(_ current: [UInt8], shift: Int) {
+        guard abs(shift) >= 6 else { return }
+        let lw = lumaWidth
+        current.withUnsafeBufferPointer { cur in
+            previousLuma.withUnsafeBufferPointer { prev in
+                for y in 0..<height {
+                    // The page moved from `from` in the previous frame to `to` in this one. Rows near the bottom have
+                    // no earlier position, rows near the top no later one, so each direction covers the other's gap.
+                    let ahead = y + shift, behind = y - shift
+                    let useAhead = ahead >= 0 && ahead < height
+                    guard useAhead || (behind >= 0 && behind < height) else { continue }
+                    for i in 0..<lw {
+                        let k = y * lw + i
+                        let c = Int(cur[k]), p = Int(prev[k])
+                        let stayed = abs(c - p)
+                        let followed = useAhead ? abs(c - Int(prev[ahead * lw + i])) : abs(p - Int(cur[behind * lw + i]))
+                        if stayed <= 3, followed > 12 {
+                            pinned[k] = min(pinned[k] + 1, 6)
+                        } else if followed <= 3, stayed > 12 {
+                            pinned[k] = -4
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// The frame's `rows` with every pinned sample replaced by the same column of the nearest row without one,
+    /// or nil when nothing is pinned there.
+    private func withoutPinned(_ base: UnsafePointer<UInt8>, bytesPerRow: Int, rows: Range<Int>) -> [UInt8]? {
+        let lw = lumaWidth
+        let reach = 64
+        let lo = max(0, rows.lowerBound - reach), hi = min(height, rows.upperBound + reach)
+        var mask = [Bool](repeating: false, count: (hi - lo) * lw)
+        var any = false
+        for y in lo..<hi {
+            for i in 0..<lw where pinned[y * lw + i] > 0 {
+                any = true
+                // A sample stands for its whole block, and text edges reach past it.
+                for yy in max(lo, y - 2)...min(hi - 1, y + 2) {
+                    for ii in max(0, i - 1)...min(lw - 1, i + 1) { mask[(yy - lo) * lw + ii] = true }
+                }
+            }
+        }
+        guard any else { return nil }
+
+        let rowBytes = width * 4
+        let block = Self.lumaStep * 4
+        var out = [UInt8](repeating: 0, count: rows.count * rowBytes)
+        for (r, y) in rows.enumerated() {
+            out.withUnsafeMutableBufferPointer { dst in
+                let row = dst.baseAddress! + r * rowBytes
+                row.update(from: base + y * bytesPerRow, count: rowBytes)
+                for i in 0..<lw where mask[(y - lo) * lw + i] {
+                    for d in 1...reach {
+                        let source: Int
+                        if y - d >= lo, !mask[(y - d - lo) * lw + i] { source = y - d }
+                        else if y + d < hi, !mask[(y + d - lo) * lw + i] { source = y + d }
+                        else { continue }
+                        (row + i * block).update(from: base + source * bytesPerRow + i * block, count: block)
+                        break
+                    }
+                }
+            }
+        }
+        return out
     }
 
     // MARK: Matching

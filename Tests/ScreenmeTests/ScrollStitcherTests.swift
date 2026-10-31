@@ -128,6 +128,44 @@ final class ScrollStitcherTests: XCTestCase {
         XCTAssertFalse(rowIsConstant(20 + 5, 40), "the header must not repeat down the page")
     }
 
+    /// A fixed sidebar (flat, with a bright bar every 37 rows) beside a scrolling page: its bars show once, in the
+    /// first frame, and the page next to it still matches the source.
+    func testFixedSidebarIsNotRepeatedDownThePage() throws {
+        let shift = 23, frames = 12, sidebar = 16
+        var page = makePage(rows: frameHeight + shift * (frames - 1), seed: 9)
+        let rowBytes = width * 4
+        let content = sidebar + 8 // the page starts after a gap, as it does beside a real sidebar
+        for y in 0..<(page.count / rowBytes) {
+            page.replaceSubrange((y * rowBytes + sidebar * 4)..<(y * rowBytes + content * 4), with: repeatElement(255, count: (content - sidebar) * 4))
+        }
+        func shot(_ i: Int) -> [UInt8] {
+            var out = frame(of: page, at: i * shift)
+            for y in 0..<frameHeight {
+                let value: UInt8 = y % 37 < 8 ? 200 : 20
+                for x in 0..<sidebar {
+                    let o = y * rowBytes + x * 4
+                    out[o] = value; out[o + 1] = value; out[o + 2] = value
+                }
+            }
+            return out
+        }
+        let stitcher = try XCTUnwrap(ScrollStitcher(width: width, height: frameHeight))
+        for i in 0..<frames {
+            XCTAssertNotEqual(add(stitcher, shot(i)), .lost, "frame \(i)")
+        }
+        let image = try XCTUnwrap(stitcher.finish())
+        XCTAssertEqual(image.height, frameHeight + shift * (frames - 1))
+        let data = bytes(of: image)
+        for y in 0..<image.height {
+            for x in content..<width {
+                XCTAssertEqual(data[y * rowBytes + x * 4], page[y * rowBytes + x * 4], "page pixel \(x),\(y)")
+                if data[y * rowBytes + x * 4] != page[y * rowBytes + x * 4] { return }
+            }
+        }
+        let bars = (frameHeight..<image.height).filter { data[$0 * rowBytes] == 200 }
+        XCTAssertTrue(bars.isEmpty, "sidebar bars repeated at rows \(bars.prefix(8))")
+    }
+
     /// A real page: black text on white with wide empty margins and gaps, a sticky nav bar, Retina-sized
     /// frames and the uneven steps of a trackpad flick (fast, then slowing down, with idle frames).
     func testRenderedTextPageWithTrackpadMomentum() throws {

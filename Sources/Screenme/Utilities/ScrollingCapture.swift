@@ -13,8 +13,7 @@ enum ScrollingCapture {
     /// Returns the stitched image, or nil when cancelled. `autoScroll`: Screenme scrolls the content to its end and
     /// finishes by itself, for agents; it throws when it cannot.
     static func run(_ target: CaptureTarget, autoScroll: Bool = false) async throws -> CGImage? {
-        let (filter, configuration) = try await target.streamSetup(showsCursor: false, retina: Prefs[Pref.retinaResolution])
-        let session = ScrollSession(frame: target.cocoaFrame, filter: filter, configuration: configuration, autoScroll: autoScroll)
+        let session = ScrollSession(target: target, autoScroll: autoScroll)
         let image = await withTaskCancellationHandler {
             await session.run()
         } onCancel: {
@@ -67,9 +66,8 @@ final class ScrollSession: ObservableObject {
         return Message.capturing
     }
 
+    private let target: CaptureTarget
     private let frame: CGRect
-    private let filter: SCContentFilter
-    private let configuration: SCStreamConfiguration
     private let engine = ScrollStitchEngine()
     private var stream: SCStream?
     private var panel: FloatingPanel?
@@ -81,10 +79,9 @@ final class ScrollSession: ObservableObject {
     /// Why an automatic capture gave up.
     private(set) var failure: String?
 
-    init(frame: CGRect, filter: SCContentFilter, configuration: SCStreamConfiguration, autoScroll: Bool = false) {
-        self.frame = frame
-        self.filter = filter
-        self.configuration = configuration
+    init(target: CaptureTarget, autoScroll: Bool = false) {
+        self.target = target
+        self.frame = target.cocoaFrame
         self.autoScroll = autoScroll
     }
 
@@ -115,13 +112,15 @@ final class ScrollSession: ObservableObject {
         phase = .starting
         error = nil
         needsAccess = false
-        configuration.minimumFrameInterval = CMTime(value: 1, timescale: 30)
-        configuration.queueDepth = 5
-        configuration.pixelFormat = kCVPixelFormatType_32BGRA
-        configuration.showsCursor = false
-
-        let stream = SCStream(filter: filter, configuration: configuration, delegate: engine)
+        let stream: SCStream
         do {
+            // Built now, with the panel on screen: Screenme only counts as a shareable app, and gets left out of the picture, once it has a window.
+            let (filter, configuration) = try await target.streamSetup(showsCursor: false, retina: Prefs[Pref.retinaResolution])
+            configuration.minimumFrameInterval = CMTime(value: 1, timescale: 30)
+            configuration.queueDepth = 5
+            configuration.pixelFormat = kCVPixelFormatType_32BGRA
+            configuration.showsCursor = false
+            stream = SCStream(filter: filter, configuration: configuration, delegate: engine)
             try stream.addStreamOutput(engine, type: .screen, sampleHandlerQueue: engine.queue)
             try await stream.startCapture()
         } catch {
