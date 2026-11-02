@@ -103,16 +103,33 @@ enum Storage {
     /// The panel needs Screenme active; focus goes back afterwards.
     @MainActor
     static func chooseDestination(suggestedName: String) async -> URL? {
-        let panel = NSSavePanel()
-        panel.nameFieldStringValue = suggestedName
-        panel.directoryURL = saveDirectory
-        panel.canCreateDirectories = true
-        if let type = UTType(filenameExtension: (suggestedName as NSString).pathExtension) { panel.allowedContentTypes = [type] }
+        let panel = destinationPanel(suggestedName: suggestedName)
         let previous = FocusKeeper.frontmostExternal()
         FocusKeeper.activateSelf()
         let response = panel.runModal()
         await FocusKeeper.restore(previous)
         return response == .OK ? panel.url : nil
+    }
+
+    /// The save panel as a sheet on `window`, for an export from that window. A free-standing modal panel can open
+    /// behind other apps while it blocks every Screenme window, which looks like a freeze. Returns nil when cancelled.
+    @MainActor
+    static func chooseDestination(suggestedName: String, attachedTo window: NSWindow) async -> URL? {
+        let panel = destinationPanel(suggestedName: suggestedName)
+        FocusKeeper.activateSelf()
+        window.makeKeyAndOrderFront(nil)
+        let response = await panel.beginSheetModal(for: window)
+        return response == .OK ? panel.url : nil
+    }
+
+    @MainActor
+    private static func destinationPanel(suggestedName: String) -> NSSavePanel {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = suggestedName
+        panel.directoryURL = saveDirectory
+        panel.canCreateDirectories = true
+        if let type = UTType(filenameExtension: (suggestedName as NSString).pathExtension) { panel.allowedContentTypes = [type] }
+        return panel
     }
 
     /// Copies `url` to `destination`, replacing a file the user chose to overwrite.

@@ -359,7 +359,7 @@ final class VideoEditorModel: ObservableObject {
                 case .saveAs:
                     // Where first, so a cancel costs nothing and a long export is not wasted.
                     let name = item.url.deletingPathExtension().lastPathComponent + (format == .gif ? ".gif" : ".mp4")
-                    guard let destination = await Storage.chooseDestination(suggestedName: name) else { return }
+                    guard let window, let destination = await Storage.chooseDestination(suggestedName: name, attachedTo: window) else { return }
                     let output = try await renderOutput(title: "Saving")
                     try Storage.copy(output.url, to: destination)
                     CaptureAction.saveAs.confirm(savedTo: destination)
