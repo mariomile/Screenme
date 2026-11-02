@@ -46,7 +46,6 @@ final class RecordingControlBar {
                                                           toggleDraw: draw, restart: restart, discard: discard))
         let size = view.fittingSize
         panel = FloatingPanel(frame: Placement.barFrame(size: size, near: area, on: screen), level: .popUpMenu)
-        panel.isMovableByWindowBackground = true
         panel.contentView = view
     }
 
@@ -104,6 +103,9 @@ final class RecordingControlBar {
             .padding(6)
             .background(VisualEffectBackground().clipShape(Capsule()))
             .overlay(Capsule().strokeBorder(.white.opacity(0.14)))
+            .contentShape(Capsule())
+            // The hosting view never hands a drag to `isMovableByWindowBackground`: the bar moves from anywhere but its buttons.
+            .gesture(WindowDragGesture())
             .environment(\.colorScheme, .dark)
             .fixedSize()
         }
